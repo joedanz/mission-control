@@ -1858,9 +1858,9 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .errors-link { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); text-decoration: none; color: inherit; }
 .errors-link:hover { border-color: var(--line-strong); }
 .errors-level { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mute); flex: none; }
-.errors-level.error, .errors-level.fatal { background: #e5484d; }
-.errors-level.warning { background: #f5a623; }
+.errors-level.error, .errors-level.fatal { background: var(--bad); }
+.errors-level.warning { background: var(--warn); }
 .errors-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .errors-culprit { color: var(--ink-mute); font-size: var(--fs-12); }
 .errors-meta { color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; }
-.errors-error { color: #e5484d; }
+.errors-error { color: var(--bad); }
