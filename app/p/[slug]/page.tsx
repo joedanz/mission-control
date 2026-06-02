@@ -17,6 +17,7 @@ import { toBoardProject } from '@/lib/board';
 import { parseGitHubRepo } from '@/lib/github';
 import { CommitsTab } from '@/components/CommitsTab';
 import { PullsTab } from '@/components/PullsTab';
+import { ErrorsTab } from '@/components/ErrorsTab';
 import type { IntegrationStatus } from '@/lib/db/schema';
 
 export const dynamic = 'force-dynamic';
@@ -204,6 +205,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               ...(githubRepo ? [
                 { key: 'commits', label: 'Commits', content: <CommitsTab slug={project.slug} /> },
                 { key: 'prs', label: 'PRs', content: <PullsTab slug={project.slug} /> },
+              ] : []),
+              ...(project.sentryProjectSlug ? [
+                { key: 'errors', label: 'Errors', content: <ErrorsTab slug={project.slug} /> },
               ] : []),
             ]}
           />
