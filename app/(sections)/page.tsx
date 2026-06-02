@@ -4,8 +4,8 @@
 import { redirect } from 'next/navigation';
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { getDashboard } from '@/lib/queries';
-import { Matrix } from '@/components/Matrix';
 import { RecentActivity } from '@/components/RecentActivity';
+import { FleetGlance } from '@/components/FleetGlance';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export default async function OverviewPage() {
     throw e;
   }
 
-  const { all, stats, sentry, zoho, aliasesNote } = await getDashboard();
+  const { all, stats } = await getDashboard();
   const recent = [...all]
     .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
     .slice(0, 6);
@@ -49,11 +49,7 @@ export default async function OverviewPage() {
         ))}
       </div>
 
-      <h2 className="section-sublabel">Integration Status Board</h2>
-      <div className="matrices">
-        <Matrix title="Sentry — Error Tracking" grid={sentry} open />
-        <Matrix title="Zoho — Email Setup" grid={zoho} note={aliasesNote} open />
-      </div>
+      <FleetGlance />
 
       <h2 className="section-sublabel">Recently Active</h2>
       <RecentActivity projects={recent} />

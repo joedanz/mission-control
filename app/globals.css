@@ -1838,3 +1838,16 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 }
 .toggle-chip:hover { color: var(--ink); border-color: var(--line-strong); }
 .toggle-chip.on { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in oklch, var(--accent) 35%, transparent); }
+
+/* "View all →" style link under a section glance (e.g. the Overview Fleet glance). */
+.section-action {
+  display: inline-block;
+  margin-top: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--ink-mute);
+  text-decoration: none;
+}
+.section-action:hover {
+  text-decoration: underline;
+}
