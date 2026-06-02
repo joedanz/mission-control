@@ -18,6 +18,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "reap": "tsx --env-file=.env.local scripts/reap.ts",
+    "smoke:composio": "tsx --env-file=.env.local scripts/smoke-composio-linear.ts",
     "daemon": "tsx daemon/auto-claim.ts",
     "scheduler": "tsx daemon/scheduler.ts",
     "cli": "tsx --env-file=.env.local cli/index.ts",
