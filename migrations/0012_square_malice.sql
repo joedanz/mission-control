@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "sentry_project_slug" text;
