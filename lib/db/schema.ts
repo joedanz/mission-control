@@ -130,6 +130,8 @@ export const projects = pgTable(
     repoUrl: text('repo_url'),
     liveUrl: text('live_url'),
     sentryProjectSlug: text('sentry_project_slug'), // nullable; null = project has no Errors tab
+    emailProvider: text('email_provider'), // nullable; manual provider label override
+    emailAddress: text('email_address'),   // nullable; manual primary email address
     priority: text('priority'),
     description: text('description'),
     notes: text('notes'),
