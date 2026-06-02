@@ -1876,3 +1876,16 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .email-check-label { width: 3.5rem; font-weight: 600; }
 .email-check-value { color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); word-break: break-all; }
 .email-error { color: var(--bad); }
+
+/* Revenue tab (Stripe active subscriptions + MRR). */
+.revenue-summary { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--ink-mute); margin-bottom: var(--space-md); }
+.revenue-mrr { color: var(--ok); font-weight: 600; }
+.revenue-mrr + .revenue-mrr { margin-left: var(--space-sm); }
+.revenue-trunc { color: var(--ink-mute); }
+.revenue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-xs); }
+.revenue-row { display: flex; align-items: baseline; gap: var(--space-sm); padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.revenue-customer { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.revenue-amount { font-family: var(--font-mono); font-size: var(--fs-12); }
+.revenue-status { color: var(--ink-mute); font-size: var(--fs-11); }
+.revenue-meta { color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; }
+.revenue-error { color: var(--bad); }

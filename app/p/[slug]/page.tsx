@@ -19,6 +19,7 @@ import { CommitsTab } from '@/components/CommitsTab';
 import { PullsTab } from '@/components/PullsTab';
 import { ErrorsTab } from '@/components/ErrorsTab';
 import { EmailTab } from '@/components/EmailTab';
+import { RevenueTab } from '@/components/RevenueTab';
 import type { IntegrationStatus } from '@/lib/db/schema';
 
 export const dynamic = 'force-dynamic';
@@ -212,6 +213,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               ] : []),
               ...(project.sentryProjectSlug ? [
                 { key: 'errors', label: 'Errors', content: <ErrorsTab slug={project.slug} /> },
+              ] : []),
+              ...(project.stripeSite ? [
+                { key: 'revenue', label: 'Revenue', content: <RevenueTab slug={project.slug} /> },
               ] : []),
             ]}
           />
