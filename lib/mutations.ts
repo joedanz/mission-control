@@ -118,6 +118,7 @@ export type ProjectInput = {
   sentryProjectSlug?: string | null;
   emailProvider?: string | null;
   emailAddress?: string | null;
+  stripeSite?: string | null;
   priority?: Priority | null;
   notes?: string | null;
 };
@@ -144,6 +145,7 @@ export async function createProject(input: ProjectInput): Promise<Project> {
       sentryProjectSlug: input.sentryProjectSlug ?? null,
       emailProvider: input.emailProvider ?? null,
       emailAddress: input.emailAddress ?? null,
+      stripeSite: input.stripeSite ?? null,
       priority: input.priority ?? null,
       notes: input.notes ?? null,
     })
@@ -174,6 +176,7 @@ export async function updateProject(id: string, input: ProjectUpdate): Promise<P
   if (input.sentryProjectSlug !== undefined) set.sentryProjectSlug = input.sentryProjectSlug;
   if (input.emailProvider !== undefined) set.emailProvider = input.emailProvider;
   if (input.emailAddress !== undefined) set.emailAddress = input.emailAddress;
+  if (input.stripeSite !== undefined) set.stripeSite = input.stripeSite;
   if (input.priority !== undefined) set.priority = input.priority;
   if (input.notes !== undefined) set.notes = input.notes;
   set.updatedAt = new Date();
