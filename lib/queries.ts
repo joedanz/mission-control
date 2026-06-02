@@ -6,7 +6,6 @@ import { db } from './db/index';
 import {
   projects,
   tasks,
-  settings,
   runs,
   events,
   agentProfiles,
@@ -33,19 +32,6 @@ export type SearchItem = {
   domain: string | null;
 };
 
-export type IntegrationRow = {
-  projectId: string;
-  projectName: string;
-  label: string; // grid display label (project name, or <localpart>@domain for zoho)
-  status: string; // needed | pending | done
-};
-
-export type IntegrationGrid = {
-  rows: IntegrationRow[];
-  done: number;
-  total: number; // live count of projects that have this integration task
-};
-
 export type DashboardStats = {
   total: number;
   prelaunch: number;
@@ -63,9 +49,6 @@ export type Dashboard = {
     client: ProjectWithTasks[];
   };
   stats: DashboardStats;
-  sentry: IntegrationGrid;
-  zoho: IntegrationGrid;
-  aliasesNote: string | null;
 };
 
 /** A single project (by unique slug) with its tasks. Archived projects ARE returned so a
@@ -528,32 +511,6 @@ export function getRunEvents(opts: { runId: string; limit?: number }): Promise<F
     .limit(limit);
 }
 
-function integrationGrid(
-  projectsWithTasks: ProjectWithTasks[],
-  type: 'sentry' | 'zoho_email',
-  labelFor: (p: ProjectWithTasks, task: Task) => string | null,
-): IntegrationGrid {
-  const rows: IntegrationRow[] = [];
-  for (const p of projectsWithTasks) {
-    const task = p.tasks.find((t) => t.integrationType === type);
-    if (!task) continue; // loose: only projects that have this integration appear
-    const label = labelFor(p, task);
-    if (label === null) continue; // e.g. zoho row with no domain — skip + log
-    rows.push({
-      projectId: p.id,
-      projectName: p.name,
-      label,
-      status: task.integrationStatus ?? 'needed',
-    });
-  }
-  rows.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-  return {
-    rows,
-    done: rows.filter((r) => r.status === 'done').length,
-    total: rows.length, // live denominator, never hardcoded
-  };
-}
-
 export async function getDashboard(): Promise<Dashboard> {
   const all = await getProjectsWithTasks();
 
@@ -571,18 +528,5 @@ export async function getDashboard(): Promise<Dashboard> {
     openSource: byCategory.open_source.length,
   };
 
-  const sentry = integrationGrid(all, 'sentry', (p) => p.name);
-
-  const zoho = integrationGrid(all, 'zoho_email', (p) => {
-    if (!p.domain) {
-      console.error(`[zoho grid] project "${p.slug}" has a zoho_email task but no domain — skipping row`);
-      return null;
-    }
-    return `${process.env.ZOHO_EMAIL_LOCALPART || 'info'}@${p.domain.toLowerCase()}`;
-  });
-
-  const aliasRow = await db.select().from(settings).where(eq(settings.key, 'email_aliases')).limit(1);
-  const aliasesNote = aliasRow[0]?.value ?? null;
-
-  return { all, byCategory, stats, sentry, zoho, aliasesNote };
+  return { all, byCategory, stats };
 }
