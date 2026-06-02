@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for lib/sentry-api — mocks globalThis.fetch; no network calls.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { listUnresolvedIssues, SentryApiError } from '../lib/sentry-api';
+import { listUnresolvedIssues } from '../lib/sentry-api';
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
