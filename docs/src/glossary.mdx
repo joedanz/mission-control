@@ -24,7 +24,11 @@ Every bit of jargon used above, translated.
 | Claim | An agent reserving a task so no other agent works on it at the same time. |
 | Heartbeat | A periodic "I'm still alive" ping from a running agent. No heartbeat for a while = assumed dead. |
 | Hook | A small script that fires automatically at a set moment (start, after a tool, stop) to report what's happening. |
-| Daemon | A background program that runs continuously — here, the dispatcher that keeps assigning tasks to AI workers. |
+| Daemon | A background program that runs continuously — here, the dispatcher that assigns queued tasks and the scheduler that wakes profiles on a clock. |
+| Scheduler | The daemon that wakes an agent profile on a schedule (an interval or a cron expression) to work a project's queue — the proactive twin of the auto-claim daemon. |
+| Scheduled check-in | One scheduled wake-up of a profile: a fresh run in the profile's project, carrying out its standing mission. |
+| Cron | A compact schedule expression (e.g. `0 9 * * 1-5` = 9am on weekdays) read in a chosen timezone. |
+| Auto-pause | The scheduler switching off a profile's schedule after three check-ins fail in a row, so a broken mission stops costing money. |
 | Reaper | A cleanup script that marks silent or crashed runs as "abandoned" so the live view stays accurate. |
 | Kill-switch | The cancel button — it flags a run to stop, and the agent halts itself before its next action. |
 | Token | The unit AI models charge by — roughly a fragment of a word. Cost is tokens × the model's rate. |

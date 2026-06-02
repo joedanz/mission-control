@@ -20,7 +20,7 @@ the server is unreachable, every hook silently no-ops — a hook never blocks or
 | **SessionStart** | `session-start.mjs` | `run.start` (client uuid), writes the run id to a cwd-keyed temp file, clears any stale kill-switch flag. |
 | **PreToolUse** | `pre-tool-use.mjs` | The kill switch — a local-file check (no network) that halts the turn before the next tool if the run was cancelled. |
 | **PostToolUse** | `post-tool-use.mjs` | `run.heartbeat` + a `debug` `tool_call` event; caches the response's `cancel_requested` bit into the local flag. |
-| **Stop / SubagentStop** | `stop.mjs` | `run.end` with token totals summed from the transcript; clears the temp file + flag. |
+| **Stop / SubagentStop** | `stop.mjs` | `run.end` with token totals summed from the transcript (**de-duplicated by message id** — Claude writes several lines per message, each echoing the same usage); clears the temp file + flag. |
 
 The run id lives at `$TMPDIR/mc-run-<sha1(cwd)>` and the cancel flag at
 `$TMPDIR/mc-cancel-<sha1(cwd)>`. `mc` reads the same run-id file, so a `mc task set-status …` run
@@ -58,6 +58,40 @@ means running daemons in *distinct* repos. And a cancel can never mark work done
 coerces `completed → abandoned` for a cancelled run, releasing the task back to the queue.
 </Warning>
 
+## The scheduler daemon
+
+A second always-on daemon (`npm run scheduler`) — the proactive twin of the auto-claim daemon.
+Where auto-claim reacts to the **queue**, the scheduler reacts to the **clock**: it polls every
+profile with `schedule_enabled` (via `agent_profiles_schedulable_idx`) and, for each one that's
+**due**, spawns a check-in run in that profile's `schedule_project` repo with its `check_in_prompt`.
+
+- **Due logic.** Interval mode fires when `now − last_check_in_at ≥ schedule_interval_sec`; cron
+  mode asks [croner](https://github.com/hexagon/croner) for the next fire after `last_check_in_at`,
+  evaluated in `schedule_timezone`. A null `last_check_in_at` is always due. The interval floor is
+  **60 seconds** (`SCHEDULE_MIN_INTERVAL_SEC`) — each check-in is a paid run, so 60s is the tightest
+  sane poll. A bad cron or timezone degrades to "not due" rather than crashing the tick.
+- **Spawn order.** `run start` (`source: cron`) → advance the clock (`mc profile checked-in`, so a
+  crash retries next tick instead of double-firing) → **pre-claim one task** (`mc task next` →
+  `mc task claim --run`) → build the prompt → spawn. A clean run auto-completes the claimed task; a
+  failed one releases it.
+- **Self-serve out of the box.** Each spawn is granted `Bash(mc:*)` and runs in `acceptEdits` — a
+  check-in must act, and `mc` is inert under `plan`. With `--max-tasks <n>` (env
+  `MC_CHECKIN_MAX_TASKS`, default 5) the prompt invites the agent to claim and finish more tasks in
+  the same session; the scheduler still pre-claims exactly one as a model-independent baseline.
+- **Auto-pause.** `mc profile checked-in --status fail` increments `consecutive_failures`; at
+  `SCHEDULE_MAX_FAILURES` (3) the schedule flips off and emits a warn event, so a broken mission
+  can't loop forever.
+
+The daemon takes a single global lock (`$TMPDIR/mc-scheduler.lock`), drains gracefully on
+SIGINT/SIGTERM, and runs profiles independently so one slow check-in never blocks another.
+
+<Note>
+**Pin the executor with `MC_CLAUDE_BIN`.** Both daemons launch `claude` by bare name, which
+`npm run` can shadow with a stale `node_modules/.bin` copy that crashes on a newer Node. Set
+`MC_CLAUDE_BIN` to the absolute path of your real install (the launchd plists do this), and
+`MC_BIN` likewise to pin the `mc` CLI.
+</Note>
+
 ## The reaper & the timing constants
 
 A `running` run with no heartbeat for **120 seconds** (`RUN_STALE_THRESHOLD_SEC`) is flipped to
@@ -71,5 +105,11 @@ reaper locally on a timer (`npm run reap`) or let an external scheduler hit `/ap
 |---|---|
 | `dev` · `build` · `start` | Next.js dev server (port 3030), production build, production server. |
 | `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit — author, apply, push, and browse the schema. |
-| `daemon` · `reap` | The auto-claim daemon and the reaper tick. |
+| `daemon` · `scheduler` · `reap` | The auto-claim daemon, the scheduler daemon, and the reaper tick. |
 | `cli` · `test` | Run `mc` from source, and Vitest. |
+
+On a Mac the reaper, scheduler, and per-project auto-claim daemon ship as launchd plists in
+`ops/` (`local.mc.reap.plist`, `local.mc.scheduler.plist`, `local.mc.daemon.plist`). Version them,
+fix the `cd` path and `MC_CLAUDE_BIN` for your machine, set `TZ` for cron, then `launchctl load`
+each. The reaper runs on a 60-second `StartInterval`; the scheduler and daemon are long-running
+(`RunAtLoad` + `KeepAlive`).

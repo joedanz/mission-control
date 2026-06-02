@@ -71,7 +71,7 @@ every log and warning goes to stderr. The envelope is always one of three shapes
 | Command | What it does |
 |---|---|
 | `run start --agent <label> [--project --title --source --model --session-id --work-dir --id]` | Open an agent session; prints the `runId` to capture into `MC_RUN_ID`. |
-| `run end <id> <status> [--tokens-in --tokens-out --cache-read --cache-write --cost-micros]` | Close a run with cumulative token/cost totals. |
+| `run end <id> <status> [--tokens-in --tokens-out --cache-read --cache-write --cost-micros --authoritative]` | Close a run with cumulative token/cost totals. `--authoritative` **sets** the metrics exactly (the daemon posts claude's own reported cost this way) instead of the default monotonic `GREATEST` guard. |
 | `run list [--active --agent --limit]` | Lean rows; what's running right now with `--active`. |
 | `run get <id>` | The full run row plus its event trail. |
 | `run cancel <id>` | Request cancellation — sets `cancel_requested` (the kill-switch). |
@@ -86,11 +86,12 @@ the concepts; this is the surface. Profiles are global (not per-project).
 
 | Command | What it does |
 |---|---|
-| `profile list [--enabled --runtime]` | All profiles, filterable by enabled state or runtime. |
+| `profile list [--enabled --runtime --schedulable]` | All profiles, filterable by enabled state, runtime, or — with `--schedulable` — just the ones with scheduled check-ins armed (the scheduler's scan). |
 | `profile get <slug>` | One profile's full config. |
-| `profile add --slug --name [--runtime --model --fallback-model --daily-budget-micros --permission-mode --skills --mcp-config --allowed-tools --disallowed-tools --append-system-prompt --env --exec-template --match-project --match-category --match-kind --match-label --priority --default --disabled]` | Create a profile; returns the new row. `runtime=exec` requires `--exec-template`. |
-| `profile update <slug> [any add flag] [--enabled]` | Patch — only the flags you pass change. |
+| `profile add --slug --name [--runtime --model --fallback-model --daily-budget-micros --permission-mode --skills --mcp-config --allowed-tools --disallowed-tools --append-system-prompt --env --exec-template --match-project --match-category --match-kind --match-label --priority --default --disabled --schedule-enabled --schedule-project --schedule-interval --schedule-cron --schedule-timezone --check-in-prompt]` | Create a profile; returns the new row. `runtime=exec` requires `--exec-template`. To enable a schedule: `--schedule-project` plus exactly one of `--schedule-interval` (≥60s) / `--schedule-cron` (read in `--schedule-timezone`). |
+| `profile update <slug> [any add flag] [--enabled]` | Patch — only the flags you pass change. Pass `""` to a schedule trigger to clear it. |
 | `profile set-default <slug>` | Make this the single global default (clears any other default). Idempotent. |
+| `profile checked-in <slug> [--status ok\|fail]` | Record a scheduled check-in's outcome — the scheduler calls this. Bare: advance the check-in clock. `ok` resets the failure counter; `fail` increments it and auto-pauses the schedule after three in a row. |
 | `profile resolve [--project --task --label --kind]` | Preview which profile auto-routing would pick — match rules → priority → default. |
 | `profile rm <slug> --yes` | Delete a profile. Runs that used it keep their row (the link just drops). |
 

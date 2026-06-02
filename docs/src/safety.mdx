@@ -7,7 +7,7 @@ icon: shield
 
 # Safety nets: the stop button and the janitor
 
-Two mechanisms keep an autonomous fleet from getting out of hand.
+Three mechanisms keep an autonomous fleet from getting out of hand.
 
 <CardGroup cols={2}>
   <Card title="The kill-switch" icon="circle-stop">
@@ -25,6 +25,12 @@ Two mechanisms keep an autonomous fleet from getting out of hand.
     freeing any task it held so the work can be retried.
 
     *scheduled via launchd · 60s*
+  </Card>
+  <Card title="Schedule auto-pause" icon="pause">
+    **Mechanism C.** A [scheduled check-in](/profiles#scheduled-check-ins) that keeps failing would
+    otherwise burn money on every tick. So the scheduler counts consecutive failures and, after
+    **three in a row**, switches the profile's schedule off and logs why. A broken recurring mission
+    stops itself; you re-enable it once it's fixed.
   </Card>
 </CardGroup>
 
