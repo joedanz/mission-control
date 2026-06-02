@@ -101,7 +101,11 @@ export function RevenueTab({ slug }: { slug: string }) {
             {formatMoney(summary.mrrByCurrency[c], c)}/mo
           </span>
         ))}
-        <span className="revenue-count"> · {summary.activeCount} active</span>
+        <span className="revenue-count">
+          {' · '}
+          {summary.activeCount}
+          {summary.truncated ? '+' : ''} active
+        </span>
         {summary.truncated && <span className="revenue-trunc"> (showing first 1,000)</span>}
       </div>
       <ul className="revenue-list">
