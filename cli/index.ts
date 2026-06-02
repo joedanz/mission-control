@@ -146,6 +146,7 @@ function coerceProjectFields(opts: LeafOpts): ProjectUpdate {
   if (opts.repoPath !== undefined) out.repoPath = String(opts.repoPath) || null;
   if (opts.repoUrl !== undefined) out.repoUrl = String(opts.repoUrl) || null;
   if (opts.liveUrl !== undefined) out.liveUrl = String(opts.liveUrl) || null;
+  if (opts.sentryProject !== undefined) out.sentryProjectSlug = String(opts.sentryProject) || null;
   if (opts.priority !== undefined) out.priority = opts.priority ? assertEnum(String(opts.priority), PRIORITIES, 'priority') : null;
   if (opts.notes !== undefined) out.notes = String(opts.notes) || null;
   return out;
@@ -304,8 +305,8 @@ const SPEC = [
   { name: 'enums', readonly: true, summary: 'Valid values for every enum field' },
   { name: 'project list', readonly: true, summary: 'List projects', options: ['--category', '--status', '--archived active|archived|all', '--search', '--limit'] },
   { name: 'project get', readonly: true, summary: 'Get a project + its tasks', args: ['<slug>'] },
-  { name: 'project add', readonly: false, summary: 'Create a project', required: ['--name', '--category'], options: ['--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes'] },
-  { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes'] },
+  { name: 'project add', readonly: false, summary: 'Create a project', required: ['--name', '--category'], options: ['--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project'] },
+  { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project'] },
   { name: 'project rm', readonly: false, summary: 'Delete a project (cascades tasks); requires --yes', args: ['<slug>'], required: ['--yes'] },
   { name: 'project set-repo', readonly: false, summary: 'Set a project repo path + url', args: ['<slug>', '<path>', '[url]'] },
   { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status', '--kind custom|integration'] },
@@ -468,6 +469,7 @@ withFlags(project.command('add'))
   .option('--repo-path <path>')
   .option('--repo-url <url>')
   .option('--live-url <url>')
+  .option('--sentry-project <slug>')
   .option('--priority <priority>', PRIORITIES.join(' | '))
   .option('--notes <notes>')
   .action((opts: LeafOpts) =>
@@ -493,6 +495,7 @@ withFlags(project.command('update'))
   .option('--repo-path <path>')
   .option('--repo-url <url>')
   .option('--live-url <url>')
+  .option('--sentry-project <slug>')
   .option('--priority <priority>')
   .option('--notes <notes>')
   .action((slug: string, opts: LeafOpts) =>
