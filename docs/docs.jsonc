@@ -2,6 +2,13 @@
   "$schema": "https://holocron.so/docs.json",
   "name": "Mission Control",
   "favicon": "/favicon.ico",
+  // Static logo so the navbar mark works without Holocron's dynamic /holocron-api/ai-logo
+  // proxy (which doesn't exist in a static export). Light/dark variants for both themes.
+  "logo": {
+    "light": "/logo.svg",
+    "dark": "/logo-dark.svg",
+    "href": "/"
+  },
   "colors": {
     // Brand indigo — matches the accent used throughout the diagrams.
     "primary": "#4a45c2",
@@ -10,6 +17,11 @@
   },
   "appearance": {
     "default": "system"
+  },
+  // The "Ask AI" assistant calls Holocron's server (/holocron-api/chat), which a static
+  // export doesn't include — disabled so we don't ship a visibly-broken panel.
+  "assistant": {
+    "enabled": false
   },
   "icons": {
     "library": "lucide"

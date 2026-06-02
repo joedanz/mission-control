@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "start": "node dist/rsc/index.js"
+    "start": "node dist/rsc/index.js",
+    "deploy": "vite build && node scripts/assemble-vercel-output.mjs && vercel deploy --prebuilt --prod --yes --scope ticc-proj"
   },
   "dependencies": {
     "@holocron.so/vite": "^0.17.0",
