@@ -31,7 +31,7 @@ the message lists the valid values; on NOT_FOUND it suggests `mc project list`.
 ```
 mc project list [--category --status --archived active|archived|all --search --limit]
 mc project get <slug>
-mc project add --name <n> --category <c> [--status --accent --domain --tech --repo-path --repo-url --live-url --priority --notes --sentry-project]
+mc project add --name <n> --category <c> [--status --accent --domain --tech --repo-path --repo-url --live-url --priority --notes --sentry-project --email-provider --email-address]
 mc project update <slug> [any add flag; only provided flags change]
 mc project rm <slug> --yes        # cascades tasks; refuses without --yes
 mc project set-repo <slug> <path> [url]
