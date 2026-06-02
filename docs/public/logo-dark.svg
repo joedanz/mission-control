@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="232" height="40" viewBox="0 0 232 40" role="img" aria-label="Mission Control">
+  <rect x="0" y="4" width="32" height="32" rx="8" fill="#a7a2f0"/>
+  <text x="16" y="26" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#1a1a2e" letter-spacing="-0.5">mc</text>
+  <text x="44" y="26" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="650" fill="#f5f5fa" letter-spacing="-0.4">Mission Control</text>
+</svg>
