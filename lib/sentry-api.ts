@@ -46,7 +46,7 @@ type RawIssue = {
   id: string;
   shortId: string;
   title: string;
-  culprit: string;
+  culprit: string | null;
   level: string;
   count: string;
   userCount: number;
@@ -71,7 +71,7 @@ export async function listUnresolvedIssues(
     id: i.id,
     shortId: i.shortId,
     title: i.title,
-    culprit: i.culprit,
+    culprit: i.culprit ?? '',
     level: i.level,
     count: Number(i.count) || 0,
     userCount: i.userCount,
