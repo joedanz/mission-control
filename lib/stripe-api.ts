@@ -132,8 +132,11 @@ type SearchPage = { data: RawSub[]; has_more?: boolean; next_page?: string | nul
 export async function listActiveSubscriptions(
   ref: StripeSiteRef,
 ): Promise<{ subscriptions: StripeSubscription[]; truncated: boolean }> {
-  if (ref.site.includes("'")) {
-    throw new StripeApiError(`Invalid stripeSite (contains a quote): ${ref.site}`);
+  // The site is interpolated into the search query inside a single-quoted literal. A single
+  // quote is the only way to break out of that literal; backslash is the only escape char, so
+  // rejecting both fully contains the value. (Site ids are [a-z0-9-]-ish by convention.)
+  if (ref.site.includes("'") || ref.site.includes('\\')) {
+    throw new StripeApiError(`Invalid stripeSite (contains a quote or backslash): ${ref.site}`);
   }
 
   const subscriptions: StripeSubscription[] = [];
@@ -155,6 +158,8 @@ export async function listActiveSubscriptions(
     hasMore = Boolean(res.has_more);
     page = res.next_page ?? null;
     pages += 1;
+    // Stop when: no more pages (has_more=false), the cap is hit, or has_more=true but Stripe gave
+    // no cursor (can't continue — `truncated` below honestly reports the partial result).
   } while (hasMore && page && pages < MAX_PAGES);
 
   return { subscriptions, truncated: hasMore };
