@@ -149,6 +149,7 @@ function coerceProjectFields(opts: LeafOpts): ProjectUpdate {
   if (opts.sentryProject !== undefined) out.sentryProjectSlug = String(opts.sentryProject) || null;
   if (opts.emailProvider !== undefined) out.emailProvider = String(opts.emailProvider) || null;
   if (opts.emailAddress !== undefined) out.emailAddress = String(opts.emailAddress) || null;
+  if (opts.stripeSite !== undefined) out.stripeSite = String(opts.stripeSite) || null;
   if (opts.priority !== undefined) out.priority = opts.priority ? assertEnum(String(opts.priority), PRIORITIES, 'priority') : null;
   if (opts.notes !== undefined) out.notes = String(opts.notes) || null;
   return out;
@@ -307,8 +308,8 @@ const SPEC = [
   { name: 'enums', readonly: true, summary: 'Valid values for every enum field' },
   { name: 'project list', readonly: true, summary: 'List projects', options: ['--category', '--status', '--archived active|archived|all', '--search', '--limit'] },
   { name: 'project get', readonly: true, summary: 'Get a project + its tasks', args: ['<slug>'] },
-  { name: 'project add', readonly: false, summary: 'Create a project', required: ['--name', '--category'], options: ['--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address'] },
-  { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address'] },
+  { name: 'project add', readonly: false, summary: 'Create a project', required: ['--name', '--category'], options: ['--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address', '--stripe-site'] },
+  { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address', '--stripe-site'] },
   { name: 'project rm', readonly: false, summary: 'Delete a project (cascades tasks); requires --yes', args: ['<slug>'], required: ['--yes'] },
   { name: 'project set-repo', readonly: false, summary: 'Set a project repo path + url', args: ['<slug>', '<path>', '[url]'] },
   { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status', '--kind custom|integration'] },
@@ -474,6 +475,7 @@ withFlags(project.command('add'))
   .option('--sentry-project <slug>')
   .option('--email-provider <name>')
   .option('--email-address <addr>')
+  .option('--stripe-site <id>')
   .option('--priority <priority>', PRIORITIES.join(' | '))
   .option('--notes <notes>')
   .action((opts: LeafOpts) =>
@@ -502,6 +504,7 @@ withFlags(project.command('update'))
   .option('--sentry-project <slug>')
   .option('--email-provider <name>')
   .option('--email-address <addr>')
+  .option('--stripe-site <id>')
   .option('--priority <priority>')
   .option('--notes <notes>')
   .action((slug: string, opts: LeafOpts) =>

@@ -95,7 +95,7 @@ Projects are addressed by **slug**; tasks by **id** (uuid). Get a task's id from
 ```
 mc project list [--category <c>] [--status <s>] [--archived active|archived|all] [--search <q>] [--limit <n>]
 mc project get <slug>
-mc project add --name <n> --category <c> [--status --accent --domain --tech --repo-path --repo-url --live-url --priority --notes --sentry-project --email-provider --email-address]
+mc project add --name <n> --category <c> [--status --accent --domain --tech --repo-path --repo-url --live-url --priority --notes --sentry-project --email-provider --email-address --stripe-site]
 mc project update <slug> [any add flag; only the flags you pass change]
 mc project rm <slug> --yes            # deletes the project and cascades its tasks
 mc project set-repo <slug> <path> [url]

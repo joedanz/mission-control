@@ -132,6 +132,7 @@ export const projects = pgTable(
     sentryProjectSlug: text('sentry_project_slug'), // nullable; null = project has no Errors tab
     emailProvider: text('email_provider'), // nullable; manual provider label override
     emailAddress: text('email_address'),   // nullable; manual primary email address
+    stripeSite: text('stripe_site'),       // nullable; metadata.site value, null = no Revenue tab
     priority: text('priority'),
     description: text('description'),
     notes: text('notes'),
