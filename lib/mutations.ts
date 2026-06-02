@@ -116,6 +116,8 @@ export type ProjectInput = {
   repoUrl?: string | null;
   liveUrl?: string | null;
   sentryProjectSlug?: string | null;
+  emailProvider?: string | null;
+  emailAddress?: string | null;
   priority?: Priority | null;
   notes?: string | null;
 };
@@ -140,6 +142,8 @@ export async function createProject(input: ProjectInput): Promise<Project> {
       repoUrl: input.repoUrl ?? null,
       liveUrl: input.liveUrl ?? null,
       sentryProjectSlug: input.sentryProjectSlug ?? null,
+      emailProvider: input.emailProvider ?? null,
+      emailAddress: input.emailAddress ?? null,
       priority: input.priority ?? null,
       notes: input.notes ?? null,
     })
@@ -168,6 +172,8 @@ export async function updateProject(id: string, input: ProjectUpdate): Promise<P
   if (input.repoUrl !== undefined) set.repoUrl = input.repoUrl;
   if (input.liveUrl !== undefined) set.liveUrl = input.liveUrl;
   if (input.sentryProjectSlug !== undefined) set.sentryProjectSlug = input.sentryProjectSlug;
+  if (input.emailProvider !== undefined) set.emailProvider = input.emailProvider;
+  if (input.emailAddress !== undefined) set.emailAddress = input.emailAddress;
   if (input.priority !== undefined) set.priority = input.priority;
   if (input.notes !== undefined) set.notes = input.notes;
   set.updatedAt = new Date();
