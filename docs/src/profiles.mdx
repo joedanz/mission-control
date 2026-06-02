@@ -33,6 +33,7 @@ The right one shows up for the right job, automatically.
 | **env** | Environment variables for the worker — secrets as `${ENV}` placeholders only (see below). |
 | **fallback model** · **daily budget** | Cost-aware routing — resilience plus a spend cap (see [Cost](/cost)). |
 | **match rules** · **priority** · **default** | When this profile applies, how ties break, and the global fallback. |
+| **scheduled check-in** | An optional cadence (interval or cron) that wakes this profile on its own to work a bound project's queue (see [below](#scheduled-check-ins)). |
 
 ## How the right profile gets picked
 
@@ -92,6 +93,45 @@ Two profile fields keep a model from running away with your budget:
   an event saying why. It reads real spend (`mc spend --profile`), not a guess at task difficulty.
 
 Both are optional; a profile with neither always runs its primary model. See [Cost](/cost).
+
+## Scheduled check-ins
+
+A profile usually waits to be *matched* to a task. Flip on a **scheduled check-in** and it stops
+waiting: the [scheduler daemon](/reference/operating#the-scheduler-daemon) wakes the profile on a
+cadence you set, opens a run in a project's repo, and lets it work that project's queue. It's how
+you stand up a recurring agent — "every weekday at 9am, triage the open issues in `myapp`." The
+mechanics of a wake-up live in [Autonomy](/autonomy#two-ways-work-starts-claimed-and-scheduled);
+here's how you arm one.
+
+A schedule has four parts:
+
+| Setting | Flag | What it means |
+|---|---|---|
+| **Project** | `--schedule-project <slug>` | The repo the check-in runs in, and the queue it serves. Required to enable. |
+| **Cadence** | `--schedule-interval <sec>` **or** `--schedule-cron <expr>` | Fire every N seconds, **or** on a cron expression — exactly one. Interval has a **60-second floor**; each check-in is a paid run. |
+| **Timezone** | `--schedule-timezone <tz>` | The IANA zone (e.g. `America/New_York`) the cron is read in. Omit it and cron resolves in the daemon's local time — usually UTC under launchd, so set it. |
+| **Mission** | `--check-in-prompt <text\|@file>` | The standing instruction handed to the agent on every wake-up. |
+
+```bash
+# Triage myapp's issue queue every weekday at 9am Eastern
+mc profile add --slug triager --name "Issue triager" \
+  --model claude-sonnet-4-6 --permission-mode acceptEdits \
+  --schedule-enabled --schedule-project myapp \
+  --schedule-cron '0 9 * * 1-5' --schedule-timezone America/New_York \
+  --check-in-prompt @prompts/triage.md
+```
+
+Turn it on or off with `--schedule-enabled` / `--schedule-disabled`; clear a trigger by passing
+`""` to its flag. A self-serving check-in needs the `mc` tool — out of the box the scheduler grants
+`Bash(mc:*)` and runs in `acceptEdits`, so you don't have to widen `--allowed-tools` yourself unless
+you want to.
+
+<Note>
+**Auto-pause keeps a broken mission cheap.** The scheduler records the result of every check-in
+(`mc profile checked-in`). Three consecutive failures and the schedule **auto-pauses** itself — the
+Profiles row shows a red `PAUSED` badge with the failure count. Edit the profile and re-enable to
+clear it.
+</Note>
 
 ## Managing profiles
 

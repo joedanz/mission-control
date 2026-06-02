@@ -11,9 +11,9 @@ Everything orbits one central database — think of it as the bulletin board in 
 the room.
 
 The whole system is built around a single **database** (a highly organized digital filing
-cabinet). Five "actors" gather around it. Some read from it, some write to it, most do both.
+cabinet). A handful of "actors" gather around it. Some read from it, some write to it, most do both.
 
-<Frame caption="Fig. 01 — System topology. Five actors, one database. Indigo paths are the two “drivers”; grey are background helpers.">
+<Frame caption="Fig. 01 — System topology. The actors around one shared database. Indigo paths are the two “drivers”; grey are background helpers.">
   ![System topology](/figures/fig-01-topology.svg)
 </Frame>
 
@@ -41,5 +41,10 @@ cabinet). Five "actors" gather around it. Some read from it, some write to it, m
   <Card title="The reaper" icon="trash-2">
     **Background.** A janitor that runs every minute and marks any agent that went silent —
     crashed, lost power — as "abandoned," so dead workers don't look alive forever.
+  </Card>
+  <Card title="The scheduler" icon="clock">
+    **Background.** A timekeeper that wakes [agent profiles](/profiles#scheduled-check-ins) on a
+    schedule — an interval or a cron expression — to work a project's queue on their own. The
+    proactive twin of the auto-claim daemon.
   </Card>
 </CardGroup>

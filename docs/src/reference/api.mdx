@@ -45,3 +45,4 @@ matching the hook's `workDir` against each project's `repo_path`.
 | `GOOGLE_CLIENT_ID` / `_SECRET` | Google OAuth credentials for the sign-in flow. |
 | `ALLOWED_EMAIL` | The one address allowed to sign in. **Fail-closed** — empty rejects everyone. |
 | `MC_INGEST_URL` / `MC_AGENT` | Where the hooks post, and the agent label they post under. |
+| `MC_CLAUDE_BIN` / `MC_BIN` | Daemon-side: absolute paths that pin the `claude` executor and the `mc` CLI, so `npm run` can't shadow them with a stale `node_modules/.bin` copy. Set in the launchd plists. |

@@ -68,3 +68,38 @@ is free, it launches an AI worker to handle it, no human needed. Here is the ful
 imported from GitHub issues — the system assigns and does them, and the results flow back to
 your dashboard. Your job shifts from *doing* the work to *steering and reviewing* it.
 </Info>
+
+## Two ways work starts: claimed and scheduled
+
+The loop above is **reactive** — it fires the instant a task lands in a project's queue. There's a
+second trigger that's **proactive**: an [agent profile](/profiles#scheduled-check-ins) can wake
+*itself* on a schedule, drop into a project's repo, and work that project's queue without anyone
+adding a task first.
+
+A second always-on daemon — the **scheduler** — watches every profile that has scheduled check-ins
+turned on. When a profile comes due, the scheduler runs a tight version of the same loop:
+
+<Steps>
+  <Step title="Start a run in the bound project's repo">
+    It opens a fresh run (`source: cron`) in the repo of the profile's **schedule project**, handing
+    the agent the profile's standing **check-in prompt** as its mission. The check-in clock advances
+    at spawn, so a slow run never double-fires; a crash before spawn just retries next tick.
+  </Step>
+  <Step title="Pre-claim one task for the run">
+    Before the agent even starts, the scheduler peeks the project's queue (`mc task next`) and
+    claims the top task to this run. So task tracking no longer depends on the agent remembering to
+    call `mc` — a clean run auto-completes the claimed task, a failed one releases it back.
+  </Step>
+  <Step title="Hand the agent the keys to self-serve">
+    Every check-in is granted the `mc` tool (`Bash(mc:*)`) and runs in `acceptEdits` out of the box
+    — a check-in has to *act*, not just plan. If the profile allows more than one task per check-in,
+    the prompt invites the agent to drain the rest of the queue in the same session.
+  </Step>
+</Steps>
+
+If a check-in fails, the profile's **consecutive-failure** counter ticks up; after three in a row
+the scheduler **auto-pauses** the schedule (and flags it on the Profiles row) so a broken mission
+can't burn money on a loop. Edit the profile and re-enable to clear it.
+
+See [Agent profiles](/profiles#scheduled-check-ins) to set a cadence, and
+[Operating](/reference/operating#the-scheduler-daemon) for the daemon itself.

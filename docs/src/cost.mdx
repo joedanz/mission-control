@@ -43,6 +43,15 @@ On the **Spend** tab you can slice that total however you like:
 **zero** rather than a made-up number. Better to under-count than to invent.
 </Info>
 
+## The accurate number wins
+
+That transcript reading is the **fallback**. When the **daemon** runs an agent — an auto-claim
+worker or a [scheduled check-in](/autonomy#two-ways-work-starts-claimed-and-scheduled) — it also
+captures claude's own `total_cost_usd` from the run's result and posts it as the **authoritative**
+figure. That value overrides the estimate exactly, even when it's *lower*, so a daemon run records
+what Claude actually billed rather than a reconstruction. Runs tracked only by hooks, with no daemon
+watching, keep the transcript estimate.
+
 ## Budgets that act on the number
 
 Measuring spend is half of it; an [agent profile](/profiles) can also **react** to it. A profile

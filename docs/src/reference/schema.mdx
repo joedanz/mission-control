@@ -44,7 +44,7 @@ app/CLI layer** for "churny" sets that do — so adding a status never needs a d
 |---|---|
 | `id` | Client-supplied by the hook, so a retried `run.start` upserts the same row. |
 | agent_label · parent_run_id | Free-text agent name; self-FK builds sub-agent trees. |
-| project_id · title · source · model | Context; `source` is `hook\|cli\|cron\|manual`. `model` is the model that actually ran (the daemon writes the budget-chosen one). |
+| project_id · title · source · model | Context; `source` is `hook\|cli\|cron\|manual` (`cron` = a scheduled check-in). `model` is the model that actually ran (the daemon writes the budget-chosen one). |
 | agent_profile_id | FK to `agent_profiles`, `ON DELETE SET NULL` — which profile this run used; deleting the profile leaves the run intact. |
 | status | `running → completed \| failed \| abandoned`. "Live/idle" is *derived* from the heartbeat, never stored. |
 | tokens_in/out · cache_read/write_tokens · cost_micros | `bigint` cumulative totals (cache split out — it dominates Claude cost); cost in micro-dollars. |
@@ -79,6 +79,10 @@ the rest of the schema.
 | mcp_servers · env | `jsonb` — the `--mcp-config` inner map and an env map. Secrets are `${ENV}` placeholders only; the daemon resolves them at spawn. |
 | append_system_prompt · exec_template | Persona text, and the command template required when `runtime='exec'` (tokens `${MODEL}`/`${PROMPT}`/`${MCP_CONFIG}`/`${FALLBACK_MODEL}`). |
 | match_rules · priority · is_default · enabled | `jsonb` routing rules (`projectSlugs`/`projectCategories`/`taskKinds`/`labelPattern`), the tie-break, the single global default, and an on/off flag. |
+| schedule_enabled · schedule_project_id | Master on/off for scheduled check-ins, and the FK to the project the check-in runs in (`ON DELETE SET NULL`). |
+| schedule_interval_sec · schedule_cron · schedule_timezone | The cadence — an interval in seconds (≥60) **or** a cron expression read in an IANA timezone. Cron wins when both are set. |
+| check_in_prompt | The standing mission handed to the agent on each scheduled wake-up. |
+| last_check_in_at · consecutive_failures | When the profile last checked in (the "is it due?" baseline, advanced at spawn), and the failure streak that auto-pauses the schedule at three. |
 | created_at · updated_at | Timestamps. |
 
 A **settings** key/value table and the four **BetterAuth** tables (`users`, `sessions`,
@@ -110,6 +114,7 @@ at all** — see [Access](/access).
 | `tasks_project_integration_uq` | One integration row per type per project (keeps the grids from double-counting). |
 | `agent_profiles_slug_uq` | Unique profile slug — the handle you address with `mc profile`. |
 | `agent_profiles_default_uq` | Partial unique over `is_default = true` — enforces *at most one* global default profile. |
+| `agent_profiles_schedulable_idx` | Partial over rows with `schedule_enabled` — the scheduler's scan for profiles that might be due. |
 
 <Note>
 **Why two agents never do the same task.** A claim is a **single conditional write**: "set
