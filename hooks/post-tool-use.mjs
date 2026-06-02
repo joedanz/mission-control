@@ -1,0 +1,33 @@
+#!/usr/bin/env node
+// ABOUTME: Claude Code PostToolUse hook → heartbeat (keeps the run "live") + a debug-level tool_call
+// ABOUTME: event retained for replay (filtered out of the info-level activity feed).
+
+import { readStdin, post, readRunId, writeCancelFlag, AGENT_LABEL } from './_lib.mjs';
+
+const input = await readStdin();
+const cwd = input.cwd || process.cwd();
+const runId = readRunId(cwd);
+if (!runId) process.exit(0); // no open run for this cwd — nothing to do
+
+const tool = input.tool_name || input.tool || 'tool';
+// Heartbeat + the (debug) tool_call event are independent — fire them concurrently.
+const [hb] = await Promise.all([
+  post({ type: 'run.heartbeat', id: runId }),
+  post({
+    type: 'event',
+    agentLabel: AGENT_LABEL,
+    runId,
+    eventType: 'tool_call',
+    level: 'debug', // captured for replay; the feed shows >= info
+    summary: `tool: ${tool}`,
+    payload: { tool, input: input.tool_input ?? null },
+  }),
+]);
+
+// The heartbeat response carries the run row (incl. cancel_requested). Cache that bit into a local flag
+// so the PreToolUse hook can halt the NEXT tool with no network call of its own. A null response (server
+// unreachable / terminal run) leaves any existing flag untouched. We only ever SET here — the flag is
+// cleared on session-start (fresh run) and run-end (stop.mjs); cancel_requested is one-way today.
+if (hb?.data?.cancelRequested) writeCancelFlag(cwd);
+
+process.exit(0);

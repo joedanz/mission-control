@@ -1,0 +1,54 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Cost
+description: Because AI work costs real money, every penny is measured and rolled up.
+icon: dollar-sign
+---
+
+# Keeping track of cost
+
+Because AI work costs real money, every penny is measured and rolled up.
+
+AI assistants charge by **tokens** — roughly, the pieces of words they read and write.
+Different models charge different rates. When an agent finishes, the system reads its
+transcript, looks up the right price for the model it used, and calculates the cost down to
+**millionths of a dollar**, so even tiny runs are tracked precisely.
+
+<Frame caption="Fig. 06 — Cost path. From raw transcript → priced by model → stored on the run → summed on the Spend tab.">
+  ![Cost calculation flow](/figures/fig-06-cost.svg)
+</Frame>
+
+On the **Spend** tab you can slice that total however you like:
+
+<CardGroup cols={2}>
+  <Card title="By project" icon="folder">
+    Which project cost the most?
+  </Card>
+  <Card title="By agent" icon="bot">
+    Which AI worker spent the most?
+  </Card>
+  <Card title="By day" icon="calendar">
+    How does spend trend over time?
+  </Card>
+  <Card title="By run" icon="receipt">
+    What did each single session cost?
+  </Card>
+  <Card title="By profile" icon="sliders-horizontal">
+    What is each agent profile spending? (`mc spend --profile`)
+  </Card>
+</CardGroup>
+
+<Info>
+**It never guesses at cost.** If a model isn't in the price table, that message contributes
+**zero** rather than a made-up number. Better to under-count than to invent.
+</Info>
+
+## Budgets that act on the number
+
+Measuring spend is half of it; an [agent profile](/profiles) can also **react** to it. A profile
+may carry a **fallback model** and a **daily budget**. The fallback alone is resilience — if the
+primary model is overloaded, claude retries on the cheaper one. Add a daily budget and it becomes
+a cap: once this profile's same-day run cost crosses the limit, the daemon **downgrades** new runs
+to the fallback model and logs an event explaining why. The decision reads real spend (the same
+`runs.cost_micros` totals the Spend tab sums), so it's grounded in what actually happened — not a
+guess about how hard a task looks.

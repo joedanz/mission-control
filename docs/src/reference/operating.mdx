@@ -1,0 +1,75 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Operating
+description: The hooks you install once, the daemon you point at a repo, and the janitor that keeps the view honest.
+icon: settings
+---
+
+# Running the moving parts
+
+The hooks you install once, the daemon you point at a repo, and the janitor that keeps the view
+honest.
+
+## The Claude Code hooks
+
+Four hook scripts post to `/api/ingest`. They are **best-effort**: if `INGEST_TOKEN` is unset or
+the server is unreachable, every hook silently no-ops — a hook never blocks or fails a session.
+
+| Hook | Script | What it does |
+|---|---|---|
+| **SessionStart** | `session-start.mjs` | `run.start` (client uuid), writes the run id to a cwd-keyed temp file, clears any stale kill-switch flag. |
+| **PreToolUse** | `pre-tool-use.mjs` | The kill switch — a local-file check (no network) that halts the turn before the next tool if the run was cancelled. |
+| **PostToolUse** | `post-tool-use.mjs` | `run.heartbeat` + a `debug` `tool_call` event; caches the response's `cancel_requested` bit into the local flag. |
+| **Stop / SubagentStop** | `stop.mjs` | `run.end` with token totals summed from the transcript; clears the temp file + flag. |
+
+The run id lives at `$TMPDIR/mc-run-<sha1(cwd)>` and the cancel flag at
+`$TMPDIR/mc-cancel-<sha1(cwd)>`. `mc` reads the same run-id file, so a `mc task set-status …` run
+from that directory is attributed to the live run.
+
+## The auto-claim daemon
+
+An unattended worker that pulls tasks from the queue and runs each as a fresh headless
+`claude -p` session in the project's repo. **Design A:** one run id per task flows through the
+whole loop — registered, claimed *before* spawn (no claim-after-spawn window), then the child's
+own hooks adopt that id so telemetry, heartbeats, and the kill switch all bind to it.
+
+```bash
+mc task next --project <slug>          # FIFO peek
+mc run start --id <uuid> ...            # pre-register the run
+mc task claim <task> --run <uuid>       # claim BEFORE spawn — race-safe
+claude -p "<task>" --permission-mode plan  # child runs in repoPath, MC_RUN_ID=<uuid>
+```
+
+| Flag | What it does |
+|---|---|
+| `--project <slug>` | Required — only claim from this project. |
+| `--once` | Process one task (or exit if the queue is empty) then stop — the recommended first proof. |
+| `--poll <sec>` *(default 10)* | Idle poll interval when the queue is empty. |
+| `--permission-mode <m>` *(default plan)* | Passed to `claude -p`. **Start with `plan`** — research only, no edits. |
+| `--timeout <sec>` *(default 900)* | Wall-clock cap per task; the child's process group is terminated past it. |
+| `--grace <sec>` *(default 15)* | After a cancel/timeout, how long to let the kill-switch halt the child before SIGTERM→SIGKILL. |
+| `--max-tasks <n>` | Stop after N tasks (bounded runs). |
+
+<Warning>
+**Plan-mode first, one daemon per repo, cancel never completes.** Start in
+`--permission-mode plan` (no edits — the smallest blast radius) and treat imported issue titles
+as untrusted. A per-`repoPath` lockfile refuses a second daemon on the same repo, so parallelism
+means running daemons in *distinct* repos. And a cancel can never mark work done: `recordRunEnd`
+coerces `completed → abandoned` for a cancelled run, releasing the task back to the queue.
+</Warning>
+
+## The reaper & the timing constants
+
+A `running` run with no heartbeat for **120 seconds** (`RUN_STALE_THRESHOLD_SEC`) is flipped to
+`abandoned` and its claim released. Task claims also carry a generous **30-minute** backstop TTL
+(`CLAIM_TTL_SEC`) — long enough that a live holder's claim is never stolen mid-work. Run the
+reaper locally on a timer (`npm run reap`) or let an external scheduler hit `/api/cron/reap`.
+
+## npm scripts
+
+| Script | What it does |
+|---|---|
+| `dev` · `build` · `start` | Next.js dev server (port 3030), production build, production server. |
+| `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit — author, apply, push, and browse the schema. |
+| `daemon` · `reap` | The auto-claim daemon and the reaper tick. |
+| `cli` · `test` | Run `mc` from source, and Vitest. |

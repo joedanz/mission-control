@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job that runs the Mission Control scheduler (`npm run scheduler`) as a long-running service so
+  agent profiles with scheduled check-ins fire on their cadence. UNLIKE the reaper (StartInterval one-shot),
+  the scheduler owns its OWN poll loop, so this is RunAtLoad + KeepAlive (relaunch on crash/logout) — NOT a
+  StartInterval job. This is the ONLY thing launching the scheduler — keep it version-controlled so a fresh
+  clone / machine rebuild can reinstate it. NOTE: the cd path and PATH are machine-specific.
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.mc.scheduler</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-lc</string>
+    <string>cd /path/to/mission &amp;&amp; npm run scheduler</string>
+  </array>
+  <!-- Explicit PATH so launchd (which does not inherit your shell PATH) finds node/npm. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Pin the executor binary. `npm run` prepends the node_modules/.bin walk to PATH, which can shadow the
+         real `claude` with a stale npm-global install that crashes on newer Node. Point this at the absolute
+         path of your working install (`command -v claude` in a clean shell). MACHINE-SPECIFIC. See INSTALL.md. -->
+    <key>MC_CLAUDE_BIN</key><string>~/.local/bin/claude</string>
+    <!-- launchd jobs do NOT inherit your login TZ; an unset TZ defaults to UTC, so a profile's `0 9 * * *`
+         cron would fire at 9am UTC, not 9am local. Pin the daemon's zone so cron check-ins fire when you
+         expect. A profile's own scheduleTimezone (set via `mc profile … --schedule-timezone`) overrides
+         this per-profile. Keep this matching the web server's TZ so the "next run" display agrees. -->
+    <key>TZ</key><string>America/New_York</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/mc-scheduler.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mc-scheduler.log</string>
+</dict></plist>

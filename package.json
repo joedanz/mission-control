@@ -1,0 +1,53 @@
+{
+  "name": "command-center",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "mc": "bin/mc.mjs"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "next dev -p 3030",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "reap": "tsx --env-file=.env.local scripts/reap.ts",
+    "daemon": "tsx daemon/auto-claim.ts",
+    "scheduler": "tsx daemon/scheduler.ts",
+    "cli": "tsx --env-file=.env.local cli/index.ts",
+    "test": "vitest run",
+    "docs": "npm --prefix docs run dev",
+    "docs:build": "npm --prefix docs run build"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@neondatabase/serverless": "^1.1.0",
+    "better-auth": "^1.6.11",
+    "commander": "^12.1.0",
+    "croner": "^10.0.1",
+    "drizzle-orm": "^0.45.2",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^16.6.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tsx": "^4.22.3",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

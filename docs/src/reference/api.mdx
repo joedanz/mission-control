@@ -1,0 +1,47 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: HTTP surface
+description: A write-only telemetry door and a handful of read-only, session-guarded views.
+icon: globe
+---
+
+# The HTTP surface & its secrets
+
+A handful of endpoints — split cleanly into a write-only telemetry door and read-only
+session-guarded views.
+
+| Endpoint | Auth | What it does |
+|---|---|---|
+| `POST /api/ingest` | Bearer `INGEST_TOKEN` | The telemetry door. Accepts `run.start`, `run.heartbeat`, `run.end`, and `event` bodies. Writes go *through* `lib/mutations` so the single-writer invariant holds. The **only** way activity gets in. |
+| `GET /api/activity` | session-auth | The Mission tab's poll — events at or above `info` plus recent runs. Requires an allowed signed-in user, not the bearer. |
+| `GET /api/board` | session-auth | The Kanban board's poll — custom tasks grouped per project (lean projection) plus active runs. `?project=<slug>` scopes it to one project (and returns all its Done tasks); no param returns every active project with each Done column capped. |
+| `GET /api/runs/[id]` | session-auth | One run with its event trail, for the run drill-in page's poll. |
+| `GET /api/cron/reap` | Bearer `CRON_SECRET` | Runs one reaper tick over HTTP — optional; the default is local `npm run reap`. |
+| `/api/auth/[...all]` | — | BetterAuth — Google OAuth callback and session management. |
+
+A telemetry post is a small typed JSON body with a `type` discriminator and a bearer header:
+
+```bash
+curl -X POST "$MC_INGEST_URL" \
+  -H "authorization: Bearer $INGEST_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"type":"run.start","id":"<uuid>","agentLabel":"claude-code","workDir":"/path/to/repo"}'
+# then, repeatedly:  {"type":"run.heartbeat","id":"<uuid>"}
+# at the end:        {"type":"run.end","id":"<uuid>","status":"completed","tokensIn":4200,"costMicros":9100}
+```
+
+On `run.start`, if no `projectId` is given the server auto-associates the run with a project by
+matching the hook's `workDir` against each project's `repo_path`.
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Owner role locally (migrations + seed); the **app** role in Vercel. |
+| `AGENT_DATABASE_URL` | The scoped agent role for `mc`. **Never** set in Vercel. |
+| `INGEST_TOKEN` | Bearer secret the hooks send to `/api/ingest`. Write-only; set in Vercel too. |
+| `CRON_SECRET` | Bearer the reaper cron sends, so the endpoint isn't publicly triggerable. |
+| `BETTER_AUTH_SECRET` / `_URL` | Session signing secret and the canonical origin (app throws if the secret is missing). |
+| `GOOGLE_CLIENT_ID` / `_SECRET` | Google OAuth credentials for the sign-in flow. |
+| `ALLOWED_EMAIL` | The one address allowed to sign in. **Fail-closed** — empty rejects everyone. |
+| `MC_INGEST_URL` / `MC_AGENT` | Where the hooks post, and the agent label they post under. |

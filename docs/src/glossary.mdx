@@ -1,0 +1,41 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Glossary
+description: Every bit of jargon used in this manual, translated to plain English.
+icon: list
+---
+
+# Plain-English glossary
+
+Every bit of jargon used above, translated.
+
+| Term | Meaning |
+|---|---|
+| Database | A highly organized digital filing cabinet (here, "Postgres," hosted by a company called Neon). The single source of truth everything reads and writes. |
+| Agent | An AI coding assistant that can read files, write code, and run commands to complete a task. |
+| Agent profile | A named, reusable recipe for *how* an agent runs — its model, skills, MCP tools, permission posture, runtime, and the rules for when to use it. Drive it with `mc profile`. |
+| Runtime | How a profiled worker is launched: `claude-code` (Claude with rich flags) or `exec` (any command — the path to non-Claude models). |
+| Auto-routing | Picking a profile for a task by its match rules, breaking ties by priority, falling back to the global default. |
+| MCP server | A Model Context Protocol tool an agent can call — a local `stdio` command or a remote `http`/`sse`/`ws` endpoint. The "powers" a profile grants. |
+| Fallback model | A cheaper/secondary model a profile drops to when the primary is overloaded, or when its daily budget is spent. |
+| Budget downgrade | When a profile's same-day run cost passes its cap, new runs switch to the fallback model — decided from real measured spend. |
+| Run | One work-session by one agent — from "start" to "finished." Carries its own cost and status. |
+| Task | One unit of work belonging to a project — waiting (`todo`), being worked (`in_progress`), or finished (`done`). |
+| Claim | An agent reserving a task so no other agent works on it at the same time. |
+| Heartbeat | A periodic "I'm still alive" ping from a running agent. No heartbeat for a while = assumed dead. |
+| Hook | A small script that fires automatically at a set moment (start, after a tool, stop) to report what's happening. |
+| Daemon | A background program that runs continuously — here, the dispatcher that keeps assigning tasks to AI workers. |
+| Reaper | A cleanup script that marks silent or crashed runs as "abandoned" so the live view stays accurate. |
+| Kill-switch | The cancel button — it flags a run to stop, and the agent halts itself before its next action. |
+| Token | The unit AI models charge by — roughly a fragment of a word. Cost is tokens × the model's rate. |
+| CLI (mc) | "Command-line interface" — the typed-command tool agents use instead of a mouse and screen. |
+| Telemetry | The automatic stream of status updates agents send about what they're doing. |
+| Integration | Standard "plumbing" a project may need — payments (Stripe), error tracking (Sentry), email, or Google sign-in. |
+| Optimistic concurrency | Letting many workers reach for the same row, but writing in a way where only one can win — no locks held up front. |
+| Idempotent | Safe to repeat — running the command (or re-sending a hook) twice has the same effect as once. An *idempotency key* is the tag that makes a retry a no-op. |
+| Micro-dollars | Cost stored as millionths of a dollar (integer), so even a fraction-of-a-cent run is tracked exactly without rounding. |
+| Upsert | "Insert or update" — create the row if it's new, otherwise patch the existing one. Used for integrations and retried run starts. |
+| Bearer token | A shared secret sent in a request header (`Authorization: Bearer …`) that the telemetry door checks before accepting writes. |
+| pgEnum / GIN index | A Postgres fixed-value type, and a specialized index that makes searching inside JSON arrays (like a tech stack) fast. |
+| Drizzle / BetterAuth | The type-safe layer that defines the database schema, and the library that runs Google sign-in and sessions. |
+| FIFO | "First in, first out" — the queue hands out the oldest waiting task first. |

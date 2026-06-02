@@ -1,0 +1,70 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Autonomy
+description: A closed loop where AI finds, does, and reports its own work — no human in the middle.
+icon: bot
+---
+
+# The star feature: AI that works on its own
+
+A closed loop where AI finds, does, and reports its own work — no human in the middle.
+
+Most dashboards just *show* you information. Mission Control can also **do the work**. A
+background dispatcher — the **auto-claim daemon** — watches the task queue. The moment a task
+is free, it launches an AI worker to handle it, no human needed. Here is the full cycle.
+
+<Frame caption="Fig. 03 — Autonomous loop. 01–03 assign work, 04–06 do it and tidy up — then it repeats.">
+  ![Autonomous task loop](/figures/fig-03-run-loop.svg)
+</Frame>
+
+<Steps>
+  <Step title="Find a free task">
+    The dispatcher asks the database for the next available task. It only considers tasks that are
+    unclaimed, or whose previous claim has expired — and it takes them in **board order**: the top
+    of a project's To Do column first, oldest-first only to break ties. Drag a card up the
+    [board](/dashboard#the-board-drag-work-steer-the-agents) and you've changed what it claims next.
+
+    ```bash
+    mc task next --project myapp
+    ```
+  </Step>
+  <Step title="Claim it — safely">
+    It stamps the task as "taken" in one atomic step. If another worker got there a millisecond
+    earlier, this one is told "already claimed" and simply moves on. No double-work, ever.
+
+    ```bash
+    mc task claim <task-id> --run <run-id>
+    ```
+  </Step>
+  <Step title="Spawn an AI worker">
+    The dispatcher launches a fresh AI assistant pointed at that task, in "plan" mode by default
+    for safety. The task description is treated as untrusted text, so a sneaky task can't hijack
+    the agent.
+
+    If an [agent profile](/profiles) matches the task, the worker is spawned to that recipe instead
+    — its model, skills, MCP tools, permission posture, or even a non-Claude runtime. Otherwise the
+    plain default worker runs, exactly as described here.
+  </Step>
+  <Step title="The agent works — and beats a heartbeat">
+    As the AI uses tools — reading files, writing code — it automatically pings the database every
+    step. That heartbeat is how we know it's still alive and making progress.
+  </Step>
+  <Step title="Report results">
+    When the AI finishes, it tallies how many tokens it used and what that cost, then marks its
+    run `completed` (or `failed`).
+
+    ```bash
+    mc run end <run-id> completed
+    ```
+  </Step>
+  <Step title="Settle the task">
+    If the run succeeded, the task becomes `done`. If it failed or was stopped, the claim is
+    released and the task drops back into the queue for another attempt. Then the loop starts over.
+  </Step>
+</Steps>
+
+<Info>
+**There's no human in any of those six steps.** Tasks flow in — you add them, or they're
+imported from GitHub issues — the system assigns and does them, and the results flow back to
+your dashboard. Your job shifts from *doing* the work to *steering and reviewing* it.
+</Info>

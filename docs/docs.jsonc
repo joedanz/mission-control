@@ -1,0 +1,80 @@
+{
+  "$schema": "https://holocron.so/docs.json",
+  "name": "Mission Control",
+  "favicon": "/favicon.ico",
+  "colors": {
+    // Brand indigo — matches the accent used throughout the diagrams.
+    "primary": "#4a45c2",
+    "dark": "#4a45c2", // light-mode accent
+    "light": "#a7a2f0" // dark-mode accent (lighter for contrast)
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Live dashboard",
+      "href": "https://your-app.example.com"
+    }
+  },
+  "footer": {
+    "links": [
+      {
+        "header": "Reference",
+        "items": [
+          { "label": "CLI", "href": "/reference/cli" },
+          { "label": "Schema", "href": "/reference/schema" },
+          { "label": "HTTP surface", "href": "/reference/api" }
+        ]
+      }
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Introduction",
+            "icon": "rocket",
+            "pages": ["index", "overview"]
+          },
+          {
+            "group": "The System",
+            "icon": "layers",
+            "pages": ["pieces", "dashboard", "data-model"]
+          },
+          {
+            "group": "How It Runs",
+            "icon": "workflow",
+            "pages": ["autonomy", "profiles", "telemetry", "safety", "cost", "access"]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Operator Reference",
+            "icon": "book",
+            "pages": [
+              "reference/cli",
+              "reference/schema",
+              "reference/api",
+              "reference/operating"
+            ]
+          },
+          {
+            "group": "Appendix",
+            "icon": "list",
+            "pages": ["glossary"]
+          }
+        ]
+      }
+    ]
+  }
+}

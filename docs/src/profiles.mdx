@@ -1,0 +1,130 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Agent profiles
+description: Named, reusable bundles of capabilities and routing rules that decide how an agent is spawned for a task.
+icon: sliders-horizontal
+---
+
+# Giving each agent the right tools
+
+Named, reusable bundles of capabilities and routing rules that decide *how* an agent is spawned
+for a task.
+
+By default every auto-claimed worker is identical: the same model, the same plan-only safety
+mode, the same blank toolkit. **Agent profiles** change that. A profile is a saved recipe — a
+model, a permission posture, a set of skills, MCP servers, a tool policy, a persona, even a
+non-Claude runtime — plus the **rules that decide when to use it**. When the daemon picks up a
+task, it finds the matching profile and spawns the worker to that recipe.
+
+Think of it like staffing: a "release engineer" profile (cautious, can run deploys, points at
+your CI tools) versus a "docs writer" profile (a cheaper model, read-mostly, no deploy access).
+The right one shows up for the right job, automatically.
+
+## What's in a profile
+
+| Field | What it controls |
+|---|---|
+| **runtime** | How the worker is launched: `claude-code` (rich `claude -p` flags) or `exec` (any command — the door to non-Claude models). |
+| **model** · **permission mode** | Which model answers, and how much it's allowed to do without asking (`plan`, `acceptEdits`, `bypassPermissions`, `default`). |
+| **skills** | Skills to steer the agent toward (surfaced in its system prompt). |
+| **MCP servers** | Model Context Protocol tools the agent can call — by `stdio` command or `http`/`sse`/`ws` URL. The real "powers." |
+| **allowed / disallowed tools** | A tool allow-list and deny-list. |
+| **append system prompt** | A persona or extra standing instructions. |
+| **env** | Environment variables for the worker — secrets as `${ENV}` placeholders only (see below). |
+| **fallback model** · **daily budget** | Cost-aware routing — resilience plus a spend cap (see [Cost](/cost)). |
+| **match rules** · **priority** · **default** | When this profile applies, how ties break, and the global fallback. |
+
+## How the right profile gets picked
+
+Routing is rule-based and runs every time the daemon claims a task.
+
+<Steps>
+  <Step title="Match on the task's context">
+    Each profile can declare **match rules** — any mix of project slugs, project categories, task
+    kinds, and a label regex. A profile applies only when *every* rule it sets is satisfied (they're
+    ANDed). A profile with no rules never matches by rule — it can only be the default.
+  </Step>
+  <Step title="Break ties by priority">
+    If several profiles match, the one with the highest **priority** wins; the oldest is the
+    tiebreaker, so the choice is stable.
+  </Step>
+  <Step title="Fall back to the default">
+    If nothing matches, the single **default** profile is used. If there's no default either, the
+    daemon spawns its plain built-in worker — exactly as before profiles existed.
+  </Step>
+</Steps>
+
+You can preview the decision without running anything:
+
+```bash
+mc profile resolve --project myapp --label "fix: crash on save" --kind custom
+```
+
+## Two runtimes: Claude and everything else
+
+Claude Code is Claude-only — pointing it at a different base URL changes *where* requests go, not
+*which* model answers. So a profile carries a first-class `runtime` field:
+
+- **`claude-code`** renders rich `claude -p` flags: `--model`, `--permission-mode`,
+  `--append-system-prompt` (persona + steered skills), `--allowedTools` / `--disallowed-tools`,
+  and `--mcp-config` (with `--strict-mcp-config` so the profile's server set is authoritative).
+- **`exec`** renders a command template you supply, with `${MODEL}`, `${PROMPT}`,
+  `${MCP_CONFIG}`, and `${FALLBACK_MODEL}` tokens filled in — so a profile can drive a non-Claude
+  model through any runner (an OpenAI-compatible gateway, a local model, whatever you script).
+
+<Warning>
+**Secrets are placeholders, never stored.** Anywhere a secret would go — an `env` value, an MCP
+header like `Authorization` — you store a `${ENV_VAR}` placeholder, not the secret itself. The
+daemon resolves it from its own environment at spawn and writes any rendered MCP config to a
+`0600` temp file, so a resolved key never lands in the database, in `ps` output, or on disk in the
+clear. If a referenced variable isn't set, the run fails fast with a clear message rather than
+launching half-credentialed.
+</Warning>
+
+## Cost-aware routing
+
+Two profile fields keep a model from running away with your budget:
+
+- **fallback model** maps to claude's `--fallback-model` — if the primary is overloaded or
+  unavailable, it transparently retries on the cheaper one.
+- **daily budget** (micro-dollars) is a spend cap on *this profile's* same-day run cost. Once the
+  day's spend crosses the cap, the daemon **downgrades** new runs to the fallback model and logs
+  an event saying why. It reads real spend (`mc spend --profile`), not a guess at task difficulty.
+
+Both are optional; a profile with neither always runs its primary model. See [Cost](/cost).
+
+## Managing profiles
+
+Profiles are global (not per-project) and slug-addressed, like projects. Drive them from the CLI
+or the **Profiles** tab in the dashboard — both write through the same core, so they can't drift.
+
+```bash
+# A claude-code profile that handles deploy tasks with a cautious posture + a cost cap
+mc profile add --slug releaser --name "Release engineer" \
+  --model opus --permission-mode acceptEdits \
+  --allowed-tools "Bash,Edit" --skills deploy,canary \
+  --match-label '^(deploy|release):' --priority 5 \
+  --fallback-model claude-sonnet-4-6 --daily-budget-micros 5000000
+
+mc profile set-default <slug>     # the global fallback when no rule matches
+mc profile list                   # all profiles
+mc profile resolve --project myapp  # preview which one auto-routing picks
+```
+
+Every run records which profile (and which model) it actually used, so the [Spend](/cost) and
+activity views can tell you exactly what each profile is costing and doing.
+
+<CardGroup cols={2}>
+  <Card title="Autonomy" icon="bot" href="/autonomy">
+    Where profiles plug in — the loop that claims a task and spawns the worker.
+  </Card>
+  <Card title="Cost" icon="dollar-sign" href="/cost">
+    Fallback models and budget downgrades, measured against real spend.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Every `mc profile` command and its flags.
+  </Card>
+  <Card title="Schema" icon="table" href="/reference/schema">
+    The `agent_profiles` table, column by column.
+  </Card>
+</CardGroup>

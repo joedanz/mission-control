@@ -1,0 +1,36 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Safety
+description: Two mechanisms keep an autonomous fleet from getting out of hand.
+icon: shield
+---
+
+# Safety nets: the stop button and the janitor
+
+Two mechanisms keep an autonomous fleet from getting out of hand.
+
+<CardGroup cols={2}>
+  <Card title="The kill-switch" icon="circle-stop">
+    **Mechanism A.** Sometimes you want to stop an agent *right now*. You press cancel, and the
+    system sets a "please stop" flag on that run. The elegant part: the agent's own hooks notice
+    the flag, and **before it's allowed to use its next tool, the system blocks it** and ends the
+    session gracefully. The agent stops itself — you don't hunt down a process.
+
+    `mc run cancel <run-id>`
+  </Card>
+  <Card title="The reaper" icon="trash-2">
+    **Mechanism B.** What if an agent crashes, loses power, or its laptop sleeps? It can't send a
+    "goodbye," so it would look *forever live*. A janitor runs **every 60 seconds**, finds any run
+    marked "running" that hasn't sent a heartbeat in a long while, and flips it to `abandoned` —
+    freeing any task it held so the work can be retried.
+
+    *scheduled via launchd · 60s*
+  </Card>
+</CardGroup>
+
+<Frame caption="Fig. 05 — Run states. The reaper guarantees nothing stays “running” forever.">
+  ![Run end states](/figures/fig-05-run-states.svg)
+</Frame>
+
+Every run ends in exactly one of three states: `completed` when it finishes OK, `failed` when
+it errors or is cancelled, or `abandoned` when it goes silent and the reaper steps in.

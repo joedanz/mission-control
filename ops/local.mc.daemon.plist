@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job for the Mission Control auto-claim daemon (`npm run daemon -- --project <slug>`) — the
+  unattended worker that pulls tasks from ONE project's queue and runs each as a headless `claude -p`
+  child in its repo. Long-running (its own poll loop), so RunAtLoad + KeepAlive (relaunch on crash/logout),
+  like the scheduler — NOT a StartInterval one-shot.
+
+  PER-PROJECT: auto-claim is concurrency-1 and scoped to a single project (a per-repoPath lockfile refuses
+  a second daemon on the same repo). Deploy ONE copy of this plist per project you want auto-claimed —
+  replace BOTH occurrences of __PROJECT__ (the Label suffix + the --project arg) with the project slug, and
+  give each its own log path. The cd path, PATH, and MC_CLAUDE_BIN are MACHINE-SPECIFIC.
+
+  MC_CLAUDE_BIN: `npm run` prepends the node_modules/.bin walk to PATH, which can shadow the real `claude`
+  with a stale npm-global install that crashes on newer Node. Pin the absolute path of your working install
+  (`command -v claude` in a clean shell). Without this, the spawned child crashes at startup. See INSTALL.md.
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.mc.daemon.__PROJECT__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-lc</string>
+    <string>cd /path/to/mission &amp;&amp; npm run daemon -- --project __PROJECT__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd does not inherit your shell PATH — give it node/npm explicitly. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Absolute path to the working `claude` (see comment above + INSTALL.md Prerequisite 4). -->
+    <key>MC_CLAUDE_BIN</key><string>~/.local/bin/claude</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/mc-daemon-__PROJECT__.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mc-daemon-__PROJECT__.log</string>
+</dict></plist>

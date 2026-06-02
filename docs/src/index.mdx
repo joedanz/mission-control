@@ -1,0 +1,45 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Mission Control
+description: A control room for software projects — and the fleet of AI assistants that work on them.
+icon: home
+---
+
+# Mission Control
+
+A control room for software projects — and the fleet of *AI assistants* that work on
+them. This is the operations field manual, written so anyone can follow it.
+
+<CardGroup cols={2}>
+  <Card title="What is Mission Control?" icon="eye" href="/overview">
+    The one-screen dashboard, plus an autopilot for your projects.
+  </Card>
+  <Card title="The pieces" icon="layers" href="/pieces">
+    Five actors, one shared database — how they connect.
+  </Card>
+  <Card title="Autonomy" icon="bot" href="/autonomy">
+    The closed loop where AI finds, does, and reports its own work.
+  </Card>
+  <Card title="Agent profiles" icon="sliders-horizontal" href="/profiles">
+    Give each agent the right model, skills, and tools for the job.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Every `mc` command, its output, and its exit codes.
+  </Card>
+</CardGroup>
+
+## About this manual
+
+|  |  |
+|---|---|
+| **Document** | Architecture & operation |
+| **System** | Next.js + Neon Postgres |
+| **Audience** | Everyone — no jargon assumed |
+| **Deployment** | [your-app.example.com](https://your-app.example.com) |
+
+This guide comes in two halves. **Part I (Guide)** is the map — what Mission Control is and
+how it works, in plain English. **Part II (Reference)** is the manual — the exact commands,
+tables, endpoints, and knobs for the people who run, extend, or integrate with the system.
+
+A plain-English companion to `README.md` and `AGENTS.md`; the reference half mirrors
+`cli/README.md`, `hooks/README.md`, and `daemon/README.md`.

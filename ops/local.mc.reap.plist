@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job that runs the Mission Control reaper (`npm run reap`) every 60s so stale `running`
+  runs get flipped to `abandoned` and crashed agents' claims free. This is the ONLY thing scheduling
+  the reaper (no Vercel cron) — keep it version-controlled so a fresh clone / machine rebuild can
+  reinstate it. See ops/README.md to install. NOTE: the cd path and PATH are machine-specific.
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.mc.reap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-lc</string>
+    <string>cd /path/to/mission &amp;&amp; npm run reap</string>
+  </array>
+  <!-- Explicit PATH so launchd (which does not inherit your shell PATH) finds node/npm. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>/tmp/mc-reap.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mc-reap.log</string>
+</dict></plist>

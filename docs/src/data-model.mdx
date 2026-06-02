@@ -1,0 +1,35 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Data model
+description: Four "drawers" in the filing cabinet, neatly linked together.
+icon: database
+---
+
+# How the information is organized
+
+Four "drawers" in the filing cabinet, neatly linked together.
+
+To make sense of the system you only need to understand four things it keeps track of. Each
+one "belongs to" the one above it, like folders inside folders. A fifth — the **agent profile**
+— sits off to the side: reusable config a run can point at, rather than a folder in the stack.
+
+<Frame caption="Fig. 02 — Data model. A project has many tasks; an AI run claims a task and records many events.">
+  ![Data model relationships](/figures/fig-02-data-model.svg)
+</Frame>
+
+| Drawer | In plain words | What it remembers |
+|---|---|---|
+| **Project** | A thing you're building — a website, an app, a client job. | Name, category (`internal`, `open_source`, `client`), status, tech, links, priority. |
+| **Task** | One item of work inside a project — a custom to-do, or a standard "integration" like payments. | Label, status (`todo` → `in_progress` → `done`), its position on the board (which sets its priority in the queue), and — if an AI grabbed it — which run claimed it and when the claim expires. |
+| **Run** | One work-session by one AI agent. Starts when it begins, ends when it finishes. | Which agent, its status (`running` / `completed` / `failed` / `abandoned`), tokens used, dollar cost, and a "heartbeat" proving it's alive. |
+| **Event** | A single timestamped line in the activity log — the diary of everything that happened. | What happened, how important it is, and links to the related run, task, and project. |
+| **Agent profile** | A reusable recipe for *how* an agent runs — its model, skills, tools, and routing rules. A run records which one it used. | Model, runtime, permission mode, skills, MCP servers, match rules, fallback model + budget. See [Agent profiles](/profiles). |
+
+<Note>
+**No two agents can grab the same task.** When an AI claims a task, it stamps the task with its
+own ID *and* an expiry time in a single, indivisible database operation. If two agents reach
+for the same task at the same instant, the database lets only one win — the other is politely
+told "already taken." That's what makes the autopilot safe to run with many workers at once.
+Engineers call this *optimistic concurrency*; the `version` and `claim_expires_at` fields make
+it work.
+</Note>

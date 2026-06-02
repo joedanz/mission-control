@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 520" role="img" aria-label="System topology">
+  <style>
+    .t-disp{font-family:'Archivo Expanded','Archivo',system-ui,sans-serif;font-weight:600}
+    .t-mono{font-family:'Martian Mono',ui-monospace,monospace}
+    .t-serif{font-family:Georgia,'Times New Roman',serif}
+    @media (prefers-color-scheme: dark){
+      [fill="#fbf9f4"]{fill:#17171c}
+      [fill="#ecebf8"]{fill:#222041}
+      [fill="#e6f1ec"]{fill:#14302a}
+      [fill="#f4ecdd"]{fill:#2c2517}
+      [fill="#f6e7e1"]{fill:#36201a}
+      [fill="#2a2620"]{fill:#e9e7e0}
+      [fill="#6b6358"]{fill:#b6b0a8}
+      [fill="#9a9082"]{fill:#8b867e}
+      [fill="#4a45c2"]{fill:#a7a2f0}
+      [fill="#2c8a6f"]{fill:#5fc9a8}
+      [fill="#946a2a"]{fill:#cf9a4a}
+      [fill="#b1543f"]{fill:#e08a72}
+      [stroke="#2a2620"]{stroke:#6a665e}
+      [stroke="#6b6358"]{stroke:#8a847b}
+      [stroke="#4a45c2"]{stroke:#7d78d8}
+      [stroke="#2c8a6f"]{stroke:#4aa98a}
+      [stroke="#946a2a"]{stroke:#c79a52}
+      [stroke="#b1543f"]{stroke:#c97862}
+    }
+  </style>
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#6b6358"/></marker>
+    <marker id="arI" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#4a45c2"/></marker>
+  </defs>
+
+  <!-- central DB -->
+  <ellipse cx="460" cy="262" rx="120" ry="33" fill="#fbf9f4" stroke="#4a45c2" stroke-width="2"/>
+  <path d="M340,262 v38 a120,33 0 0 0 240,0 v-38" fill="#fbf9f4" stroke="#4a45c2" stroke-width="2"/>
+  <ellipse cx="460" cy="262" rx="120" ry="33" fill="#ecebf8" stroke="#4a45c2" stroke-width="2"/>
+  <text x="460" y="258" text-anchor="middle" class="t-disp" font-size="20" fill="#2a2620">Neon Database</text>
+  <text x="460" y="280" text-anchor="middle" class="t-mono" font-size="11" fill="#6b6358" letter-spacing="1">PROJECTS · TASKS · RUNS · EVENTS</text>
+
+  <!-- top-left you -->
+  <rect x="44" y="44" width="214" height="74" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="56" y="72" class="t-disp" font-size="15" fill="#2a2620">You, in a browser</text>
+  <text x="56" y="93" class="t-serif" font-size="13" font-style="italic" fill="#6b6358">the web dashboard</text>
+  <text x="56" y="110" class="t-mono" font-size="10" fill="#9a9082" letter-spacing="1">SIGN IN · VIEW · EDIT</text>
+  <path d="M205,118 C300,168 358,200 388,234" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#arI)"/>
+
+  <!-- top-right agent -->
+  <rect x="662" y="44" width="214" height="74" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="864" y="72" text-anchor="end" class="t-disp" font-size="15" fill="#2a2620">AI agent</text>
+  <text x="864" y="93" text-anchor="end" class="t-serif" font-size="13" font-style="italic" fill="#6b6358">the mc command tool</text>
+  <text x="864" y="110" text-anchor="end" class="t-mono" font-size="10" fill="#9a9082" letter-spacing="1">READ · CLAIM · RECORD</text>
+  <path d="M715,118 C620,168 562,200 532,234" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#arI)"/>
+
+  <!-- left telemetry -->
+  <rect x="44" y="226" width="206" height="72" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="56" y="253" class="t-disp" font-size="14" fill="#2a2620">Telemetry hooks</text>
+  <text x="56" y="273" class="t-serif" font-size="12.5" font-style="italic" fill="#6b6358">auto-report agent activity</text>
+  <text x="56" y="290" class="t-mono" font-size="9.5" fill="#9a9082" letter-spacing="1">&#8594; /API/INGEST</text>
+  <path d="M250,262 L336,262" fill="none" stroke="#6b6358" stroke-width="1.8" marker-end="url(#ar)"/>
+
+  <!-- right daemon -->
+  <rect x="670" y="226" width="206" height="72" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="864" y="253" text-anchor="end" class="t-disp" font-size="14" fill="#2a2620">Auto-claim daemon</text>
+  <text x="864" y="273" text-anchor="end" class="t-serif" font-size="12.5" font-style="italic" fill="#6b6358">finds &amp; assigns work</text>
+  <text x="864" y="290" text-anchor="end" class="t-mono" font-size="9.5" fill="#9a9082" letter-spacing="1">SPAWNS WORKERS</text>
+  <path d="M670,262 L584,262" fill="none" stroke="#6b6358" stroke-width="1.8" marker-end="url(#ar)"/>
+
+  <!-- bottom reaper -->
+  <rect x="352" y="402" width="216" height="72" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="460" y="429" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">The reaper</text>
+  <text x="460" y="449" text-anchor="middle" class="t-serif" font-size="12.5" font-style="italic" fill="#6b6358">clears crashed agents</text>
+  <text x="460" y="466" text-anchor="middle" class="t-mono" font-size="9.5" fill="#9a9082" letter-spacing="1">EVERY 60 SECONDS</text>
+  <path d="M460,402 L460,302" fill="none" stroke="#6b6358" stroke-width="1.8" marker-end="url(#ar)"/>
+
+  <text x="298" y="198" class="t-mono" font-size="9.5" fill="#4a45c2" letter-spacing="1">WRITE · READ</text>
+  <text x="576" y="198" text-anchor="end" class="t-mono" font-size="9.5" fill="#4a45c2" letter-spacing="1">WRITE · READ</text>
+</svg>

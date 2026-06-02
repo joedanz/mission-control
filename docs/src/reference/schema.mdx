@@ -1,0 +1,121 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Schema
+description: Six working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+icon: table
+---
+
+# The database, column by column
+
+Six working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+
+Every `id` is a UUID stored as text. Enumerated values are split deliberately into two kinds:
+**hard `pgEnum` types** for sets that almost never change, and **plain text validated in the
+app/CLI layer** for "churny" sets that do — so adding a status never needs a database migration.
+
+## projects — "a thing you're building"
+
+| Column | Notes |
+|---|---|
+| `id` · name · `slug` | UUID, display name, and a unique URL-safe handle (the address you pass to `mc`). |
+| category · status · accent | `category`/`accent` are pgEnums; `status` is validated text. |
+| tech_stack | `jsonb` string array, indexed with a GIN index for tech-based filtering. |
+| repo_path · repo_url · live_url | Local checkout (daemon target), GitHub URL (issue import), and the deployed site. |
+| priority · target_date · notes | Planning metadata. |
+| archived · sort_order | Soft-hide flag and manual ordering. |
+| created_at · updated_at · last_activity_at | Timestamps; `last_activity_at` drives the "recently touched" list. |
+
+## tasks — "one item of work"
+
+| Column | Notes |
+|---|---|
+| `project_id` | FK to `projects`, `ON DELETE CASCADE` — delete a project, its tasks go too. |
+| label · notes · kind | `kind` is `custom` or `integration`. |
+| status · integration_status | Custom workflow (`todo→in_progress→done`) vs the tri-state for integration tasks (`needed/pending/done`). |
+| version | Optimistic-concurrency token, bumped on every status/claim write — the collision signal. |
+| sort_order | Manual board position within a column; lower comes first. Drives the queue head (see `tasks_claimable_idx`) so a board re-order steers what the daemon claims next. |
+| claimed_by_run_id | FK to `runs`, `ON DELETE SET NULL` — a deleted/abandoned run frees the claim. |
+| claimed_at · claim_expires_at | When the claim was taken and when it auto-releases (the backstop). |
+| completed_at | Set when the task reaches `done`. |
+
+## runs — "one AI work-session"
+
+| Column | Notes |
+|---|---|
+| `id` | Client-supplied by the hook, so a retried `run.start` upserts the same row. |
+| agent_label · parent_run_id | Free-text agent name; self-FK builds sub-agent trees. |
+| project_id · title · source · model | Context; `source` is `hook\|cli\|cron\|manual`. `model` is the model that actually ran (the daemon writes the budget-chosen one). |
+| agent_profile_id | FK to `agent_profiles`, `ON DELETE SET NULL` — which profile this run used; deleting the profile leaves the run intact. |
+| status | `running → completed \| failed \| abandoned`. "Live/idle" is *derived* from the heartbeat, never stored. |
+| tokens_in/out · cache_read/write_tokens · cost_micros | `bigint` cumulative totals (cache split out — it dominates Claude cost); cost in micro-dollars. |
+| session_id · work_dir · transcript_ref | Claude Code's session id, the hook's cwd, and a *path* to the transcript — never its body. |
+| cancel_requested | The kill-switch flag; surfaced on the heartbeat response and enforced by the PreToolUse hook. |
+| started_at · ended_at · last_heartbeat_at | `last_heartbeat_at` is what the reaper watches. |
+
+## events — "one line in the log" (append-only)
+
+| Column | Notes |
+|---|---|
+| `seq` | `bigint` identity — the monotonic key the feed orders by (timestamps can tie). |
+| run_id · project_id · task_id | Optional FKs, all `SET NULL` — the log outlives what it references. |
+| actor_label · type · level | Who acted, what happened (`EVENT_TYPES`), and severity (`debug/info/warn/error`). |
+| summary · payload | Human line plus an optional `jsonb` blob. |
+| tokens · cost_micros | Per-event attribution only — never the rollup source (that's `runs.cost_micros`). |
+| idempotency_key | Unique (partial) — dedupes retried appends so a re-sent hook can't double-log. |
+
+## agent_profiles — "a reusable agent recipe"
+
+Global, slug-addressed capability bundles + auto-routing rules. See [Agent profiles](/profiles)
+for the concepts. Churny value sets (`runtime`, `permission_mode`) are validated text, matching
+the rest of the schema.
+
+| Column | Notes |
+|---|---|
+| `id` · slug · name | UUID, a unique slug (the address you pass to `mc profile`), and a display name. |
+| runtime · model | `runtime` is `claude-code` or `exec`; `model` is the primary model. |
+| fallback_model · daily_budget_micros | Cost-aware routing: the `--fallback-model` (resilience) and the budget-downgrade target, plus a `bigint` micro-dollar cap on this profile's same-day run cost (`NULL` = no cap). |
+| provider · base_url · permission_mode | Optional provider/gateway hints and the Claude permission posture. |
+| skills · allowed_tools · disallowed_tools | `jsonb` string arrays — steered skills and the tool allow/deny lists. |
+| mcp_servers · env | `jsonb` — the `--mcp-config` inner map and an env map. Secrets are `${ENV}` placeholders only; the daemon resolves them at spawn. |
+| append_system_prompt · exec_template | Persona text, and the command template required when `runtime='exec'` (tokens `${MODEL}`/`${PROMPT}`/`${MCP_CONFIG}`/`${FALLBACK_MODEL}`). |
+| match_rules · priority · is_default · enabled | `jsonb` routing rules (`projectSlugs`/`projectCategories`/`taskKinds`/`labelPattern`), the tie-break, the single global default, and an on/off flag. |
+| created_at · updated_at | Timestamps. |
+
+A **settings** key/value table and the four **BetterAuth** tables (`users`, `sessions`,
+`accounts`, `verification`) round out the database. The agent role **cannot see the auth tables
+at all** — see [Access](/access).
+
+## Enums & allow-lists
+
+| Where validated | Field | Values |
+|---|---|---|
+| **pgEnum** | category | `internal · open_source · client` |
+| **pgEnum** | accent | `orange · green · blue · violet · warm` |
+| app/CLI text | project status | `prelaunch · launched · testing · active · design · planning` |
+| app/CLI text | task status | `todo · in_progress · done` |
+| app/CLI text | integration type / status | `google_oauth · stripe · sentry · zoho_email · other` / `needed · pending · done` |
+| app/CLI text | run status / source | `running · completed · failed · abandoned` / `hook · cli · cron · manual` |
+| app/CLI text | event level | `debug · info · warn · error` |
+| app/CLI text | profile runtime | `claude-code · exec` |
+| app/CLI text | permission mode | `plan · acceptEdits · bypassPermissions · default` |
+
+## Indexes that matter
+
+| Index | Purpose |
+|---|---|
+| `tasks_claimable_idx` | Partial over only `status='todo' AND kind='custom'` rows, ordered `(sort_order, created_at)` — priority by board position, then FIFO. The daemon polls this on a loop, so a board re-order changes what it picks up next. |
+| `runs_status_heartbeat_idx` | The reaper's index — finds `running` runs whose heartbeat went stale. |
+| `events_order_idx` | `(created_at, seq)` — the activity feed's replay order. |
+| `events_idempotency_uq` | Partial unique on `idempotency_key` — the dedupe guarantee. |
+| `tasks_project_integration_uq` | One integration row per type per project (keeps the grids from double-counting). |
+| `agent_profiles_slug_uq` | Unique profile slug — the handle you address with `mc profile`. |
+| `agent_profiles_default_uq` | Partial unique over `is_default = true` — enforces *at most one* global default profile. |
+
+<Note>
+**Why two agents never do the same task.** A claim is a **single conditional write**: "set
+`claimed_by_run_id` and `claim_expires_at` on this task *only if* it's unclaimed or its claim
+has expired." Because it's one indivisible statement, concurrent agents can't both win — exactly
+one row update succeeds; the rest get zero rows back and surface a `CONFLICT`. Claiming is
+**orthogonal to status**: it never moves the task to `in_progress`. This is textbook *optimistic
+concurrency*, and it's what makes the autopilot safe to run many-at-once.
+</Note>

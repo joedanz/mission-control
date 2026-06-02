@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 160" role="img" aria-label="Cost calculation flow">
+  <style>
+    .t-disp{font-family:'Archivo Expanded','Archivo',system-ui,sans-serif;font-weight:600}
+    .t-mono{font-family:'Martian Mono',ui-monospace,monospace}
+    .t-serif{font-family:Georgia,'Times New Roman',serif}
+    @media (prefers-color-scheme: dark){
+      [fill="#fbf9f4"]{fill:#17171c}
+      [fill="#ecebf8"]{fill:#222041}
+      [fill="#e6f1ec"]{fill:#14302a}
+      [fill="#f4ecdd"]{fill:#2c2517}
+      [fill="#f6e7e1"]{fill:#36201a}
+      [fill="#2a2620"]{fill:#e9e7e0}
+      [fill="#6b6358"]{fill:#b6b0a8}
+      [fill="#9a9082"]{fill:#8b867e}
+      [fill="#4a45c2"]{fill:#a7a2f0}
+      [fill="#2c8a6f"]{fill:#5fc9a8}
+      [fill="#946a2a"]{fill:#cf9a4a}
+      [fill="#b1543f"]{fill:#e08a72}
+      [stroke="#2a2620"]{stroke:#6a665e}
+      [stroke="#6b6358"]{stroke:#8a847b}
+      [stroke="#4a45c2"]{stroke:#7d78d8}
+      [stroke="#2c8a6f"]{stroke:#4aa98a}
+      [stroke="#946a2a"]{stroke:#c79a52}
+      [stroke="#b1543f"]{stroke:#c97862}
+    }
+  </style>
+  <defs>
+    <marker id="mm" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#6b6358"/></marker>
+  </defs>
+  <rect x="28" y="50" width="180" height="60" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.4"/>
+  <text x="118" y="78" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Transcript</text>
+  <text x="118" y="96" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">tokens per message</text>
+  <rect x="288" y="50" width="180" height="60" fill="#f4ecdd" stroke="#946a2a" stroke-width="1.4"/>
+  <text x="378" y="78" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Price table</text>
+  <text x="378" y="96" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">rate per model</text>
+  <rect x="548" y="50" width="180" height="60" fill="#e6f1ec" stroke="#2c8a6f" stroke-width="1.4"/>
+  <text x="638" y="78" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Run&#8217;s cost</text>
+  <text x="638" y="96" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">saved on the run</text>
+  <rect x="778" y="50" width="100" height="60" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.4"/>
+  <text x="828" y="78" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Spend</text>
+  <text x="828" y="96" text-anchor="middle" class="t-serif" font-size="10.5" font-style="italic" fill="#6b6358">tab total</text>
+  <path d="M208,80 L284,80" fill="none" stroke="#6b6358" stroke-width="1.6" marker-end="url(#mm)"/>
+  <path d="M468,80 L544,80" fill="none" stroke="#6b6358" stroke-width="1.6" marker-end="url(#mm)"/>
+  <path d="M728,80 L774,80" fill="none" stroke="#6b6358" stroke-width="1.6" marker-end="url(#mm)"/>
+</svg>

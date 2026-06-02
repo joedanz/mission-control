@@ -1,0 +1,88 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: The dashboard
+description: When you sign in, the website has five tabs. Here's what each one is for.
+icon: layout-dashboard
+---
+
+# What you see: the dashboard
+
+When you sign in, the website has five tabs. Here's what each one is for.
+
+<Frame caption="The live Mission Control dashboard.">
+  ![Mission Control dashboard](/live-view.png)
+</Frame>
+
+<CardGroup cols={2}>
+  <Card title="Tab 1 · Overview" icon="gauge">
+    The "at a glance" page. A row of headline numbers — how many projects, how many launched,
+    how many clients — plus an integration board (is error-tracking and email wired up for each
+    project?) and a list of recently touched projects.
+  </Card>
+  <Card title="Tab 2 · Projects" icon="folder-kanban">
+    The main work surface: every project in one sortable, searchable register — name, type,
+    tech used, setup status, number of tasks, last activity. You can add projects and tasks
+    right here.
+  </Card>
+  <Card title="Tab 3 · Board" icon="square-kanban">
+    A drag-and-drop Kanban across every active project — one swimlane per project, with To Do /
+    In Progress / Done columns. Drag a card to move or re-prioritise its work, and the order you
+    set steers what the AI picks up next. (Each project also has its own Board tab.)
+  </Card>
+  <Card title="Tab 4 · Mission" icon="radar">
+    The live ops room. A "fleet" strip shows AI agents working right now, with a pulsing dot for
+    the live ones, and an activity feed streams events as they happen — like a flight tracker for
+    your AI.
+  </Card>
+  <Card title="Tab 5 · Spend" icon="dollar-sign">
+    The money view. Total spent, number of runs, tokens used, and a breakdown you can group by
+    project, by agent, by day, or by individual run.
+  </Card>
+</CardGroup>
+
+<Info>
+**Where the page gets its numbers.** When you load a tab, the website reads straight from the
+database and builds the page on the server before sending it to you — so it's fast and always
+current. When you make a change, it's saved to the database and the page refreshes its data.
+The Mission tab goes further: it quietly re-checks for new activity every few seconds, so it
+stays live.
+</Info>
+
+## The board: drag work, steer the agents
+
+The **Board** is both a window into what the agents are doing and the lever you use to decide
+what they do next. It comes in two shapes that share the same three columns — **To Do**,
+**In Progress**, and **Done**.
+
+<CardGroup cols={2}>
+  <Card title="The overall board" icon="square-kanban">
+    The top-level **Board** tab. One **swimlane** per active project, stacked with the live fleet
+    strip on top — so you see every project's queue at once. You can re-order cards *within* a
+    project, but a card can't jump to a different project (its lane is fixed).
+  </Card>
+  <Card title="The per-project board" icon="folder-kanban">
+    A **Board** tab on each project's page (between Tasks and Integrations). Just that one
+    project's columns, plus a readiness chip for its integrations and a selector for how far back
+    the **Done** column reaches.
+  </Card>
+</CardGroup>
+
+Two kinds of drag do two different things:
+
+- **Drag a card between columns** to change its status — `To Do → In Progress → Done` (and back).
+- **Drag a card up or down within a column** to re-order it — that's the priority order.
+
+<Note>
+**Re-ordering the To Do column steers the autopilot.** The position you give a card *is* its
+priority: the auto-claim daemon takes the **top** of To Do next. Drag a card to the top and it
+becomes the next thing an AI worker picks up — see [Autonomy](/autonomy). A pure re-order is
+silent — it doesn't count as activity on the project, it just changes who's next in line.
+</Note>
+
+<Warning>
+**A card an agent is actively working is locked.** While a task is claimed by a live run, its
+card can't be dragged — you can't yank work out from under a running agent. It frees up the
+moment that run ends. Moves are also optimistic: the card jumps immediately, and if the write
+loses a race (someone else moved it, or it was just claimed) the board quietly snaps it back on
+its next refresh.
+</Warning>

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 530" role="img" aria-label="Autonomous task loop">
+  <style>
+    .t-disp{font-family:'Archivo Expanded','Archivo',system-ui,sans-serif;font-weight:600}
+    .t-mono{font-family:'Martian Mono',ui-monospace,monospace}
+    .t-serif{font-family:Georgia,'Times New Roman',serif}
+    @media (prefers-color-scheme: dark){
+      [fill="#fbf9f4"]{fill:#17171c}
+      [fill="#ecebf8"]{fill:#222041}
+      [fill="#e6f1ec"]{fill:#14302a}
+      [fill="#f4ecdd"]{fill:#2c2517}
+      [fill="#f6e7e1"]{fill:#36201a}
+      [fill="#2a2620"]{fill:#e9e7e0}
+      [fill="#6b6358"]{fill:#b6b0a8}
+      [fill="#9a9082"]{fill:#8b867e}
+      [fill="#4a45c2"]{fill:#a7a2f0}
+      [fill="#2c8a6f"]{fill:#5fc9a8}
+      [fill="#946a2a"]{fill:#cf9a4a}
+      [fill="#b1543f"]{fill:#e08a72}
+      [stroke="#2a2620"]{stroke:#6a665e}
+      [stroke="#6b6358"]{stroke:#8a847b}
+      [stroke="#4a45c2"]{stroke:#7d78d8}
+      [stroke="#2c8a6f"]{stroke:#4aa98a}
+      [stroke="#946a2a"]{stroke:#c79a52}
+      [stroke="#b1543f"]{stroke:#c97862}
+    }
+  </style>
+  <defs>
+    <marker id="lp" markerWidth="10" markerHeight="10" refX="8" refY="3.1" orient="auto"><path d="M0,0 L8,3.1 L0,6.2 Z" fill="#4a45c2"/></marker>
+    <marker id="lpT" markerWidth="10" markerHeight="10" refX="8" refY="3.1" orient="auto"><path d="M0,0 L8,3.1 L0,6.2 Z" fill="#2c8a6f"/></marker>
+  </defs>
+  <!-- nodes -->
+  <g>
+    <circle cx="160" cy="118" r="60" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.6"/>
+    <text x="160" y="106" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">01 · FIND</text>
+    <text x="160" y="126" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">spot a free</text>
+    <text x="160" y="142" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">task in queue</text>
+  </g>
+  <g>
+    <circle cx="450" cy="86" r="60" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.6"/>
+    <text x="450" y="74" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">02 · CLAIM</text>
+    <text x="450" y="94" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">lock it so no</text>
+    <text x="450" y="110" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">one else takes it</text>
+  </g>
+  <g>
+    <circle cx="740" cy="118" r="60" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.6"/>
+    <text x="740" y="106" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">03 · SPAWN</text>
+    <text x="740" y="126" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">launch an AI</text>
+    <text x="740" y="142" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">worker on it</text>
+  </g>
+  <g>
+    <circle cx="740" cy="412" r="60" fill="#f4ecdd" stroke="#946a2a" stroke-width="1.6"/>
+    <text x="740" y="400" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">04 · WORK</text>
+    <text x="740" y="420" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">do the job,</text>
+    <text x="740" y="436" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">beat a heartbeat</text>
+  </g>
+  <g>
+    <circle cx="450" cy="452" r="60" fill="#f4ecdd" stroke="#946a2a" stroke-width="1.6"/>
+    <text x="450" y="440" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">05 · REPORT</text>
+    <text x="450" y="460" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">tally tokens, cost,</text>
+    <text x="450" y="476" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">close the run</text>
+  </g>
+  <g>
+    <circle cx="160" cy="412" r="60" fill="#e6f1ec" stroke="#2c8a6f" stroke-width="1.6"/>
+    <text x="160" y="400" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">06 · SETTLE</text>
+    <text x="160" y="420" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">done? mark done.</text>
+    <text x="160" y="436" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">failed? requeue.</text>
+  </g>
+  <!-- arrows -->
+  <path d="M218,104 C292,88 360,84 388,85" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#lp)"/>
+  <path d="M511,90 C582,96 650,104 682,112" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#lp)"/>
+  <path d="M740,178 L740,350" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#lp)"/>
+  <path d="M682,432 C620,450 558,454 511,451" fill="none" stroke="#946a2a" stroke-width="1.8" marker-end="url(#lp)"/>
+  <path d="M390,455 C320,455 258,442 212,429" fill="none" stroke="#946a2a" stroke-width="1.8" marker-end="url(#lp)"/>
+  <path d="M160,352 L160,180" fill="none" stroke="#2c8a6f" stroke-width="1.8" marker-end="url(#lpT)"/>
+  <text x="118" y="272" text-anchor="middle" class="t-mono" font-size="10" fill="#2c8a6f">LOOP &#8635;</text>
+</svg>

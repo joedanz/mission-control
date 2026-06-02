@@ -1,0 +1,203 @@
+# `mc` — Mission Control CLI
+
+A global, agent-friendly CLI for Mission Control. It reads and writes `projects` and
+`tasks` directly against Neon through the scoped **agent** database role. Built for AI agents
+(and operators) on both local and remote machines.
+
+It is a thin layer over the same `lib/mutations.ts` core the web app uses — so the CLI and the
+dashboard can never drift.
+
+## Install
+
+```bash
+npm link          # from this repo → puts `mc` on your PATH
+which mc          # confirm
+mc --version
+```
+
+No build step: `mc` runs the TypeScript source via `tsx` (a devDependency). Any machine that runs
+`mc` needs this repo checked out with `node_modules` installed.
+
+## Credentials
+
+`mc` talks to Neon directly. It resolves the connection string in this order:
+
+1. **`AGENT_DATABASE_URL`** in the environment (recommended for remote/CI — inject via your host's
+   secret store, no file on disk).
+2. **`$MC_ENV_FILE`** — path to a dotenv file.
+3. **`~/.config/mc/env`** (honors `$XDG_CONFIG_HOME`).
+
+The credential file **must be `chmod 600`** — `mc` refuses to run if it's group/world-readable.
+
+```bash
+mkdir -p ~/.config/mc
+printf 'AGENT_DATABASE_URL=postgres://...\n' > ~/.config/mc/env
+chmod 600 ~/.config/mc/env
+```
+
+- `mc` requires the **scoped** `AGENT_DATABASE_URL`. It will **not** silently fall back to the
+  owner/app `DATABASE_URL`. If you really must, set `MC_ALLOW_DATABASE_URL_FALLBACK=1` (not
+  recommended — that role may be over-privileged).
+- **Never commit this file** and never copy it into the repo.
+
+### Security model
+
+The agent role is scoped at the database layer to `projects` + `tasks` + `runs` + `events` (read/write;
+no DELETE on the append-only runs/events) — it **cannot** read auth tables. But **the CLI performs no
+sign-in and no email-allowlist check**: anyone holding `AGENT_DATABASE_URL` can read/write all project,
+task, run, and event data. Treat the credential as sensitive.
+
+**Rotation:** rotate by changing the Neon role's password — this invalidates every distributed
+copy at once:
+
+```sql
+ALTER ROLE mc_agent PASSWORD '<new>';
+```
+
+Rotate on any suspected leak.
+
+## Output contract
+
+Pass `--json` for machine output. When stdout is **not** a TTY (i.e. piped), JSON is the default,
+so agents get JSON automatically. Use `--human` to force text.
+
+In JSON mode, stdout is **exactly one** JSON document; all logs/warnings go to stderr.
+
+```jsonc
+// success
+{ "ok": true, "command": "project add", "data": { "id": "…", "slug": "…", … } }
+// list
+{ "ok": true, "command": "project list", "data": { "items": [ … ], "count": 19 } }
+// error
+{ "ok": false, "command": "project get", "error": { "code": "NOT_FOUND", "message": "…" } }
+```
+
+- Mutations return the affected row in `data` (so you get the new `id`).
+- Lists return `{ items, count }` (count = total matching; `items` capped by `--limit`, default 50).
+- `data` keys are camelCase matching the schema (`repoPath`, `lastActivityAt`, `integrationStatus`).
+
+**Exit codes:** `0` ok · `1` DB/conflict · `2` validation · `3` not-found · `4` config/credentials.
+
+## Self-describing
+
+```bash
+mc spec --json      # full command catalog, with readonly:true|false per command
+mc enums --json     # valid values for every enum field
+```
+
+## Addressing
+
+Projects are addressed by **slug**; tasks by **id** (uuid). Get a task's id from `task add`,
+`task list`, or `project get`.
+
+## Commands
+
+```
+mc project list [--category <c>] [--status <s>] [--archived active|archived|all] [--search <q>] [--limit <n>]
+mc project get <slug>
+mc project add --name <n> --category <c> [--status --accent --domain --tech --repo-path --repo-url --live-url --priority --notes]
+mc project update <slug> [any add flag; only the flags you pass change]
+mc project rm <slug> --yes            # deletes the project and cascades its tasks
+mc project set-repo <slug> <path> [url]
+
+mc task list <slug> [--status <s>] [--kind custom|integration]
+mc task get <id>
+mc task add <slug> <label...>
+mc task set-status <id> <status>      # todo|in_progress|done — idempotent; prefer over toggle
+mc task move <id> [--status <s>] [--top|--after <id>]   # board move: change column and/or reorder within it; --top = claimed next. Refuses a live-claimed task → CONFLICT
+mc task toggle <id>
+mc task rm <id> --yes
+mc task next [--project <slug>]                 # peek the next claimable task (custom, todo, unclaimed/claim-expired) — board order (sort_order), then oldest-first
+mc task claim <id> [--run <id>] [--ttl <secs>]  # claim a task for the current run; single-statement, race-safe (loses → CONFLICT exit 1)
+mc task import-issues <slug> [--state open|closed|all] [--label <name>] [--limit <n>] [--dry-run]  # self-source: GitHub issues → custom tasks
+
+mc integration set <slug> <type> <status>   # upsert by (project, type); idempotent
+mc integration list <slug>
+
+# Agent profiles — capability bundles (skills/MCP/model/tools/persona) + auto-routing rules
+mc profile list [--enabled] [--runtime claude-code|exec] [--schedulable]   # --schedulable = enabled + scheduled check-ins on
+mc profile get <slug>
+mc profile add --slug <s> --name <n> [--runtime claude-code|exec] [--model <m>] [--fallback-model <m>] [--daily-budget-micros <n>] [--provider <p>] [--base-url <u>] [--permission-mode plan|acceptEdits|bypassPermissions|default] [--skills a,b] [--mcp-config <json|@file>] [--allowed-tools <csv>] [--disallowed-tools <csv>] [--append-system-prompt <t>] [--env K=V ...] [--exec-template <cmd>] [--match-project <csv>] [--match-category <csv>] [--match-kind <csv>] [--match-label <regex>] [--priority <n>] [--default] [--disabled] [--schedule-enabled] [--schedule-disabled] [--schedule-project <slug>] [--schedule-interval <sec>] [--schedule-cron <expr>] [--schedule-timezone <tz>] [--check-in-prompt <t|@file>]  # fallback-model = claude --fallback-model + budget-downgrade target; daily-budget-micros caps this profile's same-UTC-day run cost (downgrade once exceeded). SCHEDULED CHECK-INS (≠ liveness heartbeat): enabled needs --schedule-project + exactly one of --schedule-interval/--schedule-cron; the scheduler wakes the profile, runs --check-in-prompt in the project's repo, and the agent self-serves that project's queued tasks. --schedule-interval floors at 60s (each check-in is a paid run); --schedule-cron is evaluated in --schedule-timezone (IANA zone; default = daemon local time, often UTC under launchd). Pass "" to clear a trigger.
+mc profile update <slug> [any add flag; only provided change] [--enabled]
+mc profile set-default <slug>                # the single global fallback when no rule matches (idempotent)
+mc profile checked-in <slug> [--status ok|fail]   # scheduler records a check-in: advances last_check_in_at; ok resets / fail increments consecutive_failures (auto-pauses after 3)
+mc profile rm <slug> --yes
+mc profile resolve [--project <slug>] [--task <id>] [--label <text>] [--kind custom|integration]   # preview auto-routing: matchRules → priority → default
+
+# Mission Control — runs (agent sessions) + the activity-event log
+mc run start --agent <label> [--project <slug>] [--profile <slug>] [--title <t>] [--source hook|cli|cron|manual] [--model <m>] [--session-id <id>] [--work-dir <dir>] [--id <uuid>]
+mc run end <id> <status> [--tokens-in <n>] [--tokens-out <n>] [--cache-read <n>] [--cache-write <n>] [--cost-micros <n>] [--agent <label>]
+mc run list [--active] [--agent <label>] [--limit <n>]   # lean rows; use 'run get <id>' for model/source/timing/cache
+mc run get <id>                              # one run + its event trail (the full row)
+mc run cancel <id>                           # request cancellation (sets cancel_requested; enforced by the PreToolUse kill-switch hook when installed)
+mc event add <summary...> --type <t> [--level debug|info|warn|error] [--project <slug>] [--task <id>] [--run <id>] [--agent <label>]
+mc event list [--project <slug>] [--run <id>] [--level <min>] [--limit <n>]
+
+# Spend — cost rollup over runs (sums runs.cost_micros, the authoritative per-run total)
+mc spend [--group-by project|agent|day|run] [--since <iso>] [--until <iso>] [--project <slug>] [--agent <label>] [--profile <slug>] [--limit <n>]
+```
+
+Run `mc enums --json` for the valid `category`, `status`, `accent`, `priority`, task `status`,
+`integration` type/status, plus `runStatus`, `runSource`, `eventType`, `eventLevel`, `runtime`, and
+`permissionMode` values.
+
+**Agent profiles & auto-routing.** A profile is a slug-addressed bundle of capabilities (skills, MCP
+servers, model, permission mode, tool policy, persona) plus match rules. `mc profile resolve` previews
+which profile auto-routing picks for a project/task: of the **enabled** profiles whose `matchRules` apply
+(project slug/category, task kind, label regex — all ANDed), the highest `--priority` wins; if none match,
+the single `--default` profile is the fallback. `runtime=claude-code` renders rich `claude -p` flags;
+`runtime=exec` renders `--exec-template` so a profile can drive a **non-Claude** model through any runner.
+Secrets are **never stored** — `--env` and `--mcp-config` values use `${ENV_VAR}` placeholders resolved
+from the host at spawn (a raw-secret-looking value triggers a soft warning). The daemon consumes this in a
+later slice; today profiles are definable, routable, and linkable to a run via `mc run start --profile`.
+
+**Attribution.** State writes (`task set-status`, etc.) and `run`/`event` commands attribute their
+audit-log entry to `$MC_AGENT` (default `mc`). Set `MC_AGENT=claude-code` (and `MC_RUN_ID`, written
+by the Session hooks) so an agent's actions are grouped under its run. `mc run start` prints the
+`runId` to capture into `MC_RUN_ID`. Token/cost on `run` commands are **absolute cumulative** totals
+(monotonic — a lower or out-of-order value never regresses them); cost is integer micro-dollars.
+
+**Self-dispatch (Phase 2).** `mc task next` peeks the next claimable task; `mc task claim <id>` atomically
+takes it for the current run. The claim is a single-statement conditional write, so concurrent agents
+never collide — exactly one wins and the rest get a `CONFLICT` (exit 1). Claiming is **orthogonal to
+status**: it doesn't move the task to `in_progress` (do that with `set-status` if you want), and a claim
+auto-expires after `CLAIM_TTL_SEC`. A crashed agent's claims free immediately when the reaper abandons its
+run, so its work returns to the queue. Loop: `mc task next` → `mc task claim <id>` → work → `set-status done`.
+The queue is **priority-ordered**: `getNextClaimableTask` walks `(sort_order, created_at)`, so `mc task move
+<id> --top` (or a drag to the top of the board's To Do column) makes a task the next one `mc task next`
+returns. `move` refuses a live-claimed task (`CONFLICT`) — a reorder never yanks work from a running agent.
+
+**Self-sourcing (Phase 3).** `mc task import-issues <slug>` fills the queue from a project's GitHub issues
+(`gh issue list` under the hood — needs the `gh` CLI authed + a GitHub `repoUrl` on the project). Each open
+issue becomes a custom task labeled `#<number> <title>` with the issue URL in `notes`. Idempotent **by issue
+number** (re-running imports only new issues, even if a title was edited); `--dry-run` previews without writing.
+This closes the source→dispatch→claim→complete loop: imported tasks are immediately claimable via `mc task next`.
+
+## Examples
+
+```bash
+# What needs Sentry?
+mc project list --json | jq '.data.items[] | .slug'
+
+# Create a project, add a task, mark it done, set an integration
+mc project add --name "Acme" --category client --status testing --tech "Next.js,Neon" --json
+mc task add acme "wire up billing" --json
+mc task set-status <id> done --json
+mc integration set acme sentry done --json
+
+# Inspect, then delete
+mc project get acme --json
+mc project rm acme --yes --json
+
+# Mission Control: open a run, log progress, close it (token/cost optional)
+RID=$(mc run start --agent claude-code --project acme --title "billing" --json | jq -r .data.id)
+mc event add "started stripe wiring" --type note --run "$RID" --project acme --json
+mc run end "$RID" completed --tokens-in 4200 --cost-micros 9100 --json
+mc event list --project acme --json        # newest-first activity (info+)
+mc run list --active --json                # what's running right now
+
+# Spend: where the money went
+mc spend --json                            # by project (default), spend-desc
+mc spend --group-by agent --json           # by agent label
+mc spend --group-by day --since 2026-05-01 --json   # daily burn this month
+```

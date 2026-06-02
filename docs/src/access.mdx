@@ -1,0 +1,32 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Access
+description: Two doors, two different keys — locked down deliberately.
+icon: lock
+---
+
+# Who's allowed in
+
+Two doors, two different keys — locked down deliberately.
+
+<CardGroup cols={2}>
+  <Card title="Google sign-in, one allowed email" icon="user-check">
+    **Front door · people.** The website only lets in **one specific Google account**
+    (`you@example.com`). This is enforced in several places at once — at the page, at every action,
+    and even when an account is first created — so no single slip opens the door. If the
+    allowed-email setting were ever blank, **nobody** gets in. It fails closed, the safe way.
+  </Card>
+  <Card title="A scoped database key" icon="key">
+    **Side door · agents.** The `mc` tool uses a database credential that can only touch
+    **projects, tasks, runs, and events** — never the login or account tables. So even if that
+    key leaked, it couldn't read anyone's sign-in details. It lives on the local machine and is
+    **never** put on the public server.
+  </Card>
+</CardGroup>
+
+<Info>
+**Three database keys, least power each.** The same database is reached by three keys with
+deliberately different powers: an **owner** key (used only locally to set up structure), an
+**app** key (the live website — reads and writes, but can't change the structure), and the
+scoped **agent** key above. Each actor gets the least power it needs, and no more.
+</Info>

@@ -1,0 +1,45 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: The pieces
+description: Everything orbits one central database — think of it as the bulletin board in the middle of the room.
+icon: layers
+---
+
+# The pieces, and how they connect
+
+Everything orbits one central database — think of it as the bulletin board in the middle of
+the room.
+
+The whole system is built around a single **database** (a highly organized digital filing
+cabinet). Five "actors" gather around it. Some read from it, some write to it, most do both.
+
+<Frame caption="Fig. 01 — System topology. Five actors, one database. Indigo paths are the two “drivers”; grey are background helpers.">
+  ![System topology](/figures/fig-01-topology.svg)
+</Frame>
+
+<CardGroup cols={2}>
+  <Card title="Neon Database" icon="database">
+    **The hub.** A cloud Postgres database — the single shared filing cabinet. Holds projects,
+    tasks, agent runs, and an activity log. Everything else just reads and writes here.
+  </Card>
+  <Card title="Web dashboard" icon="monitor">
+    **For humans.** The website you open in a browser, built with Next.js and hosted on Vercel.
+    It draws the project registers, the live activity feed, and the cost reports.
+  </Card>
+  <Card title="The mc CLI" icon="terminal">
+    **For agents.** A typed command tool AI agents use instead of a mouse — `mc task next`,
+    `mc run start`, `mc spend`. Each command reads or updates the same database.
+  </Card>
+  <Card title="Telemetry hooks" icon="activity">
+    **Background.** Small scripts that fire automatically whenever an AI does something, sending
+    a status update to the website's intake door so its progress appears live.
+  </Card>
+  <Card title="Auto-claim daemon" icon="bot">
+    **Background.** A tireless dispatcher that constantly checks for unclaimed tasks and launches
+    an AI worker for each — the autopilot that makes the system run itself.
+  </Card>
+  <Card title="The reaper" icon="trash-2">
+    **Background.** A janitor that runs every minute and marks any agent that went silent —
+    crashed, lost power — as "abandoned," so dead workers don't look alive forever.
+  </Card>
+</CardGroup>

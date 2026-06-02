@@ -1,0 +1,27 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+title: Telemetry
+description: You never have to ask the AI what it's doing — it tells you automatically.
+icon: activity
+---
+
+# How agents "phone home"
+
+You never have to ask the AI what it's doing — it tells you automatically.
+
+Every AI work-session has small scripts attached, called **hooks**. Think of them as a fitness
+tracker strapped to the agent: the agent just does its job, and the tracker quietly sends
+updates to the dashboard at the right moments. There are three moments.
+
+<Frame caption="Fig. 04 — Telemetry path. Hooks post to one guarded intake door, which records to the database; your Mission tab shows it seconds later.">
+  ![Telemetry flow](/figures/fig-04-telemetry.svg)
+</Frame>
+
+| When | What it sends | So you can see… |
+|---|---|---|
+| **At start** | "A run has started," plus which agent and folder. | A new live agent appear on the Mission tab. |
+| **After every tool** | A heartbeat, and a low-level note of which tool it used. | That the agent is still alive and progressing. |
+| **At stop** | Final totals — tokens in and out, cache usage, dollar cost. | The run close out, with its real cost on the Spend tab. |
+
+The intake door (`/api/ingest`) requires a secret token, so random outsiders can't post fake
+activity. It's the only way telemetry gets in.
