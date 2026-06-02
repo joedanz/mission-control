@@ -129,6 +129,7 @@ export const projects = pgTable(
     repoPath: text('repo_path'),
     repoUrl: text('repo_url'),
     liveUrl: text('live_url'),
+    sentryProjectSlug: text('sentry_project_slug'), // nullable; null = project has no Errors tab
     priority: text('priority'),
     description: text('description'),
     notes: text('notes'),
