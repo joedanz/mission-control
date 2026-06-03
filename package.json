@@ -31,6 +31,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@neondatabase/serverless": "^1.1.0",
+    "@xyflow/react": "^12.11.0",
     "better-auth": "^1.6.11",
     "commander": "^12.1.0",
     "croner": "^10.0.1",

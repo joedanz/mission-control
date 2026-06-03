@@ -1893,3 +1893,84 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .revenue-status { color: var(--ink-mute); font-size: var(--fs-11); }
 .revenue-meta { color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; }
 .revenue-error { color: var(--bad); }
+
+/* ── Workflows tab — read-only @xyflow/react canvas (slice 2) ─────────────────────────── */
+.wf-tab { display: grid; grid-template-columns: 220px 1fr; gap: var(--space-md); align-items: start; }
+.wf-tab.skeleton { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+/* Left rail — the project's workflows. */
+.wf-rail { display: flex; flex-direction: column; gap: var(--space-xs); }
+.wf-rail__item {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--ink); font: inherit;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.wf-rail__item:hover { background: var(--panel-2); }
+.wf-rail__item.active { border-color: var(--accent); background: var(--panel-2); }
+.wf-rail__name { font-size: var(--fs-13); font-weight: 600; }
+.wf-rail__meta { display: flex; align-items: center; gap: var(--space-xs); color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); }
+
+/* Main column — header + canvas. */
+.wf-main { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
+.wf-main__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.wf-main__title { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+.wf-main__title h3 { margin: 0; font-size: var(--fs-16); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A run-status chip (rail + header). */
+.wf-runbadge {
+  display: inline-flex; align-items: center; padding: 1px 6px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--fs-11); text-transform: lowercase;
+}
+.wf-runbadge--idle { color: var(--ink-mute); }
+.wf-runbadge--info { color: var(--info-ink); background: var(--info-soft); border-color: color-mix(in oklch, var(--info) 26%, transparent); }
+.wf-runbadge--ok   { color: var(--ok-ink);   background: var(--ok-soft);   border-color: color-mix(in oklch, var(--ok) 26%, transparent); }
+.wf-runbadge--bad  { color: var(--bad-ink);  background: var(--bad-soft);  border-color: color-mix(in oklch, var(--bad) 26%, transparent); }
+.wf-runbadge--warn { color: var(--warn-ink); background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 26%, transparent); }
+
+/* The canvas surface — React Flow needs an explicitly-sized container. */
+.wf-canvas {
+  height: 480px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel);
+  --xy-background-pattern-color: var(--line);
+  --xy-edge-stroke: var(--ink-mute);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--panel-2);
+  --xy-controls-button-color: var(--ink-dim);
+  --xy-controls-button-border-color: var(--line);
+  --xy-attribution-background-color: color-mix(in oklch, var(--panel) 75%, transparent);
+}
+.wf-canvas--placeholder { display: flex; align-items: center; justify-content: center; color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-13); }
+
+/* Custom nodes — match the ops-board look (mono, sharp, tone-glow on live status). */
+.wf-node {
+  min-width: 132px; max-width: 220px; padding: var(--space-sm); border: 1px solid var(--line);
+  border-left-width: 3px; border-radius: var(--radius-sm); background: var(--panel);
+  font-family: var(--font-mono); box-shadow: 0 1px 2px color-mix(in oklch, var(--ink) 8%, transparent);
+}
+.wf-node--trigger { border-left-color: var(--info); }
+.wf-node--agent   { border-left-color: var(--accent); }
+.wf-node--generic { border-left-color: var(--ink-mute); }
+.wf-node__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xs); }
+.wf-node__kind { font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); }
+.wf-node__body { margin-top: 4px; font-size: var(--fs-12); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-node__body--mono { color: var(--ink-dim); }
+.wf-node__meta { margin-top: 2px; font-size: var(--fs-11); color: var(--ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Live step status — border tint + glow; running pulses. */
+.wf-node--running   { border-color: var(--info); box-shadow: 0 0 0 3px var(--info-soft); animation: wf-pulse 1.4s ease-in-out infinite; }
+.wf-node--completed { border-color: var(--ok); }
+.wf-node--failed    { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.wf-node--skipped   { opacity: 0.6; }
+@keyframes wf-pulse { 0%, 100% { box-shadow: 0 0 0 3px var(--info-soft); } 50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--info) 14%, transparent); } }
+
+/* Step badge in the node head. */
+.wf-badge { padding: 0 5px; border-radius: var(--radius-sm); font-size: var(--fs-11); text-transform: lowercase; }
+.wf-badge--pending   { color: var(--ink-mute); background: color-mix(in oklch, var(--ink-mute) 14%, transparent); }
+.wf-badge--running   { color: var(--info-ink); background: var(--info-soft); }
+.wf-badge--completed { color: var(--ok-ink);   background: var(--ok-soft); }
+.wf-badge--failed    { color: var(--bad-ink);  background: var(--bad-soft); }
+.wf-badge--skipped   { color: var(--ink-mute); background: color-mix(in oklch, var(--ink-mute) 14%, transparent); }
+
+/* React Flow handles — small, themed to the line color. */
+.wf-canvas .react-flow__handle { width: 7px; height: 7px; background: var(--ink-mute); border: 1px solid var(--panel); }

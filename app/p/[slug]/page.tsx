@@ -20,6 +20,7 @@ import { ErrorsTab } from '@/components/ErrorsTab';
 import { EmailTab } from '@/components/EmailTab';
 import { RevenueTab } from '@/components/RevenueTab';
 import { IntegrationsTab } from '@/components/IntegrationsTab';
+import { WorkflowsTab } from '@/components/workflows/WorkflowsTab';
 
 export const dynamic = 'force-dynamic';
 
@@ -178,6 +179,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               { key: 'overview', label: 'Overview', content: overview },
               { key: 'tasks', label: 'Tasks', content: tasksPanel },
               { key: 'board', label: 'Board', content: boardPanel },
+              { key: 'workflows', label: 'Workflows', content: <WorkflowsTab slug={project.slug} /> },
               { key: 'integrations', label: 'Integrations', content: integrationsPanel },
               { key: 'activity', label: 'Activity', content: activityPanel },
               ...(githubRepo ? [
