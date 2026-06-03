@@ -354,6 +354,10 @@ export const composioToolkits = pgTable('composio_toolkits', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// The closed set of values the connection status column holds. mapStatus() is the single writer of
+// derived values; the connect flow also writes 'initializing'/'disconnected' directly.
+export type ConnectionStatus = 'initializing' | 'active' | 'error' | 'expired' | 'disconnected';
+
 // One connection per (project, toolkit). Holds only Composio resource IDs — never a secret.
 export const composioConnections = pgTable(
   'composio_connections',
@@ -370,7 +374,7 @@ export const composioConnections = pgTable(
     toolkitSlug: text('toolkit_slug').notNull(),
     userId: text('user_id').notNull(), // mc-proj-<projectId> — the Composio user_id
     connectedAccountId: text('connected_account_id'), // Composio ca_… (set once link initiated)
-    status: text('status').notNull().default('initializing'), // initializing|active|error|expired|disconnected
+    status: text('status').$type<ConnectionStatus>().notNull().default('initializing'),
     linkUrl: text('link_url'), // transient hosted link for an in-flight connect
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

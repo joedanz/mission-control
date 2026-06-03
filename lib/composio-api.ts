@@ -1,5 +1,7 @@
 // ABOUTME: Composio v3 HTTP client (auth-config / MCP-server / connected-account) + pure helpers
-// ABOUTME: (user_id derivation, status mapping, per-user MCP URL). No DB. Vercel-safe fetch, no SDK.
+// ABOUTME: (user_id derivation, status mapping). No DB (type-only schema import). Vercel-safe fetch, no SDK.
+
+import type { ConnectionStatus } from './db/schema';
 
 const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3';
 
@@ -15,13 +17,8 @@ export function deriveUserId(projectId: string): string {
   return `mc-proj-${projectId}`;
 }
 
-/** Per-user MCP URL = the toolkit's server base + ?user_id=. Placeholders never go in the URL. */
-export function deriveMcpUrl(mcpUrlBase: string, userId: string): string {
-  return `${mcpUrlBase}?user_id=${encodeURIComponent(userId)}`;
-}
-
 /** Map Composio's connected-account status to our lowercase enum. */
-export function mapStatus(raw: string | undefined | null): string {
+export function mapStatus(raw: string | undefined | null): ConnectionStatus {
   switch ((raw ?? '').toUpperCase()) {
     case 'ACTIVE':
       return 'active';
