@@ -5,7 +5,8 @@ import { getCatalogEntry } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
 import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, ComposioApiError } from './composio-api';
-import type { ComposioConnection } from './db/schema';
+import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
+import type { ComposioConnection, McpServerConfig } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
 
 /** Ensure the shared auth-config + MCP server exist for a toolkit; cache + return their ids. Idempotent
@@ -72,4 +73,22 @@ export async function disconnect(projectSlug: string, toolkitSlug: string): Prom
   }
   const updated = await setConnectionStatus(conn.id, 'disconnected');
   return updated ?? conn;
+}
+
+/** Resolve a project's ACTIVE Composio connections into an mcpServers map for a spawned agent. Lists
+ *  the project's connections, keeps only status==='active', joins each toolkit's cached mcpUrl, and
+ *  builds the map. An active connection whose toolkit cache row has no mcpUrl is skipped (defensive —
+ *  ensureToolkit populates it before connect). */
+export async function resolveProjectMcpServers(projectSlug: string): Promise<Record<string, McpServerConfig>> {
+  const projectId = await getProjectIdBySlug(projectSlug);
+  if (!projectId) throw new NotFoundError('project', projectSlug);
+  const active = (await listConnectionsByProject(projectId)).filter((c) => c.status === 'active');
+  const joined = await Promise.all(
+    active.map(async (c) => {
+      const toolkit = await getToolkitRow(c.toolkitSlug);
+      return toolkit?.mcpUrl ? { toolkitSlug: c.toolkitSlug, userId: c.userId, mcpUrl: toolkit.mcpUrl } : null;
+    }),
+  );
+  const rows: ConnectionMcpRow[] = joined.filter((r): r is ConnectionMcpRow => r !== null);
+  return buildConnectionMcpServers(rows);
 }

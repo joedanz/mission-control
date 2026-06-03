@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import type { AgentProfile } from '../lib/db/schema';
 import { chooseModel, type ModelChoice } from './render-profile';
 import { CHECK_IN_MAX_TASKS } from '../lib/constants';
-import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, type Spawned } from './runner';
+import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
 import { isDue, buildCheckInPrompt } from './schedule';
 
 const AGENT_LABEL = process.env.MC_SCHEDULER_AGENT || 'mc-scheduler';
@@ -111,6 +111,8 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
   const prompt = buildCheckInPrompt(profile, project, claimedTask, a.maxTasks);
 
   if (choice.downgraded) await recordDowngrade(choice, profile, spentToday, runId, project.slug, log);
+  // Auto-feed the project's ACTIVE Composio connections as MCP servers (runCheckIn always has a profile).
+  const extraMcpServers = await fetchComposioMcpServers(project.slug, runId, log);
 
   const how = process.env.MC_DAEMON_EXEC ? 'executor (MC_DAEMON_EXEC)' : `profile ${profile.slug} (${profile.runtime}${choice.model ? `, model ${choice.model}` : ''})`;
   const work = claimedTask ? `task "${claimedTask.label}"` : 'mission only';
@@ -118,7 +120,7 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
 
   let spawned: Spawned;
   try {
-    spawned = spawnExecutor({ prompt, runId, repoPath, profile, effectiveModel: choice.model, basePermissionMode: a.permissionMode, extraAllowedTools: CHECK_IN_TOOLS });
+    spawned = spawnExecutor({ prompt, runId, repoPath, profile, effectiveModel: choice.model, basePermissionMode: a.permissionMode, extraAllowedTools: CHECK_IN_TOOLS, extraMcpServers });
   } catch (e) {
     const msg = (e as Error).message;
     log(`spawn render failed for "${profile.slug}": ${msg} — failing run`);

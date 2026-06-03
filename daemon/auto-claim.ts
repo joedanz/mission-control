@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProfile } from '../lib/db/schema';
 import { chooseModel, type ModelChoice } from './render-profile';
-import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, type Spawned } from './runner';
+import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
 
 const AGENT_LABEL = process.env.MC_DAEMON_AGENT || 'auto-claim-daemon';
 
@@ -115,6 +115,8 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
     return 'done';
   }
   if (choice.downgraded) await recordDowngrade(choice, profile!, spentToday, runId, a.project, log);
+  // Auto-feed the project's ACTIVE Composio connections as MCP servers (profileless spawns skip it).
+  const extraMcpServers = profile ? await fetchComposioMcpServers(a.project, runId, log) : undefined;
   const how = process.env.MC_DAEMON_EXEC
     ? 'executor (MC_DAEMON_EXEC)'
     : profile
@@ -132,6 +134,7 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
       effectiveModel: choice.model,
       basePermissionMode: a.permissionMode,
       extraEnv: { MC_TASK_LABEL: task.label, MC_TASK_NOTES: task.notes ?? '' },
+      extraMcpServers,
     });
   } catch (e) {
     // Render failed (e.g. a profile secret's ${ENV} is unset) — fail the run cleanly, don't spawn broken.

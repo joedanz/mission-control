@@ -8,8 +8,8 @@ import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { AgentProfile } from '../lib/db/schema';
-import { planSpawn, resolveMcpConfigJson, type ModelChoice } from './render-profile';
+import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
+import { planSpawn, resolveMcpConfigJson, mergeMcpServers, type ModelChoice } from './render-profile';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MC_BIN = process.env.MC_BIN || `node ${join(ROOT, 'bin', 'mc.mjs')}`;
@@ -72,6 +72,22 @@ export async function recordDowngrade(choice: ModelChoice, profile: AgentProfile
   await mc(['event', 'add', `Model downgraded to ${choice.model} — profile "${profile.slug}" daily budget reached (${spentTodayMicros} ≥ ${profile.dailyBudgetMicros} µ$)`, '--type', 'note', '--level', 'info', '--run', runId, '--project', projectSlug]);
 }
 
+/** A project's ACTIVE Composio connections as MCP servers, fetched via the CLI so DB scope stays at the
+ *  mc_agent boundary; the daemon merges them UNDER a profile's own servers at spawn. Non-fatal: a CLI
+ *  failure logs and returns undefined so the run still spawns (just without auto-feed). Returns undefined
+ *  when there is nothing to add. Shared by both daemons so the command name + log wording live in one place. */
+export async function fetchComposioMcpServers(projectSlug: string, runId: string, log: Log): Promise<Record<string, McpServerConfig> | undefined> {
+  const cfg = await mc(['composio', 'mcp-config', projectSlug]);
+  if (!cfg.ok) {
+    log(`composio mcp-config for ${projectSlug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
+    return undefined;
+  }
+  const servers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
+  const names = Object.keys(servers ?? {}).map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k));
+  if (names.length) log(`fed ${names.length} composio server(s) [${names.join(', ')}] into run ${runId.slice(0, 8)}`);
+  return servers;
+}
+
 export type Spawned = {
   child: ReturnType<typeof spawn>;
   cleanup: () => void;
@@ -128,6 +144,9 @@ export type SpawnExecutorOpts = {
   /** Tools granted on top of the profile's allowedTools (claude-code only) — e.g. the scheduler's Bash(mc:*)
    *  so a check-in can self-serve via the mc CLI. See planSpawn. */
   extraAllowedTools?: string[];
+  /** Project-derived Composio MCP servers (from `mc composio mcp-config`), merged UNDER the profile's
+   *  own mcpServers (the profile wins a key collision). Ignored when there is no profile. */
+  extraMcpServers?: Record<string, McpServerConfig>;
 };
 
 /** Build + spawn the executor as its OWN process group (detached) so we can SIGTERM the whole tree on cancel.
@@ -153,7 +172,7 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   // argv (which `ps` would expose). resolveMcpConfigJson may throw MissingEnvError before any file exists.
   let mcpConfigPath: string | null = null;
   let cleanup = noCleanup;
-  const mcpJson = profile ? resolveMcpConfigJson(profile.mcpServers, process.env) : null;
+  const mcpJson = profile ? resolveMcpConfigJson(mergeMcpServers(profile.mcpServers, opts.extraMcpServers), process.env) : null;
   if (mcpJson) {
     const path = join(tmpdir(), `mc-mcp-${runId}.json`);
     writeFileSync(path, mcpJson, { mode: 0o600 });

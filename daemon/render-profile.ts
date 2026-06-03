@@ -64,6 +64,17 @@ export function resolveMcpConfigJson(
   return JSON.stringify({ mcpServers: resolved });
 }
 
+/** Merge auto-fed MCP servers UNDER a profile's own. Spreading `extra` first then `base` makes the
+ *  profile (base) win on a key collision. Returns null only when the merge is empty, so the caller can
+ *  treat null as "no --mcp-config" exactly like a profile with no servers. */
+export function mergeMcpServers(
+  base: Record<string, McpServerConfig> | null | undefined,
+  extra: Record<string, McpServerConfig> | null | undefined,
+): Record<string, McpServerConfig> | null {
+  const merged = { ...(extra ?? {}), ...(base ?? {}) };
+  return Object.keys(merged).length ? merged : null;
+}
+
 // ── Spawn plan ────────────────────────────────────────────────────────────────────
 
 export type SpawnPlan = {
