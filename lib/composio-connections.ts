@@ -5,7 +5,7 @@ import { getCatalogEntry } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
 import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, ComposioApiError } from './composio-api';
-import { buildConnectionMcpServers } from './composio-mcp';
+import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
 import type { ComposioConnection, McpServerConfig } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
 
@@ -83,10 +83,12 @@ export async function resolveProjectMcpServers(projectSlug: string): Promise<Rec
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const active = (await listConnectionsByProject(projectId)).filter((c) => c.status === 'active');
-  const rows: { toolkitSlug: string; userId: string; mcpUrl: string }[] = [];
-  for (const c of active) {
-    const toolkit = await getToolkitRow(c.toolkitSlug);
-    if (toolkit?.mcpUrl) rows.push({ toolkitSlug: c.toolkitSlug, userId: c.userId, mcpUrl: toolkit.mcpUrl });
-  }
+  const joined = await Promise.all(
+    active.map(async (c) => {
+      const toolkit = await getToolkitRow(c.toolkitSlug);
+      return toolkit?.mcpUrl ? { toolkitSlug: c.toolkitSlug, userId: c.userId, mcpUrl: toolkit.mcpUrl } : null;
+    }),
+  );
+  const rows: ConnectionMcpRow[] = joined.filter((r): r is ConnectionMcpRow => r !== null);
   return buildConnectionMcpServers(rows);
 }
