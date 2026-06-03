@@ -112,12 +112,13 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
 
   if (choice.downgraded) await recordDowngrade(choice, profile, spentToday, runId, project.slug, log);
   // Auto-feed the project's ACTIVE Composio connections (same as auto-claim). Non-fatal on failure.
+  // (no profile guard: runCheckIn is only ever called with a resolved profile)
   let extraMcpServers: Record<string, McpServerConfig> | undefined;
   const cfg = await mc(['composio', 'mcp-config', project.slug]);
   if (cfg.ok) {
     extraMcpServers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
     const keys = Object.keys(extraMcpServers ?? {});
-    if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => k.replace('composio-', '')).join(', ')}] into run ${runId.slice(0, 8)}`);
+    if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k)).join(', ')}] into run ${runId.slice(0, 8)}`);
   } else {
     log(`composio mcp-config for ${project.slug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
   }

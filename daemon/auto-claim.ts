@@ -123,7 +123,7 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
     if (cfg.ok) {
       extraMcpServers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
       const keys = Object.keys(extraMcpServers ?? {});
-      if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => k.replace('composio-', '')).join(', ')}] into run ${runId.slice(0, 8)}`);
+      if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k)).join(', ')}] into run ${runId.slice(0, 8)}`);
     } else {
       log(`composio mcp-config for ${a.project} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
     }
