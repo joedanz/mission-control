@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-label="Auto-feed: active connections become an agent's tools at spawn time">
+  <style>
+    .t-disp{font-family:'Archivo Expanded','Archivo',system-ui,sans-serif;font-weight:600}
+    .t-mono{font-family:'Martian Mono',ui-monospace,monospace}
+    .t-serif{font-family:Georgia,'Times New Roman',serif}
+    @media (prefers-color-scheme: dark){
+      [fill="#fbf9f4"]{fill:#17171c}
+      [fill="#ecebf8"]{fill:#222041}
+      [fill="#e6f1ec"]{fill:#14302a}
+      [fill="#f4ecdd"]{fill:#2c2517}
+      [fill="#f6e7e1"]{fill:#36201a}
+      [fill="#2a2620"]{fill:#e9e7e0}
+      [fill="#6b6358"]{fill:#b6b0a8}
+      [fill="#9a9082"]{fill:#8b867e}
+      [fill="#4a45c2"]{fill:#a7a2f0}
+      [fill="#2c8a6f"]{fill:#5fc9a8}
+      [fill="#946a2a"]{fill:#cf9a4a}
+      [fill="#b1543f"]{fill:#e08a72}
+      [stroke="#2a2620"]{stroke:#6a665e}
+      [stroke="#6b6358"]{stroke:#8a847b}
+      [stroke="#4a45c2"]{stroke:#7d78d8}
+      [stroke="#2c8a6f"]{stroke:#4aa98a}
+      [stroke="#946a2a"]{stroke:#c79a52}
+      [stroke="#b1543f"]{stroke:#c97862}
+    }
+  </style>
+  <defs>
+    <marker id="arI" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#4a45c2"/></marker>
+    <marker id="arA" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#946a2a"/></marker>
+    <marker id="arG" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#2c8a6f"/></marker>
+  </defs>
+
+  <!-- ── Title ── -->
+  <text x="460" y="38" text-anchor="middle" class="t-disp" font-size="16" fill="#2a2620">Auto-feed at spawn time</text>
+
+  <!-- ── Box A: Active connections (database) ── -->
+  <rect x="36" y="70" width="200" height="76" rx="4" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.5"/>
+  <text x="136" y="97" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Active connections</text>
+  <text x="136" y="115" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">stored in database</text>
+  <text x="136" y="133" text-anchor="middle" class="t-mono" font-size="9" fill="#4a45c2" letter-spacing="1">DATABASE READ</text>
+
+  <!-- ── Box B: mc composio mcp-config ── -->
+  <rect x="36" y="186" width="200" height="76" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="136" y="213" text-anchor="middle" class="t-disp" font-size="12" fill="#2a2620">mc composio</text>
+  <text x="136" y="230" text-anchor="middle" class="t-disp" font-size="12" fill="#2a2620">mcp-config &lt;slug&gt;</text>
+  <text x="136" y="251" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">CLI COMMAND</text>
+
+  <!-- arrows A and B → MCP JSON output -->
+  <path d="M236,108 C282,108 300,152 312,162" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+  <path d="M236,224 C282,224 300,210 312,196" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+
+  <!-- ── MCP JSON output box ── -->
+  <rect x="314" y="152" width="216" height="72" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="422" y="174" text-anchor="middle" class="t-mono" font-size="11" fill="#4a45c2">{ composio-linear,</text>
+  <text x="422" y="192" text-anchor="middle" class="t-mono" font-size="11" fill="#4a45c2">  composio-slack, … }</text>
+  <text x="422" y="212" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">MCP CONFIG JSON</text>
+
+  <!-- arrow → merge -->
+  <path d="M530,188 L580,188" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+
+  <!-- ── Merge node ── -->
+  <rect x="582" y="148" width="208" height="80" rx="4" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.5"/>
+  <text x="686" y="174" text-anchor="middle" class="t-disp" font-size="12" fill="#2a2620">merge with profile's</text>
+  <text x="686" y="191" text-anchor="middle" class="t-disp" font-size="12" fill="#2a2620">MCP servers</text>
+  <text x="686" y="211" text-anchor="middle" class="t-serif" font-size="10.5" font-style="italic" fill="#6b6358">(profile wins on name collision)</text>
+
+  <!-- arrow merge → API key resolve -->
+  <path d="M686,228 L686,270" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+
+  <!-- ── API key resolution box ── -->
+  <rect x="582" y="272" width="208" height="76" rx="4" fill="#f4ecdd" stroke="#946a2a" stroke-width="1.5"/>
+  <text x="686" y="296" text-anchor="middle" class="t-disp" font-size="12" fill="#2a2620">resolve env vars</text>
+  <text x="686" y="313" text-anchor="middle" class="t-mono" font-size="10" fill="#946a2a">${COMPOSIO_API_KEY}</text>
+  <text x="686" y="334" text-anchor="middle" class="t-serif" font-size="10" font-style="italic" fill="#6b6358">from host env — never stored in DB</text>
+
+  <!-- ── amber side note label ── -->
+  <text x="548" y="310" text-anchor="middle" class="t-mono" font-size="9" fill="#946a2a" letter-spacing="1">SECRET</text>
+
+  <!-- arrow → claude invocation -->
+  <path d="M686,348 L686,388" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+
+  <!-- ── claude spawn box ── -->
+  <rect x="582" y="390" width="208" height="62" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="686" y="413" text-anchor="middle" class="t-mono" font-size="10" fill="#2a2620">claude -p</text>
+  <text x="686" y="430" text-anchor="middle" class="t-mono" font-size="10" fill="#2a2620">--mcp-config  --strict-mcp-config</text>
+  <text x="686" y="446" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">AGENT SPAWN</text>
+
+  <!-- arrow → agent has tools (green) -->
+  <path d="M582,421 L530,421" fill="none" stroke="#2c8a6f" stroke-width="1.6" marker-end="url(#arG)"/>
+
+  <!-- ── Final: Agent has tools ── -->
+  <rect x="314" y="391" width="214" height="60" rx="4" fill="#e6f1ec" stroke="#2c8a6f" stroke-width="1.8"/>
+  <text x="421" y="416" text-anchor="middle" class="t-disp" font-size="13" fill="#2c8a6f">Agent now has</text>
+  <text x="421" y="435" text-anchor="middle" class="t-disp" font-size="13" fill="#2c8a6f">those tools</text>
+  <text x="421" y="449" text-anchor="middle" class="t-mono" font-size="9" fill="#2c8a6f" letter-spacing="1">INTEGRATIONS LIVE</text>
+</svg>

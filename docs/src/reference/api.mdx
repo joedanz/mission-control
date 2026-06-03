@@ -19,6 +19,10 @@ session-guarded views.
 | `GET /api/runs/[id]` | session-auth | One run with its event trail, for the run drill-in page's poll. |
 | `GET /api/cron/reap` | Bearer `CRON_SECRET` | Runs one reaper tick over HTTP — optional; the default is local `npm run reap`. |
 | `/api/auth/[...all]` | — | BetterAuth — Google OAuth callback and session management. |
+| `GET /api/projects/[slug]/composio` | session-auth | Returns `{ toolkits: ToolkitView[] }` — the project's Composio connections and their statuses. `POST` with `{ action: 'connect'\|'status'\|'disconnect', toolkit }` drives the connection lifecycle. |
+| `GET /api/projects/[slug]/errors` | session-auth | Live Sentry unresolved issues for the project. Requires `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `sentry_project_slug` on the project row. |
+| `GET /api/projects/[slug]/email` | session-auth | Live DNS check (MX / SPF / DMARC) plus provider detection for the project's email address. |
+| `GET /api/projects/[slug]/revenue` | session-auth | Live Stripe active subscriptions and computed MRR for the project. Requires `STRIPE_SECRET_KEY` and `stripe_site` on the project row. |
 
 A telemetry post is a small typed JSON body with a `type` discriminator and a bearer header:
 
@@ -47,3 +51,8 @@ matching the hook's `workDir` against each project's `repo_path`.
 | `ALLOWED_EMAIL` | The one address allowed to sign in. **Fail-closed** — empty rejects everyone. |
 | `MC_INGEST_URL` / `MC_AGENT` | Where the hooks post, and the agent label they post under. |
 | `MC_CLAUDE_BIN` / `MC_BIN` | Daemon-side: absolute paths that pin the `claude` executor and the `mc` CLI, so `npm run` can't shadow them with a stale `node_modules/.bin` copy. Set in the launchd plists. |
+| `SENTRY_AUTH_TOKEN` | Sentry personal/integration token with `project:read` scope. Required for the Errors tab. |
+| `SENTRY_ORG` | Sentry organization slug. Required alongside `SENTRY_AUTH_TOKEN`. |
+| `SENTRY_BASE_URL` | Sentry API base URL. Optional — defaults to `https://sentry.io`. Override for self-hosted instances. |
+| `STRIPE_SECRET_KEY` | Stripe API key. Read-only key recommended. Required for the Revenue tab. |
+| `COMPOSIO_API_KEY` | Composio developer key. Resolved from the host environment at daemon spawn — never stored in the database. Required for all `mc composio` commands and the `/api/projects/[slug]/composio` route. |

@@ -73,4 +73,7 @@
   <path d="M390,455 C320,455 258,442 212,429" fill="none" stroke="#946a2a" stroke-width="1.8" marker-end="url(#lp)"/>
   <path d="M160,352 L160,180" fill="none" stroke="#2c8a6f" stroke-width="1.8" marker-end="url(#lpT)"/>
   <text x="118" y="272" text-anchor="middle" class="t-mono" font-size="10" fill="#2c8a6f">LOOP &#8635;</text>
+  <!-- Composio feed annotation near SPAWN node (cx740 cy118 r60); placed to the right of the downward arrow at x740 -->
+  <text x="810" y="196" text-anchor="middle" class="t-mono" font-size="9.5" fill="#4a45c2">+ FEED ACTIVE</text>
+  <text x="810" y="209" text-anchor="middle" class="t-mono" font-size="9.5" fill="#4a45c2">INTEGRATIONS</text>
 </svg>

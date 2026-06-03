@@ -49,8 +49,8 @@ every log and warning goes to stderr. The envelope is always one of three shapes
 |---|---|
 | `project list [--category --status --archived --search --limit]` | The project register, filterable and searchable. |
 | `project get <slug>` | One project with its tasks and integrations. |
-| `project add --name --category [--status --accent --tech --repo-path --repo-url --live-url --priority …]` | Create a project; returns the new row (and id). |
-| `project update <slug> [any add flag]` | Patch — only the flags you pass change. |
+| `project add --name --category [--status --accent --tech --repo-path --repo-url --live-url --priority --sentry-project --email-provider --email-address --stripe-site …]` | Create a project; returns the new row (and id). |
+| `project update <slug> [any add flag]` | Patch — only the flags you pass change. `--sentry-project`, `--email-provider`, `--email-address`, `--stripe-site` are new nullable fields wiring the Errors, Email, and Revenue tabs. |
 | `project set-repo <slug> <path> [url]` | Point a project at a local repo (the daemon needs this). |
 | `project rm <slug> --yes` | Delete a project; cascades its tasks. Refuses without `--yes`. |
 
@@ -102,6 +102,29 @@ the concepts; this is the surface. Profiles are global (not per-project).
 and writes rendered MCP config to a `0600` temp file — so a key never reaches the database or
 `ps`. A missing variable fails the run instead of launching half-credentialed. `mc profile add`
 warns on stderr if a value *looks* like a raw secret.
+</Note>
+
+## Composio integrations
+
+Manage per-project connections to third-party toolkits via Composio. All subcommands emit the
+standard `{ok,command,data|error}` JSON envelope. `catalog` has no DB requirement; all others
+need credentials.
+
+| Command | What it does |
+|---|---|
+| `composio catalog` | List all supported toolkits — slug, name, and tool count. No DB credentials needed. |
+| `composio connect <slug> <toolkit>` | Start a connection; returns the OAuth authorize URL and prints the next step `mc composio status <slug> <toolkit>`. |
+| `composio status <slug> <toolkit>` | Poll Composio and persist the connection's current status. |
+| `composio list <slug>` | List a project's connections and their statuses. |
+| `composio disconnect <slug> <toolkit>` | Revoke the connection at Composio and mark it disconnected locally. |
+| `composio mcp-config <slug>` | Resolve a project's active connections into an `mcpServers` JSON map — what the daemons use at spawn time. |
+| `composio refresh <slug>` | Re-poll all of a project's connections; emit a `composio.connection_changed` event per status transition. |
+
+<Note>
+**Tokens expire.** Composio access tokens can expire. Run `mc composio refresh <slug>` periodically
+(or on a schedule) to keep a project's connections live — each call re-polls every connection and
+emits a `composio.connection_changed` event for any that changed. See [Integrations](/integrations)
+for the full connection lifecycle.
 </Note>
 
 ## Integrations & self-description

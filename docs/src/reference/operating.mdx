@@ -93,6 +93,17 @@ SIGINT/SIGTERM, and runs profiles independently so one slow check-in never block
 `MC_BIN` likewise to pin the `mc` CLI.
 </Note>
 
+## Composio connection refresh
+
+Composio access tokens expire. When a project has active Composio connections, run
+`mc composio refresh <slug>` periodically to re-poll all connections and keep them live. Each
+call emits a `composio.connection_changed` event for every connection whose status transitions,
+so stale or errored connections surface in the activity log.
+
+A scheduler check-in profile is a natural home for this: include `mc composio refresh <slug>` in
+the project's `check_in_prompt`, or call it from a cron task in the same project. See
+[Integrations](/integrations) for the connection lifecycle.
+
 ## The reaper & the timing constants
 
 A `running` run with no heartbeat for **120 seconds** (`RUN_STALE_THRESHOLD_SEC`) is flipped to

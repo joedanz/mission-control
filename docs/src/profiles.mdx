@@ -36,6 +36,37 @@ The right one shows up for the right job, automatically.
 | **match rules** · **priority** · **default** | When this profile applies, how ties break, and the global fallback. |
 | **scheduled check-in** | An optional cadence (interval or cron) that wakes this profile on its own to work a bound project's queue (see [below](#scheduled-check-ins)). |
 
+## Composio auto-feed
+
+When the daemon spawns an agent it also fetches the project's active [Composio](/integrations)
+connections and merges them into the agent's MCP server set automatically — no extra profile
+configuration required.
+
+How it works:
+
+- Each active connection becomes an MCP server keyed `composio-<toolkit>` (e.g.
+  `composio-linear`, `composio-slack`).
+- These servers are merged **under** the profile's own `mcpServers`. If the profile already
+  declares a key that matches, the **profile wins** — you can always override an auto-fed server
+  with a hand-crafted one.
+- The API key is carried as an `x-api-key` header using the `${COMPOSIO_API_KEY}` placeholder,
+  resolved from the daemon's host environment at spawn. **It is never stored in the database.**
+- If the project has no active connections, or the lookup fails, the run still spawns — just
+  without the auto-fed servers (non-fatal).
+- When no profile matches the task (the null-profile path), the daemon still feeds the active
+  connections and passes `--strict-mcp-config` so the profileless agent sees exactly those
+  servers and nothing else.
+
+<Note>
+**Secrets are resolved at spawn, never stored.** The `${COMPOSIO_API_KEY}` placeholder (and any
+other `${ENV}` placeholders in your profile's MCP config) is resolved from the daemon's
+environment at the moment the agent is launched. The resolved value is written to a `0600` temp
+file and is never visible in the database, in `ps` output, or on disk in the clear.
+</Note>
+
+See [Integrations](/integrations) for how to connect a project to Composio and manage its active
+connections.
+
 ## How the right profile gets picked
 
 Routing is rule-based and runs every time the daemon claims a task.
