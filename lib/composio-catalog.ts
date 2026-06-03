@@ -1,0 +1,34 @@
+// ABOUTME: Static catalog of Composio long-tail toolkits MC supports connecting, with a curated
+// ABOUTME: allow-list of tools per toolkit. Editorial data (not runtime state) — lives in code.
+
+export type CatalogEntry = { name: string; allowedTools: string[] };
+
+export const COMPOSIO_CATALOG: Record<string, CatalogEntry> = {
+  linear: {
+    name: 'Linear',
+    allowedTools: [
+      'LINEAR_LIST_LINEAR_TEAMS',
+      'LINEAR_CREATE_LINEAR_ISSUE',
+      'LINEAR_GET_LINEAR_ISSUE',
+      'LINEAR_LIST_LINEAR_ISSUES',
+    ],
+  },
+  slack: {
+    name: 'Slack',
+    allowedTools: [
+      'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL',
+      'SLACK_LIST_CONVERSATIONS',
+      'SLACK_FETCH_CONVERSATION_HISTORY',
+    ],
+  },
+};
+
+/** Look up a catalog entry; null for an unknown slug. */
+export function getCatalogEntry(slug: string): CatalogEntry | null {
+  return COMPOSIO_CATALOG[slug] ?? null;
+}
+
+/** Sorted list of supported toolkit slugs. */
+export function catalogSlugs(): string[] {
+  return Object.keys(COMPOSIO_CATALOG).sort();
+}

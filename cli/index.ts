@@ -29,6 +29,7 @@ import { statusLabel, isTaskDone, taskState } from '../lib/ui';
 import { withActor } from '../lib/actor-context';
 import { scanForLeakedSecrets, type ProfileInput, type ProfileUpdate, type MatchContext } from '../lib/profiles';
 import { ensureDbCredentials, ConfigError } from './env';
+import { ComposioApiError } from '../lib/composio-api';
 import type { ProjectWithTasks } from '../lib/queries';
 import type { Category, Project, Task, AgentProfile } from '../lib/db/schema';
 import type { ProjectInput, ProjectUpdate } from '../lib/mutations';
@@ -65,6 +66,9 @@ function classify(err: unknown): ErrInfo {
   }
   if (err instanceof GitHubError) {
     return { code: 'GITHUB', message: redact(err.message), exit: 1 };
+  }
+  if (err instanceof ComposioApiError) {
+    return { code: 'COMPOSIO', message: redact(err.message), exit: 1 };
   }
   // Postgres unique violation (e.g. duplicate slug, duplicate integration row).
   const e = err as { code?: string; sourceError?: { code?: string }; message?: string };
@@ -324,6 +328,11 @@ const SPEC = [
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
   { name: 'integration set', readonly: false, summary: 'Upsert an integration status (idempotent)', args: ['<slug>', '<type>', '<status>'] },
   { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
+  { name: 'composio catalog', readonly: true, summary: 'List supported Composio toolkits' },
+  { name: 'composio connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
+  { name: 'composio status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
+  { name: 'composio list', readonly: true, summary: "List a project's Composio connections", args: ['<slug>'] },
+  { name: 'composio disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
   { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
@@ -833,6 +842,89 @@ withFlags(integration.command('list'))
           console.log(`\n${items.length} integrations`);
         },
       };
+    }),
+  );
+
+// ── composio ──
+const composio = program.command('composio').description('Manage Composio toolkit connections');
+
+withFlags(composio.command('catalog'))
+  .description('List supported Composio toolkits')
+  .action((opts: LeafOpts) =>
+    emit('composio catalog', opts, async () => {
+      const { COMPOSIO_CATALOG } = await import('../lib/composio-catalog');
+      const items = Object.entries(COMPOSIO_CATALOG).map(([slug, entry]) => ({
+        slug,
+        name: entry.name,
+        tools: entry.allowedTools.length,
+      }));
+      return {
+        data: { items, count: items.length },
+        human: () => items.forEach((t) => console.log(`${t.slug}  ${t.name}  (${t.tools} tools)`)),
+      };
+    }),
+  );
+
+withFlags(composio.command('connect'))
+  .description('Start a Composio connection (prints authorize link)')
+  .argument('<slug>')
+  .argument('<toolkit>')
+  .action((slug: string, toolkit: string, opts: LeafOpts) =>
+    emit('composio connect', opts, async () => {
+      ensureDbCredentials();
+      const { connectStart } = await import('../lib/composio-connections');
+      const { linkUrl, connection } = await connectStart(slug, toolkit);
+      return {
+        data: { linkUrl, connection },
+        human: () => {
+          console.log(`Open to authorize:\n${linkUrl}`);
+          console.log(`Then: mc composio status ${slug} ${toolkit}`);
+        },
+      };
+    }),
+  );
+
+withFlags(composio.command('status'))
+  .description('Poll a Composio connection status')
+  .argument('<slug>')
+  .argument('<toolkit>')
+  .action((slug: string, toolkit: string, opts: LeafOpts) =>
+    emit('composio status', opts, async () => {
+      ensureDbCredentials();
+      const { connectPoll } = await import('../lib/composio-connections');
+      const connection = await connectPoll(slug, toolkit);
+      return { data: connection, human: () => console.log(`${slug}/${toolkit}: ${connection.status}`) };
+    }),
+  );
+
+withFlags(composio.command('list'))
+  .description("List a project's Composio connections")
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('composio list', opts, async () => {
+      ensureDbCredentials();
+      const { listConnections } = await import('../lib/composio-connections');
+      const items = await listConnections(slug);
+      return {
+        data: { items, count: items.length },
+        human: () => {
+          items.forEach((c) => console.log(`${c.toolkitSlug}  ${c.status}`));
+          console.log(`\n${items.length} connection${items.length === 1 ? '' : 's'}`);
+        },
+      };
+    }),
+  );
+
+withFlags(composio.command('disconnect'))
+  .description('Disconnect a Composio toolkit')
+  .argument('<slug>')
+  .argument('<toolkit>')
+  .action((slug: string, toolkit: string, opts: LeafOpts) =>
+    emit('composio disconnect', opts, async () => {
+      ensureDbCredentials();
+      const { disconnect } = await import('../lib/composio-connections');
+      const connection = await disconnect(slug, toolkit);
+      return { data: connection, human: () => console.log(`${slug}/${toolkit}: ${connection.status}`) };
     }),
   );
 
