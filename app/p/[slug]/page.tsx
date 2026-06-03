@@ -10,7 +10,6 @@ import { TabbedPanels } from '@/components/TabbedPanels';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTask } from '@/components/AddTask';
 import { ProjectCardActions } from '@/components/ProjectCardActions';
-import { IntegrationControl } from '@/components/IntegrationControl';
 import { ActivityFeed } from '@/components/ActivityFeed';
 import { ProjectBoard } from '@/components/board/ProjectBoard';
 import { toBoardProject } from '@/lib/board';
@@ -20,17 +19,9 @@ import { PullsTab } from '@/components/PullsTab';
 import { ErrorsTab } from '@/components/ErrorsTab';
 import { EmailTab } from '@/components/EmailTab';
 import { RevenueTab } from '@/components/RevenueTab';
-import type { IntegrationStatus } from '@/lib/db/schema';
+import { IntegrationsTab } from '@/components/IntegrationsTab';
 
 export const dynamic = 'force-dynamic';
-
-const INTG_LABEL: Record<string, string> = {
-  google_oauth: 'Google OAuth',
-  stripe: 'Stripe',
-  sentry: 'Sentry',
-  zoho_email: 'Zoho Email',
-  other: 'Other',
-};
 
 const CATEGORY_LABEL: Record<string, string> = {
   internal: 'Internal Products',
@@ -135,22 +126,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     </div>
   );
 
-  const integrationsPanel = (
-    <div className="detail-integrations">
-      {integrationTasks.length > 0 ? (
-        integrationTasks.map((t) => (
-          <IntegrationControl
-            key={t.id}
-            taskId={t.id}
-            label={INTG_LABEL[t.integrationType ?? 'other'] ?? t.integrationType ?? 'Other'}
-            status={(t.integrationStatus ?? 'needed') as IntegrationStatus}
-          />
-        ))
-      ) : (
-        <p className="detail-muted">No integrations tracked for this project.</p>
-      )}
-    </div>
-  );
+  const integrationsPanel = <IntegrationsTab slug={project.slug} />;
 
   const boardInitial = { projects: [toBoardProject(project, false)], runs: [] };
   const boardIntegrations = {
