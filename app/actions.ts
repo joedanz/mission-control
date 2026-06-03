@@ -16,12 +16,10 @@ import {
   STATUSES,
   ACCENTS,
   PRIORITIES,
-  INTEGRATION_STATUSES,
   type Category,
   type Status,
   type Accent,
   type Priority,
-  type IntegrationStatus,
 } from '@/lib/db/schema';
 
 function str(form: FormData, key: string): string {
@@ -97,12 +95,6 @@ export async function addTask(projectId: string, label: string) {
 
 export async function toggleTask(taskId: string) {
   const updated = await asUser((m) => m.toggleTask(taskId));
-  if (updated) revalidatePath('/', 'layout');
-}
-
-export async function setIntegrationStatus(taskId: string, status: IntegrationStatus) {
-  if (!(INTEGRATION_STATUSES as readonly string[]).includes(status)) return;
-  const updated = await asUser((m) => m.setIntegrationStatus(taskId, status));
   if (updated) revalidatePath('/', 'layout');
 }
 

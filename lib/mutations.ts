@@ -519,36 +519,6 @@ export async function claimTask(
   return row;
 }
 
-/** Sets an EXISTING integration task's status by task id (the web's by-id path). Null if missing. */
-export async function setIntegrationStatus(
-  taskId: string,
-  status: IntegrationStatus,
-): Promise<Task | null> {
-  const updated = await db
-    .update(tasks)
-    .set({
-      integrationStatus: status,
-      completedAt: status === 'done' ? new Date() : null,
-      version: sql`${tasks.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(tasks.id, taskId))
-    .returning();
-  const row = updated[0];
-  if (!row) return null;
-  await Promise.all([
-    touchProject(row.projectId),
-    recordEvent({
-      type: 'integration.upserted',
-      projectId: row.projectId,
-      taskId: row.id,
-      summary: `${row.integrationType} → ${status}`,
-      payload: { integrationType: row.integrationType, status },
-    }),
-  ]);
-  return row;
-}
-
 /** Create-or-update an integration task by (project, type) — the CLI's idempotent path. */
 export async function upsertIntegration(
   projectId: string,
