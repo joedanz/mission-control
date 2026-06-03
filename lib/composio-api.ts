@@ -35,6 +35,12 @@ export function mapStatus(raw: string | undefined | null): ConnectionStatus {
   }
 }
 
+/** The prior connected_account to revoke on reconnect: the stored id when it exists and differs
+ *  from the freshly-created one, else null (nothing to clean up). Pure. */
+export function orphanedConnectedAccountId(existingId: string | null | undefined, newId: string): string | null {
+  return existingId && existingId !== newId ? existingId : null;
+}
+
 async function composioFetch(path: string, init?: RequestInit): Promise<unknown> {
   const key = process.env.COMPOSIO_API_KEY;
   if (!key) throw new ComposioApiError('COMPOSIO_API_KEY is not set');

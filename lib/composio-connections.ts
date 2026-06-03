@@ -4,7 +4,7 @@
 import { getCatalogEntry } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
-import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, ComposioApiError } from './composio-api';
+import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, ComposioApiError } from './composio-api';
 import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
 import type { ComposioConnection, McpServerConfig } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
@@ -32,11 +32,23 @@ export async function connectStart(projectSlug: string, toolkitSlug: string): Pr
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const { authConfigId } = await ensureToolkit(toolkitSlug);
+  const existing = await getConnection(projectId, toolkitSlug); // capture the prior account before the upsert overwrites it
   const userId = deriveUserId(projectId);
   const { redirectUrl, connectedAccountId } = await initiateConnection(authConfigId, userId);
   const connection = await upsertConnection(projectId, toolkitSlug, {
     userId, connectedAccountId, status: 'initializing', linkUrl: redirectUrl, error: null,
   });
+  // Revoke the prior connected_account so reconnects don't leak it at Composio. Best-effort: the new
+  // connection already succeeded, so a cleanup failure must not fail the reconnect (worst case the old
+  // account lingers — today's status quo).
+  const orphaned = orphanedConnectedAccountId(existing?.connectedAccountId, connectedAccountId);
+  if (orphaned) {
+    try {
+      await deleteConnection(orphaned);
+    } catch (e) {
+      console.warn(`composio reconnect: failed to delete orphaned account ${orphaned}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
   return { linkUrl: redirectUrl, connection };
 }
 

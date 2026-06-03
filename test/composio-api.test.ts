@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  deriveUserId, mapStatus,
+  deriveUserId, mapStatus, orphanedConnectedAccountId,
   createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection,
   ComposioApiError,
 } from '../lib/composio-api';
@@ -32,6 +32,12 @@ describe('Composio API pure helpers', () => {
     expect(mapStatus('DISABLED')).toBe('disconnected');
     expect(mapStatus(null)).toBe('error');
     expect(mapStatus('weird')).toBe('error');
+  });
+  it('picks the orphaned connected_account to revoke on reconnect', () => {
+    expect(orphanedConnectedAccountId('ca_old', 'ca_new')).toBe('ca_old');
+    expect(orphanedConnectedAccountId('ca_same', 'ca_same')).toBeNull();
+    expect(orphanedConnectedAccountId(null, 'ca_new')).toBeNull();
+    expect(orphanedConnectedAccountId(undefined, 'ca_new')).toBeNull();
   });
 });
 
