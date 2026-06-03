@@ -1,9 +1,9 @@
-// ABOUTME: Composio API client — pure helpers (user_id, status map, MCP URL) + fetch-mocked wrappers.
+// ABOUTME: Composio API client — pure helpers (user_id, status map) + fetch-mocked wrappers.
 // ABOUTME: No network: global fetch is stubbed per case. CI-safe.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  deriveUserId, deriveMcpUrl, mapStatus,
+  deriveUserId, mapStatus,
   createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection,
   ComposioApiError,
 } from '../lib/composio-api';
@@ -22,9 +22,6 @@ function mockFetch(status: number, body: unknown) {
 describe('Composio API pure helpers', () => {
   it('derives a stable per-project user_id', () => {
     expect(deriveUserId('abc-123')).toBe('mc-proj-abc-123');
-  });
-  it('derives a per-user MCP URL', () => {
-    expect(deriveMcpUrl('https://b/v3/mcp/srv1', 'mc-proj-x')).toBe('https://b/v3/mcp/srv1?user_id=mc-proj-x');
   });
   it('maps Composio statuses to our enum', () => {
     expect(mapStatus('ACTIVE')).toBe('active');

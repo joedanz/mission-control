@@ -3,7 +3,7 @@
 
 import { eq, and } from 'drizzle-orm';
 import { db } from './db/index';
-import { composioToolkits, composioConnections, type ComposioToolkit, type ComposioConnection } from './db/schema';
+import { composioToolkits, composioConnections, type ComposioToolkit, type ComposioConnection, type ConnectionStatus } from './db/schema';
 
 export async function getToolkitRow(slug: string): Promise<ComposioToolkit | null> {
   const rows = await db.select().from(composioToolkits).where(eq(composioToolkits.slug, slug)).limit(1);
@@ -43,7 +43,7 @@ export async function listConnectionsByProject(projectId: string): Promise<Compo
 export async function upsertConnection(
   projectId: string,
   toolkitSlug: string,
-  patch: { userId: string; connectedAccountId?: string | null; status?: string; linkUrl?: string | null; error?: string | null },
+  patch: { userId: string; connectedAccountId?: string | null; status?: ConnectionStatus; linkUrl?: string | null; error?: string | null },
 ): Promise<ComposioConnection> {
   const rows = await db
     .insert(composioConnections)
@@ -64,7 +64,7 @@ export async function upsertConnection(
 
 export async function setConnectionStatus(
   id: string,
-  status: string,
+  status: ConnectionStatus,
   error: string | null = null,
 ): Promise<ComposioConnection | null> {
   const rows = await db
