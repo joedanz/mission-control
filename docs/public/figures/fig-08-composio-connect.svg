@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 388" role="img" aria-label="Connecting a toolkit: from mc composio connect to an active link">
+  <style>
+    .t-disp{font-family:'Archivo Expanded','Archivo',system-ui,sans-serif;font-weight:600}
+    .t-mono{font-family:'Martian Mono',ui-monospace,monospace}
+    .t-serif{font-family:Georgia,'Times New Roman',serif}
+    @media (prefers-color-scheme: dark){
+      [fill="#fbf9f4"]{fill:#17171c}
+      [fill="#ecebf8"]{fill:#222041}
+      [fill="#e6f1ec"]{fill:#14302a}
+      [fill="#f4ecdd"]{fill:#2c2517}
+      [fill="#f6e7e1"]{fill:#36201a}
+      [fill="#2a2620"]{fill:#e9e7e0}
+      [fill="#6b6358"]{fill:#b6b0a8}
+      [fill="#9a9082"]{fill:#8b867e}
+      [fill="#4a45c2"]{fill:#a7a2f0}
+      [fill="#2c8a6f"]{fill:#5fc9a8}
+      [fill="#946a2a"]{fill:#cf9a4a}
+      [fill="#b1543f"]{fill:#e08a72}
+      [stroke="#2a2620"]{stroke:#6a665e}
+      [stroke="#6b6358"]{stroke:#8a847b}
+      [stroke="#4a45c2"]{stroke:#7d78d8}
+      [stroke="#2c8a6f"]{stroke:#4aa98a}
+      [stroke="#946a2a"]{stroke:#c79a52}
+      [stroke="#b1543f"]{stroke:#c97862}
+    }
+  </style>
+  <defs>
+    <marker id="arI" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#4a45c2"/></marker>
+    <marker id="arA" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#946a2a"/></marker>
+    <marker id="arG" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 Z" fill="#2c8a6f"/></marker>
+  </defs>
+
+  <!-- ── Title ── -->
+  <text x="460" y="40" text-anchor="middle" class="t-disp" font-size="16" fill="#2a2620">Connecting a toolkit</text>
+
+  <!-- ── Stage labels (row 1) ── -->
+  <text x="125" y="76" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">STAGE 1</text>
+  <text x="365" y="76" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">STAGE 2</text>
+  <text x="605" y="76" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">STAGE 3</text>
+
+  <!-- ── ROW 1 (left → right) ── -->
+  <!-- N1: mc composio connect  x 40-210 -->
+  <rect x="40" y="88" width="170" height="96" rx="5" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="125" y="120" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">mc composio</text>
+  <text x="125" y="137" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">connect</text>
+  <text x="125" y="159" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">You run it</text>
+  <text x="125" y="175" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">CLI COMMAND</text>
+
+  <!-- N2: Mission Control  x 270-460 -->
+  <rect x="270" y="88" width="190" height="96" rx="5" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.5"/>
+  <text x="365" y="114" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Mission Control</text>
+  <text x="365" y="134" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">sets up auth config +</text>
+  <text x="365" y="149" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">MCP server at Composio</text>
+  <text x="365" y="164" text-anchor="middle" class="t-serif" font-size="11" font-style="italic" fill="#6b6358">(cached per toolkit)</text>
+  <text x="365" y="179" text-anchor="middle" class="t-mono" font-size="9" fill="#4a45c2" letter-spacing="1">API CALL · DB WRITE</text>
+
+  <!-- N3: Composio  x 520-690 -->
+  <rect x="520" y="88" width="170" height="96" rx="5" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="605" y="120" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">Composio</text>
+  <text x="605" y="142" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">returns an</text>
+  <text x="605" y="157" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">authorize URL</text>
+  <text x="605" y="175" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">EXTERNAL SERVICE</text>
+
+  <!-- row-1 arrows -->
+  <path d="M210,136 L268,136" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#arI)"/>
+  <path d="M460,136 L518,136" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#arI)"/>
+
+  <!-- N3 down → N4 (authorize) -->
+  <path d="M605,184 L605,250" fill="none" stroke="#946a2a" stroke-width="1.8" marker-end="url(#arA)"/>
+
+  <!-- ── ROW 2 (right → left) ── -->
+  <!-- N4: You authorize in the browser  x 520-690 -->
+  <rect x="520" y="252" width="170" height="88" rx="5" fill="#f4ecdd" stroke="#946a2a" stroke-width="1.5"/>
+  <text x="605" y="284" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">You authorize</text>
+  <text x="605" y="302" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">in the browser</text>
+  <text x="605" y="322" text-anchor="middle" class="t-mono" font-size="9" fill="#946a2a" letter-spacing="1">OAUTH FLOW</text>
+
+  <!-- N5: mc composio status  x 270-460 -->
+  <rect x="270" y="252" width="190" height="88" rx="5" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="365" y="280" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">mc composio</text>
+  <text x="365" y="297" text-anchor="middle" class="t-disp" font-size="13" fill="#2a2620">status</text>
+  <text x="365" y="318" text-anchor="middle" class="t-serif" font-size="11.5" font-style="italic" fill="#6b6358">poll until active</text>
+  <text x="365" y="333" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">DB READ</text>
+
+  <!-- ACTIVE pill  x 40-240 -->
+  <rect x="40" y="266" width="200" height="60" rx="30" fill="#e6f1ec" stroke="#2c8a6f" stroke-width="2"/>
+  <text x="140" y="292" text-anchor="middle" class="t-disp" font-size="13" fill="#2c8a6f">Connection: ACTIVE</text>
+  <text x="140" y="312" text-anchor="middle" class="t-mono" font-size="9" fill="#2c8a6f" letter-spacing="1">READY TO FEED AGENT</text>
+
+  <!-- row-2 arrows (right → left) -->
+  <path d="M520,296 L462,296" fill="none" stroke="#4a45c2" stroke-width="1.8" marker-end="url(#arI)"/>
+  <path d="M270,296 L242,296" fill="none" stroke="#2c8a6f" stroke-width="1.8" marker-end="url(#arG)"/>
+
+  <!-- status progression label -->
+  <text x="140" y="350" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">initializing &#8594; active</text>
+</svg>

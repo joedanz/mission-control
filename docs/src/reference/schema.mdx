@@ -2,13 +2,13 @@
 "$schema": https://holocron.so/frontmatter.json
 rendering: static
 title: Schema
-description: Six working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+description: Eight working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
 icon: table
 ---
 
 # The database, column by column
 
-Six working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+Eight working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
 
 Every `id` is a UUID stored as text. Enumerated values are split deliberately into two kinds:
 **hard `pgEnum` types** for sets that almost never change, and **plain text validated in the
@@ -24,6 +24,9 @@ app/CLI layer** for "churny" sets that do — so adding a status never needs a d
 | repo_path · repo_url · live_url | Local checkout (daemon target), GitHub URL (issue import), and the deployed site. |
 | priority · target_date · notes | Planning metadata. |
 | archived · sort_order | Soft-hide flag and manual ordering. |
+| sentry_project_slug | Nullable text. Sentry project slug — when set, enables the Errors tab. |
+| email_provider · email_address | Nullable text. Manual provider label and primary email address — when set, enables the Email tab. |
+| stripe_site | Nullable text. Stripe `metadata.site` value — when set, enables the Revenue tab. |
 | created_at · updated_at · last_activity_at | Timestamps; `last_activity_at` drives the "recently touched" list. |
 
 ## tasks — "one item of work"
@@ -64,6 +67,35 @@ app/CLI layer** for "churny" sets that do — so adding a status never needs a d
 | tokens · cost_micros | Per-event attribution only — never the rollup source (that's `runs.cost_micros`). |
 | idempotency_key | Unique (partial) — dedupes retried appends so a re-sent hook can't double-log. |
 
+## composio_toolkits — "a shared per-toolkit Composio resource cache"
+
+One row per toolkit slug, populated lazily the first time a connection is created. Holds the
+shared Composio auth-config and MCP server resources — never a secret.
+
+| Column | Notes |
+|---|---|
+| `slug` (PK) | Matches a key in the Composio catalog — the authority for valid toolkit slugs. |
+| auth_config_id | Composio `ac_…` auth-config id, created once and reused across projects. |
+| mcp_server_id | Composio MCP server id, created once per toolkit. |
+| mcp_url | Base MCP URL, e.g. `https://backend.composio.dev/v3/mcp/<id>`. |
+| created_at · updated_at | Timestamps. |
+
+## composio_connections — "a project's link to one toolkit"
+
+One row per (project, toolkit) pair — the UNIQUE index enforces the one-connection-per-(project, toolkit) invariant intentionally; see the Indexes section.
+
+| Column | Notes |
+|---|---|
+| `id` | UUID. |
+| project_id | FK to `projects`, `ON DELETE CASCADE` — delete a project, its connections go too. |
+| toolkit_slug | Composio catalog key. Not a FK to `composio_toolkits` — the cache may not exist yet when a connection is first written. |
+| user_id | Composio user identity scoped to this project (`mc-proj-<projectId>`). |
+| connected_account_id | Composio `ca_…` id, set once the OAuth link is initiated. |
+| status | `ConnectionStatus`: `initializing\|active\|error\|expired\|disconnected`. |
+| link_url | Transient hosted OAuth link for an in-flight connect; cleared on completion. |
+| error | Last error message, if any. |
+| created_at · updated_at | Timestamps. |
+
 ## agent_profiles — "a reusable agent recipe"
 
 Global, slug-addressed capability bundles + auto-routing rules. See [Agent profiles](/profiles)
@@ -101,8 +133,10 @@ at all** — see [Access](/access).
 | app/CLI text | integration type / status | `google_oauth · stripe · sentry · zoho_email · other` / `needed · pending · done` |
 | app/CLI text | run status / source | `running · completed · failed · abandoned` / `hook · cli · cron · manual` |
 | app/CLI text | event level | `debug · info · warn · error` |
+| app/CLI text | event type (`EVENT_TYPES`) | `project.created · project.updated · project.deleted · task.created · task.status_changed · task.claimed · task.deleted · integration.upserted · run.started · run.ended · run.abandoned · run.cancel_requested · profile.created · profile.updated · profile.deleted · tool_call · composio.connection_changed · note` |
 | app/CLI text | profile runtime | `claude-code · exec` |
 | app/CLI text | permission mode | `plan · acceptEdits · bypassPermissions · default` |
+| app/CLI text | `ConnectionStatus` | `initializing · active · error · expired · disconnected` |
 
 ## Indexes that matter
 
@@ -116,6 +150,7 @@ at all** — see [Access](/access).
 | `agent_profiles_slug_uq` | Unique profile slug — the handle you address with `mc profile`. |
 | `agent_profiles_default_uq` | Partial unique over `is_default = true` — enforces *at most one* global default profile. |
 | `agent_profiles_schedulable_idx` | Partial over rows with `schedule_enabled` — the scheduler's scan for profiles that might be due. |
+| `composio_connections_project_toolkit_uq` | UNIQUE on `(project_id, toolkit_slug)` — enforces the intentional one-connection-per-(project, toolkit) invariant. Two connections for the same toolkit in the same project are an explicit non-goal; dropping this index requires a per-connection `user_id` redesign. |
 
 <Note>
 **Why two agents never do the same task.** A claim is a **single conditional write**: "set

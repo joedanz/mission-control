@@ -25,6 +25,7 @@ one "belongs to" the one above it, like folders inside folders. A fifth — the 
 | **Run** | One work-session by one AI agent. Starts when it begins, ends when it finishes. | Which agent, its status (`running` / `completed` / `failed` / `abandoned`), tokens used, dollar cost, and a "heartbeat" proving it's alive. |
 | **Event** | A single timestamped line in the activity log — the diary of everything that happened. | What happened, how important it is, and links to the related run, task, and project. |
 | **Agent profile** | A reusable recipe for *how* an agent runs — its model, skills, tools, and routing rules. A run records which one it used. | Model, runtime, permission mode, skills, MCP servers, match rules, fallback model + budget. See [Agent profiles](/profiles). |
+| **Composio connection** | A project's live link to one third-party toolkit (Linear, Slack, and so on) brokered by Composio. Each project can have at most one connection per toolkit. | Toolkit slug, OAuth status (`initializing`, `active`, `error`, `expired`, `disconnected`), and the Composio connected-account ID. See [Integrations](/integrations). |
 
 <Note>
 **No two agents can grab the same task.** When an AI claims a task, it stamps the task with its

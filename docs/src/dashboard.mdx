@@ -2,13 +2,13 @@
 "$schema": https://holocron.so/frontmatter.json
 rendering: static
 title: The dashboard
-description: When you sign in, the website has five tabs. Here's what each one is for.
+description: The five top-level tabs and the per-project tabs that light up as you connect services.
 icon: layout-dashboard
 ---
 
 # What you see: the dashboard
 
-When you sign in, the website has five tabs. Here's what each one is for.
+When you sign in, the website has five top-level tabs. Each project page also gains extra tabs as you connect external services.
 
 <Frame caption="The live Mission Control dashboard.">
   ![Mission Control dashboard](/live-view.png)
@@ -17,8 +17,8 @@ When you sign in, the website has five tabs. Here's what each one is for.
 <CardGroup cols={2}>
   <Card title="Tab 1 · Overview" icon="gauge">
     The "at a glance" page. A row of headline numbers — how many projects, how many launched,
-    how many clients — plus an integration board (is error-tracking and email wired up for each
-    project?) and a list of recently touched projects.
+    how many clients — plus a **Fleet Glance** strip showing the 6 most recently active AI runs
+    (with a link to the full Mission view), and a list of recently touched projects.
   </Card>
   <Card title="Tab 2 · Projects" icon="folder-kanban">
     The main work surface: every project in one sortable, searchable register — name, type,
@@ -87,3 +87,38 @@ moment that run ends. Moves are also optimistic: the card jumps immediately, and
 loses a race (someone else moved it, or it was just claimed) the board quietly snaps it back on
 its next refresh.
 </Warning>
+
+## Per-project tabs
+
+Every project page always shows the same core tabs (Overview, Tasks, Board, Integrations, Activity).
+Three more — Errors, Email, and Revenue — appear automatically once you set the matching project
+field, and each pulls live data from an external service every time you open it. The table below
+covers those three plus the always-present Integrations tab (which reads from the database, not a
+live service).
+
+<Frame caption="Fig. 07 — Per-project tabs and where their data comes from.">
+  ![Per-project tabs diagram](/figures/fig-07-tabs.svg)
+</Frame>
+
+| Tab | Appears when… | What you see | Data source |
+|-----|---------------|--------------|-------------|
+| **Errors** | `sentryProjectSlug` is set | Up to 25 unresolved Sentry issues from the last 24 h — level, title, culprit, event and user counts, last-seen time, each linking to Sentry; plus a summary of total unresolved and 24 h event volume. If the token is missing the tab shows a setup hint instead of erroring. | Live Sentry REST API |
+| **Email** | `domain` is set | MX, SPF, and DMARC DNS checks — pass/fail with the raw record value. Auto-detects the email provider (Zoho, Google Workspace, Microsoft 365, Proton, Fastmail, iCloud) and also shows any manually set `emailProvider` / `emailAddress`. | Live DNS lookup (no token needed) |
+| **Revenue** | `stripeSite` is set | MRR per currency, active subscription count (shown as N+ when truncated at 1,000), and a table of active subscriptions (customer, amount, billing interval, created date). One Stripe account is shared across all projects; subscriptions are filtered by `metadata.site`. | Live Stripe Search API |
+| **Integrations** | Always present | The full Composio toolkit catalog overlaid with this project's connection statuses — Active, Initializing, Error, Expired, or Off — plus Connect / Check status / Disconnect buttons. When you return to the tab after authorizing a new connection, any still-initializing toolkit is polled automatically. See [Integrations](/integrations) for the full story. | Database read (no live Composio call on GET) |
+
+<Note>
+**Setting the project fields.** Use `mc project update` to enable each tab:
+
+```bash
+mc project update my-app --sentry-project my-app-slug   # unlocks Errors tab
+mc project update my-app --domain my-app.com             # unlocks Email tab
+mc project update my-app --stripe-site site_abc123       # unlocks Revenue tab
+```
+</Note>
+
+<Info>
+**Environment variables required for live tabs.** The Errors tab needs `SENTRY_AUTH_TOKEN` and
+`SENTRY_ORG` (and optionally `SENTRY_BASE_URL` for self-hosted Sentry). The Revenue tab needs
+`STRIPE_SECRET_KEY`. The Email tab uses the server's DNS resolver — no token required.
+</Info>
