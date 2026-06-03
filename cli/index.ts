@@ -930,7 +930,7 @@ withFlags(composio.command('disconnect'))
   );
 
 withFlags(composio.command('mcp-config'))
-  .description("Resolve a project's active connections into an mcpServers map (placeholder secrets)")
+  .description("Resolve a project's active connections into an mcpServers map")
   .argument('<slug>')
   .action((slug: string, opts: LeafOpts) =>
     emit('composio mcp-config', opts, async () => {
