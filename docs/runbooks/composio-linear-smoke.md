@@ -3,10 +3,27 @@
 Proves that a `claude` agent spawned by Mission Control's executor can act on a long-tail service
 (Linear) through a Composio-hosted MCP server. One-time external setup, then a re-runnable harness.
 
+> **Verified working 2026-06-02** — a `claude` agent created + read back a real Linear issue through
+> this loop. Confirms the `claude` CLI accepts Composio's remote-`http` MCP shape with an `x-api-key`
+> header.
+
 ## Prerequisites
 - A Composio account: <https://app.composio.dev>
 - A Linear account you can connect.
 - `mc` CLI linked (`npm link` from this repo).
+
+### Host requirements (the harness fails without these)
+- **`.env.local` must be `chmod 600`** — the `mc` CLI refuses a group/world-readable credential file
+  (`CONFIG` error). Run `chmod 600 .env.local`.
+- **Set `MC_CLAUDE_BIN` to your real standalone `claude`.** `npm run` / `tsx` prepend
+  `node_modules/.bin` to `PATH`, whose `claude` is a bundled `@anthropic-ai/claude-code` shim that
+  crashes on init (`Cannot read properties of undefined (reading 'prototype')`, a google-auth error)
+  under recent Node. Find the real one with `which -a claude | grep -v node_modules`, then add to
+  `.env.local`:
+  ```
+  MC_CLAUDE_BIN=/absolute/path/to/claude
+  ```
+  (Daemons/scheduler need this in their launch env too.)
 
 ## 1. Get your Composio API key
 1. Sign in at <https://app.composio.dev>.
@@ -25,8 +42,9 @@ In the Composio dashboard:
 
 ## 3. Create a Composio MCP server for Linear
 1. In the dashboard, create an **MCP server** bound to the Linear toolkit + the auth config above.
-2. Allow-list at least: `LINEAR_LIST_TEAMS`, `LINEAR_CREATE_ISSUE`, and a read tool
-   (`LINEAR_GET_ISSUE` / `LINEAR_LIST_ISSUES`).
+2. Allow-list at least: `LINEAR_LIST_LINEAR_TEAMS`, `LINEAR_CREATE_LINEAR_ISSUE`, and a read tool
+   (`LINEAR_GET_LINEAR_ISSUE` / `LINEAR_LIST_LINEAR_ISSUES`). (Confirm exact slugs via
+   `GET /api/v3/tools?toolkit_slug=linear` — Composio's Linear tools carry a `_LINEAR_` infix.)
 3. Generate the **per-user MCP URL** for your user id. It looks like:
    ```
    https://backend.composio.dev/v3/mcp/<SERVER_ID>?user_id=user_smoke
@@ -71,6 +89,9 @@ npm run smoke:composio
     if so, that is the finding; capture the error).
   - *"emitted a MC_SMOKE_RESULT line but its JSON could not be parsed"* — the agent reached the tools but
     its final line wasn't valid JSON; scroll up to the teed output.
+  - *"run did not complete (status=failed)"* with a `Cannot read properties of undefined (reading
+    'prototype')` stack in the teed output — `claude` resolved to the broken `node_modules/.bin` shim.
+    Set `MC_CLAUDE_BIN` (see Host requirements above) and re-run.
   - *"wrong or hallucinated issue"* — the returned title didn't match the unique marker.
 
 ### Out-of-band confirmation
