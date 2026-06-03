@@ -867,6 +867,7 @@ withFlags(composio.command('connect'))
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
     emit('composio connect', opts, async () => {
+      ensureDbCredentials();
       const { connectStart } = await import('../lib/composio-connections');
       const { linkUrl, connection } = await connectStart(slug, toolkit);
       return {
@@ -885,6 +886,7 @@ withFlags(composio.command('status'))
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
     emit('composio status', opts, async () => {
+      ensureDbCredentials();
       const { connectPoll } = await import('../lib/composio-connections');
       const connection = await connectPoll(slug, toolkit);
       return { data: connection, human: () => console.log(`${slug}/${toolkit}: ${connection.status}`) };
@@ -896,11 +898,15 @@ withFlags(composio.command('list'))
   .argument('<slug>')
   .action((slug: string, opts: LeafOpts) =>
     emit('composio list', opts, async () => {
+      ensureDbCredentials();
       const { listConnections } = await import('../lib/composio-connections');
       const items = await listConnections(slug);
       return {
         data: { items, count: items.length },
-        human: () => items.forEach((c) => console.log(`${c.toolkitSlug}  ${c.status}`)),
+        human: () => {
+          items.forEach((c) => console.log(`${c.toolkitSlug}  ${c.status}`));
+          console.log(`\n${items.length} connection${items.length === 1 ? '' : 's'}`);
+        },
       };
     }),
   );
@@ -911,6 +917,7 @@ withFlags(composio.command('disconnect'))
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
     emit('composio disconnect', opts, async () => {
+      ensureDbCredentials();
       const { disconnect } = await import('../lib/composio-connections');
       const connection = await disconnect(slug, toolkit);
       return { data: connection, human: () => console.log(`${slug}/${toolkit}: ${connection.status}`) };
