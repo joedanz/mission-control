@@ -790,6 +790,7 @@ button:focus:not(:focus-visible) { outline: none; }
 .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
 .pill.ok     { color: var(--ok-ink);     background: var(--ok-soft);     border-color: color-mix(in oklch, var(--ok) 26%, transparent); }
 .pill.warn   { color: var(--warn-ink);   background: var(--warn-soft);   border-color: color-mix(in oklch, var(--warn) 26%, transparent); }
+.pill.bad    { color: var(--bad-ink);    background: var(--bad-soft);    border-color: color-mix(in oklch, var(--bad) 26%, transparent); }
 .pill.info   { color: var(--info-ink);   background: var(--info-soft);   border-color: color-mix(in oklch, var(--info) 26%, transparent); }
 .pill.violet { color: var(--violet-ink); background: var(--violet-soft); border-color: color-mix(in oklch, var(--violet) 26%, transparent); }
 
@@ -1149,6 +1150,9 @@ a.row-name:hover { color: var(--accent); }
   padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .intg-control-label { font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.intg-actions { display: inline-flex; align-items: center; gap: 12px; }
+.intg-tools { color: var(--ink-mute); font-weight: 400; }
+.intg-error { color: var(--bad-ink); font-weight: 400; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); }
 .seg-btn {
   min-height: 44px; padding: 0 14px;
