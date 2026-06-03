@@ -1,9 +1,9 @@
 'use client';
 
 // ABOUTME: Workflows tab — a left rail of the project's workflows + the read-only @xyflow/react canvas for the
-// ABOUTME: selected one, with its live per-node step overlay (polled). Read-only: the "Run" action is disabled
-// ABOUTME: (execution is daemon-driven, slice 4) — today a workflow runs via `mc workflow run <slug>` and this
-// ABOUTME: canvas reflects it live. List fetch mirrors IntegrationsTab's seq-guarded state machine.
+// ABOUTME: selected one, with its live per-node step overlay (polled). The "Run" button POSTs to enqueue a run
+// ABOUTME: (status 'queued') that the workflow-daemon executes (slice 4); the poll reflects queued→running→done.
+// ABOUTME: A run already queued/in progress disables Run (single-flight → 409). List fetch mirrors IntegrationsTab.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorkflowListItem, WorkflowRunSummary } from '@/lib/workflow-view';
@@ -16,7 +16,7 @@ type ListState =
   | { kind: 'data'; workflows: WorkflowListItem[] };
 
 const RUN_TONE: Record<WorkflowRunSummary['status'], string> = {
-  running: 'info', completed: 'ok', failed: 'bad', cancelled: 'warn',
+  queued: 'info', running: 'info', completed: 'ok', failed: 'bad', cancelled: 'warn',
 };
 
 function RunBadge({ run }: { run: WorkflowRunSummary | null }) {
@@ -62,6 +62,39 @@ export function WorkflowsTab({ slug }: { slug: string }) {
   }, [slug, applyList]);
 
   const { detail, loaded, error } = useWorkflowRun({ projectSlug: slug, workflowSlug: selected });
+
+  const [triggering, setTriggering] = useState(false);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+  // A run is active when its latest run hasn't reached a terminal status. The poll updates this within ~4s of
+  // the enqueue; until then `triggering` + the server-side single-flight guard (409) prevent a double-run.
+  const latestStatus = detail?.latestRun?.status;
+  const runActive = latestStatus === 'queued' || latestStatus === 'running';
+
+  const onRun = useCallback(async () => {
+    if (!selected) return;
+    setTriggering(true);
+    setRunMsg(null);
+    try {
+      const res = await fetch(`/api/projects/${slug}/workflows`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workflow: selected, action: 'run' }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setRunMsg('queued — the workflow-daemon will pick it up');
+        void loadList(); // refresh the rail badges now; the detail badge updates on the next poll
+      } else if (res.status === 409) {
+        setRunMsg('a run is already queued or in progress');
+      } else {
+        setRunMsg(json.message ?? json.error ?? `failed (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTriggering(false);
+    }
+  }, [slug, selected, loadList]);
 
   if (state.kind === 'loading') {
     return (
@@ -121,14 +154,18 @@ export function WorkflowsTab({ slug }: { slug: string }) {
             <h3>{detail?.name ?? '—'}</h3>
             <RunBadge run={detail?.latestRun ?? null} />
           </div>
-          <button
-            type="button"
-            className="btn-sm"
-            disabled
-            title={`Runs via: mc workflow run ${selected ?? ''} — live trigger lands in slice 4`}
-          >
-            Run ▸
-          </button>
+          <div className="wf-main__run">
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={!selected || triggering || runActive}
+              title={runActive ? 'a run is already queued or in progress' : `Enqueue a run of ${selected ?? ''} (executed by the workflow-daemon)`}
+              onClick={onRun}
+            >
+              {triggering ? 'Starting…' : runActive ? 'Running…' : 'Run ▸'}
+            </button>
+            {runMsg && <span className="wf-run-msg detail-muted">{runMsg}</span>}
+          </div>
         </header>
 
         {!loaded && <div className="wf-canvas wf-canvas--placeholder">Loading graph…</div>}

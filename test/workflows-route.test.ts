@@ -24,8 +24,13 @@ const store = {
 };
 vi.mock('@/lib/workflow-store', () => store);
 
-// Import AFTER mocks are registered.
-const { GET } = await import('../app/api/projects/[slug]/workflows/route');
+const enqueue = { enqueueWorkflowRun: vi.fn() };
+vi.mock('@/lib/workflow-enqueue', () => enqueue);
+
+// Import AFTER mocks are registered. ConflictError is the REAL class (validation has no DB deps) so the
+// route's `instanceof ConflictError → 409` branch is exercised, not a mock.
+const { GET, POST } = await import('../app/api/projects/[slug]/workflows/route');
+const { ConflictError } = await import('../lib/validation');
 
 const GRAPH: WorkflowGraph = {
   nodes: [
@@ -41,6 +46,17 @@ const stepRow = (over = {}) => ({ id: 's1', workflowRunId: 'r1', nodeId: 't', st
 
 function get(url: string) {
   return GET(new Request(url), { params });
+}
+
+function post(body: unknown) {
+  return POST(
+    new Request('http://localhost/api/projects/demo/workflows', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json' },
+    }),
+    { params },
+  );
 }
 
 beforeEach(() => {
@@ -103,6 +119,42 @@ describe('GET detail (?workflow=)', () => {
   it('404s an unknown workflow slug', async () => {
     store.getWorkflowBySlug.mockResolvedValue(null);
     expect((await get('http://localhost/api/projects/demo/workflows?workflow=nope')).status).toBe(404);
+  });
+});
+
+describe('POST run (enqueue)', () => {
+  beforeEach(() => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow()); // belongs to project p1
+  });
+
+  it('enqueues a queued run and returns its id', async () => {
+    enqueue.enqueueWorkflowRun.mockResolvedValue({ id: 'r9', status: 'queued' });
+    const res = await post({ workflow: 'triage', action: 'run' });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.data).toMatchObject({ workflowRunId: 'r9', status: 'queued' });
+    expect(enqueue.enqueueWorkflowRun).toHaveBeenCalledWith('triage', { trigger: 'manual' });
+  });
+
+  it('409 when the single-flight guard rejects', async () => {
+    enqueue.enqueueWorkflowRun.mockRejectedValue(new ConflictError('workflow', 'already has a run in progress'));
+    const res = await post({ workflow: 'triage', action: 'run' });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('conflict');
+  });
+
+  it('404s a workflow that belongs to another project (no enqueue)', async () => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow({ projectId: 'other' }));
+    const res = await post({ workflow: 'triage', action: 'run' });
+    expect(res.status).toBe(404);
+    expect(enqueue.enqueueWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  it('422 on an unknown action', async () => {
+    const res = await post({ workflow: 'triage', action: 'frobnicate' });
+    expect(res.status).toBe(422);
+    expect(enqueue.enqueueWorkflowRun).not.toHaveBeenCalled();
   });
 });
 

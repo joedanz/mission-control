@@ -9,7 +9,8 @@ import { createProject } from '../lib/mutations';
 import {
   createWorkflow, getWorkflowBySlug, getWorkflowById, listWorkflows, setWorkflowStatus,
   createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowRunStatus,
-  requestWorkflowRunCancel, touchWorkflowRun, countActiveWorkflowRuns,
+  requestWorkflowRunCancel, touchWorkflowRun, countPendingWorkflowRuns,
+  claimWorkflowRun, listQueuedWorkflowRuns,
   upsertStepRun, setStepRunStatus, listStepRuns,
 } from '../lib/workflow-store';
 
@@ -77,19 +78,43 @@ describe('workflow store — runs', () => {
     expect((await listWorkflowRuns({ workflowId: wf.id })).length).toBe(1);
   });
 
-  it('countActiveWorkflowRuns reflects the single-flight guard', async () => {
+  it('countPendingWorkflowRuns counts queued + running (the single-flight guard)', async () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
-    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
-    expect(await countActiveWorkflowRuns(wf.id)).toBe(1);
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' });
+    expect(await countPendingWorkflowRuns(wf.id)).toBe(1); // a not-yet-claimed queued run still blocks a duplicate
+    await claimWorkflowRun(run.id); // queued → running
+    expect(await countPendingWorkflowRuns(wf.id)).toBe(1); // running is still pending
     await setWorkflowRunStatus(run.id, 'completed');
-    expect(await countActiveWorkflowRuns(wf.id)).toBe(0);
+    expect(await countPendingWorkflowRuns(wf.id)).toBe(0); // terminal → not pending
   });
 
-  it('setWorkflowRunStatus stamps endedAt on a terminal status', async () => {
+  it('claimWorkflowRun flips queued→running exactly once (race-safe — the loser gets null)', async () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
-    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' });
+    const first = await claimWorkflowRun(run.id);
+    expect(first?.status).toBe('running');
+    expect(await claimWorkflowRun(run.id)).toBeNull(); // already claimed
+  });
+
+  it('listQueuedWorkflowRuns returns queued runs only (the daemon poll)', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const queuedRun = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' });
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' }); // not queued
+    const queued = await listQueuedWorkflowRuns();
+    expect(queued.map((r) => r.id)).toContain(queuedRun.id);
+    expect(queued.every((r) => r.status === 'queued')).toBe(true); // robust to other projects' queued runs
+  });
+
+  it('setWorkflowRunStatus stamps endedAt on a terminal status but NOT on queued', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' });
+    const queued = await setWorkflowRunStatus(run.id, 'queued'); // non-terminal — must not stamp endedAt
+    expect(queued?.status).toBe('queued');
+    expect(queued?.endedAt).toBeNull();
     const ended = await setWorkflowRunStatus(run.id, 'failed');
     expect(ended?.status).toBe('failed');
     expect(ended?.endedAt).not.toBeNull();

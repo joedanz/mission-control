@@ -54,6 +54,7 @@ export const EVENT_TYPES = [
   'run.ended',
   'run.abandoned',
   'run.cancel_requested',
+  'workflow.abandoned',
   'profile.created',
   'profile.updated',
   'profile.deleted',
@@ -404,7 +405,10 @@ export type ComposioConnection = typeof composioConnections.$inferSelect;
 // fleet feed / cancellation all come from that row; we never create a claimable task, which would race
 // the auto-claim daemon).
 export const WORKFLOW_STATUSES = ['draft', 'active', 'paused'] as const;
-export const WORKFLOW_RUN_STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const;
+// 'queued' = enqueued by the web Run button / `mc workflow run --async`, awaiting the workflow-daemon to
+// claim it (queued→running, race-safe). The synchronous CLI path creates its run already 'running' (it owns
+// the process), so the daemon — which only lists/claims 'queued' — never races a manual `mc workflow run`.
+export const WORKFLOW_RUN_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
 export const WORKFLOW_TRIGGERS = ['manual', 'cron', 'event', 'webhook'] as const;
 export const WORKFLOW_STEP_STATUSES = ['pending', 'running', 'completed', 'failed', 'skipped'] as const;
 export const WORKFLOW_NODE_TYPES = ['trigger', 'agent', 'integration', 'branch', 'gate'] as const;

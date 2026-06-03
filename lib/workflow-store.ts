@@ -1,7 +1,7 @@
 // ABOUTME: DB CRUD for workflows + workflow_runs + workflow_step_runs. Pure Drizzle (no graph logic, no
 // ABOUTME: spawn) — the DB-testable seam under the CLI + daemon walker, mirroring lib/composio-store.ts.
 
-import { eq, and, desc, count } from 'drizzle-orm';
+import { eq, and, asc, desc, count, inArray } from 'drizzle-orm';
 import { db } from './db/index';
 import {
   workflows, workflowRuns, workflowStepRuns,
@@ -63,6 +63,9 @@ export async function createWorkflowRun(input: {
   trigger: WorkflowTrigger;
   graphSnapshot: WorkflowGraph;
   context?: unknown;
+  // 'running' = the synchronous CLI path (owns its process, walks inline). 'queued' = the async/web path
+  // (the workflow-daemon claims it). Defaults to the column default ('running') for the slice-1 behaviour.
+  status?: WorkflowRunStatus;
 }): Promise<WorkflowRun> {
   const rows = await db
     .insert(workflowRuns)
@@ -71,9 +74,33 @@ export async function createWorkflowRun(input: {
       trigger: input.trigger,
       graphSnapshot: input.graphSnapshot,
       ...(input.context !== undefined && { context: input.context }),
+      ...(input.status !== undefined && { status: input.status }),
     })
     .returning();
   return rows[0];
+}
+
+/** Race-safe claim of a queued run for the workflow-daemon: flip queued→running and stamp a heartbeat in
+ *  ONE conditional statement, returning the row only if THIS caller won. A loser (another daemon already
+ *  claimed it, or it was cancelled before pickup) gets null and skips. Mirrors claimTask — no transaction
+ *  needed (a single UPDATE is atomic on neon-http). */
+export async function claimWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const rows = await db
+    .update(workflowRuns)
+    .set({ status: 'running', lastHeartbeatAt: new Date() })
+    .where(and(eq(workflowRuns.id, id), eq(workflowRuns.status, 'queued')))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/** The workflow-daemon's poll query: queued runs awaiting a claim, oldest-first (FIFO). */
+export async function listQueuedWorkflowRuns(limit = 20): Promise<WorkflowRun[]> {
+  return db
+    .select()
+    .from(workflowRuns)
+    .where(eq(workflowRuns.status, 'queued'))
+    .orderBy(asc(workflowRuns.startedAt))
+    .limit(limit);
 }
 
 export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
@@ -91,19 +118,23 @@ export async function listWorkflowRuns(opts: { workflowId?: string; status?: Wor
   return q.orderBy(desc(workflowRuns.startedAt)).limit(opts.limit ?? 50);
 }
 
-/** Active = a run still in `running`. The single-flight guard: refuse a new run when this is > 0. */
-export async function countActiveWorkflowRuns(workflowId: string): Promise<number> {
+/** Pending = a run that is queued OR running. The single-flight guard refuses a new run when this is > 0,
+ *  so a not-yet-claimed queued run still blocks a duplicate (the daemon hasn't picked it up yet). */
+export async function countPendingWorkflowRuns(workflowId: string): Promise<number> {
   const rows = await db
     .select({ c: count() })
     .from(workflowRuns)
-    .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.status, 'running')));
+    .where(and(eq(workflowRuns.workflowId, workflowId), inArray(workflowRuns.status, ['queued', 'running'])));
   return rows[0]?.c ?? 0;
 }
+
+// Terminal = the run is over; only then do we stamp endedAt. 'queued' and 'running' are both in-flight.
+const TERMINAL_RUN_STATUSES: WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 
 export async function setWorkflowRunStatus(id: string, status: WorkflowRunStatus): Promise<WorkflowRun | null> {
   const rows = await db
     .update(workflowRuns)
-    .set({ status, ...(status !== 'running' ? { endedAt: new Date() } : {}) })
+    .set({ status, ...(TERMINAL_RUN_STATUSES.includes(status) ? { endedAt: new Date() } : {}) })
     .where(eq(workflowRuns.id, id))
     .returning();
   return rows[0] ?? null;

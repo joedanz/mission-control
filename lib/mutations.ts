@@ -16,6 +16,7 @@ import {
   events,
   runs,
   agentProfiles,
+  workflowRuns,
   type Project,
   type Task,
   type Run,
@@ -32,6 +33,7 @@ import {
   type RunSource,
   type EventType,
   type EventLevel,
+  type WorkflowRun,
 } from './db/schema';
 import { slugify, ConflictError } from './validation';
 import { type ProfileInput, type ProfileUpdate, validateProfile } from './profiles';
@@ -1076,17 +1078,46 @@ export async function reconcileTerminalClaims(): Promise<{ runId: string; status
   return dangling.map((d) => ({ runId: d.runId, status: d.status as RunStatus }));
 }
 
-/** One reaper tick as the 'reaper' system actor: abandon stale `running` runs, THEN reconcile any
- *  dangling claims of terminal runs. Order matters — reap first (abandons + releases), then reconcile
- *  catches anything still dangling, so a just-abandoned run converges in the same tick. The shared core
- *  of `npm run reap` and the /api/cron/reap route; both just format the returned counts. */
+/** Reaper for workflow runs: flip `running` workflow_runs whose walker stopped heartbeating (the daemon /
+ *  CLI process died mid-walk) to 'failed' and emit a deduped `workflow.abandoned` event for each. Uses the
+ *  same stale window + `workflow_runs_status_heartbeat_idx` as reapStaleRuns. QUEUED runs are LEFT alone — a
+ *  down workflow-daemon shouldn't fail user-requested work; it resumes claiming on restart. The in-flight
+ *  agent step's linked `runs` row is independently abandoned by reapStaleRuns (it heartbeats separately). */
+export async function reapStaleWorkflowRuns(): Promise<WorkflowRun[]> {
+  const rows = await db
+    .update(workflowRuns)
+    .set({ status: 'failed', endedAt: sql`coalesce(${workflowRuns.endedAt}, now())` })
+    .where(
+      and(
+        eq(workflowRuns.status, 'running'),
+        sql`${workflowRuns.lastHeartbeatAt} < now() - make_interval(secs => ${RUN_STALE_THRESHOLD_SEC})`,
+      ),
+    )
+    .returning();
+  for (const r of rows) {
+    await recordEvent({
+      type: 'workflow.abandoned',
+      summary: `Workflow run abandoned (no heartbeat > ${RUN_STALE_THRESHOLD_SEC}s)`,
+      payload: { workflowRunId: r.id, workflowId: r.workflowId },
+      idempotencyKey: `workflow.abandoned:${r.id}`,
+    });
+  }
+  return rows;
+}
+
+/** One reaper tick as the 'reaper' system actor: abandon stale `running` runs, reconcile any dangling claims
+ *  of terminal runs, AND fail stale `running` workflow_runs (dead walkers). Order matters — reap runs first
+ *  (abandons + releases), then reconcile catches anything still dangling, so a just-abandoned run converges in
+ *  the same tick. The shared core of `npm run reap` and the /api/cron/reap route; both just format the counts. */
 export async function runReaperTick(): Promise<{
   reaped: Run[];
   reconciled: { runId: string; status: RunStatus }[];
+  staleWorkflows: WorkflowRun[];
 }> {
   return withActor({ label: 'reaper', kind: 'system' }, async () => ({
     reaped: await reapStaleRuns(),
     reconciled: await reconcileTerminalClaims(),
+    staleWorkflows: await reapStaleWorkflowRuns(),
   }));
 }
 

@@ -7,12 +7,14 @@ config({ path: '.env.local' });
 
 async function main() {
   const { runReaperTick } = await import('../lib/mutations');
-  const { reaped, reconciled } = await runReaperTick();
+  const { reaped, reconciled, staleWorkflows } = await runReaperTick();
   const when = new Date().toISOString();
   const parts: string[] = [];
   if (reaped.length) parts.push(`abandoned ${reaped.length} stale run(s): ${reaped.map((r) => r.id).join(', ')}`);
   if (reconciled.length)
     parts.push(`reconciled ${reconciled.length} dangling claim(s): ${reconciled.map((r) => r.runId).join(', ')}`);
+  if (staleWorkflows.length)
+    parts.push(`failed ${staleWorkflows.length} stale workflow run(s): ${staleWorkflows.map((r) => r.id).join(', ')}`);
   console.log(parts.length ? `[reap ${when}] ${parts.join('; ')}` : `[reap ${when}] no stale runs`);
 }
 
