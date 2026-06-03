@@ -148,6 +148,10 @@ export type SpawnExecutorOpts = {
    *  own mcpServers (the profile wins a key collision). With no profile they are used as-is (rendered
    *  with --strict-mcp-config, so the profileless agent sees exactly these). */
   extraMcpServers?: Record<string, McpServerConfig>;
+  /** Where to TEE the captured claude-code stdout (default process.stdout, keeping the daemon log
+   *  unchanged). The workflow runner passes process.stderr so a synchronous `mc workflow run` keeps its
+   *  JSON envelope on stdout uncorrupted by the child's result stream. */
+  teeStream?: NodeJS.WritableStream;
 };
 
 /** Build + spawn the executor as its OWN process group (detached) so we can SIGTERM the whole tree on cancel.
@@ -198,10 +202,11 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
     const child = spawn(plan.bin, plan.args, o);
     let captured = '';
     if (capture && child.stdout) {
+      const tee = opts.teeStream ?? process.stdout;
       child.stdout.on('data', (chunk: Buffer) => {
         const s = chunk.toString();
         captured += s;
-        process.stdout.write(s); // tee → keep the result line visible in the daemon log
+        tee.write(s); // tee → keep the result line visible in the daemon log (stderr for the CLI walker)
       });
     }
     return { child, cleanup, output: () => captured };

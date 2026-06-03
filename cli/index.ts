@@ -22,7 +22,7 @@ import {
   PROFILE_RUNTIMES,
   PERMISSION_MODES,
 } from '../lib/db/schema';
-import { assertEnum, ValidationError, NotFoundError, ConflictError } from '../lib/validation';
+import { assertEnum, ValidationError, NotFoundError, ConflictError, slugify } from '../lib/validation';
 import { SPEND_GROUP_BYS, SCHEDULE_MIN_INTERVAL_SEC } from '../lib/constants';
 import { parseGitHubRepo, listIssues, GitHubError } from '../lib/github';
 import { statusLabel, isTaskDone, taskState } from '../lib/ui';
@@ -31,7 +31,7 @@ import { scanForLeakedSecrets, type ProfileInput, type ProfileUpdate, type Match
 import { ensureDbCredentials, ConfigError } from './env';
 import { ComposioApiError } from '../lib/composio-api';
 import type { ProjectWithTasks } from '../lib/queries';
-import type { Category, Project, Task, AgentProfile } from '../lib/db/schema';
+import type { Category, Project, Task, AgentProfile, WorkflowGraph } from '../lib/db/schema';
 import type { ProjectInput, ProjectUpdate } from '../lib/mutations';
 
 // ── Output / envelope ───────────────────────────────────────────────────────--
@@ -186,6 +186,30 @@ function parseMcpConfig(raw: string): Record<string, unknown> {
   return (obj && typeof obj === 'object' && obj.mcpServers ? obj.mcpServers : (parsed as Record<string, unknown>));
 }
 
+/** Parse `--graph` (inline JSON or `@path`) into a React Flow `{ nodes, edges }`. Throws ValidationError
+ *  on bad JSON / missing file; structural validation (DAG, one trigger, agent prompts) is lib/workflows. */
+function parseGraphArg(raw: string): WorkflowGraph {
+  let text = raw;
+  if (raw.startsWith('@')) {
+    try {
+      text = readFileSync(raw.slice(1), 'utf8');
+    } catch (e) {
+      throw new ValidationError('graph', `Cannot read ${raw.slice(1)}: ${(e as Error).message}`);
+    }
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ValidationError('graph', 'Invalid JSON (use inline JSON or @path/to/graph.json)');
+  }
+  const g = parsed as Partial<WorkflowGraph>;
+  if (!g || typeof g !== 'object' || !Array.isArray(g.nodes) || !Array.isArray(g.edges)) {
+    throw new ValidationError('graph', 'graph must be an object with `nodes` and `edges` arrays');
+  }
+  return { nodes: g.nodes, edges: g.edges };
+}
+
 /** Build validated profile fields from a raw options bag. Only keys actually present are returned, so it
  *  drives both `add` (createProfile fills defaults) and the partial `update`. Enum validation is strict;
  *  match-* flags assemble matchRules; --env collects KEY=VALUE pairs. Deep validation (mcp shape, regex,
@@ -335,6 +359,13 @@ const SPEC = [
   { name: 'composio disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
   { name: 'composio mcp-config', readonly: true, summary: "Resolve a project's active connections into an mcpServers map", args: ['<slug>'] },
   { name: 'composio refresh', readonly: false, summary: "Re-poll a project's Composio connections; emit events on status changes", args: ['<slug>'] },
+  { name: 'workflow list', readonly: true, summary: 'List workflows', options: ['--project'] },
+  { name: 'workflow get', readonly: true, summary: 'Get one workflow by slug', args: ['<slug>'] },
+  { name: 'workflow create', readonly: false, summary: 'Create a workflow from a node graph', required: ['--project', '--name'], options: ['--slug', '--graph', '--description'] },
+  { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous)', args: ['<slug>'], options: ['--timeout', '--allow-concurrent'] },
+  { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
+  { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
+  { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
   { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
@@ -964,6 +995,146 @@ withFlags(composio.command('refresh'))
           console.log(`\n${refreshed.length} connection${refreshed.length === 1 ? '' : 's'}, ${changed} changed`);
         },
       };
+    }),
+  );
+
+// ── workflow ──
+const workflow = program.command('workflow').description('Agentic workflows — node graphs of agent runs + integrations');
+
+withFlags(workflow.command('list'))
+  .description('List workflows')
+  .option('--project <slug>', 'filter to one project')
+  .action((opts: LeafOpts) =>
+    emit('workflow list', opts, async () => {
+      ensureDbCredentials();
+      const { listWorkflows } = await import('../lib/workflow-store');
+      const { getProjectIdBySlug } = await import('../lib/queries');
+      let projectId: string | undefined;
+      if (opts.project) {
+        const id = await getProjectIdBySlug(String(opts.project));
+        if (!id) throw new NotFoundError('project', String(opts.project), NO_SLUG_HINT);
+        projectId = id;
+      }
+      const items = await listWorkflows({ projectId });
+      return {
+        data: { items, count: items.length },
+        human: () => {
+          items.forEach((w) => console.log(`${w.slug}  ${w.name}  [${w.status}]  ${w.graph.nodes.length} nodes`));
+          console.log(`\n${items.length} workflow${items.length === 1 ? '' : 's'}`);
+        },
+      };
+    }),
+  );
+
+withFlags(workflow.command('get'))
+  .description('Get one workflow by slug')
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow get', opts, async () => {
+      ensureDbCredentials();
+      const { getWorkflowBySlug } = await import('../lib/workflow-store');
+      const wf = await getWorkflowBySlug(slug);
+      if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
+      return { data: wf, human: () => console.log(`${wf.slug}  ${wf.name}  [${wf.status}]  v${wf.version}  ${wf.graph.nodes.length} nodes`) };
+    }),
+  );
+
+withFlags(workflow.command('create'))
+  .description('Create a workflow from a node graph (JSON inline or @file)')
+  .requiredOption('--project <slug>', 'home project')
+  .requiredOption('--name <name>', 'workflow name')
+  .option('--slug <slug>', 'workflow slug (defaults to slugified name)')
+  .option('--graph <json|@file>', 'React Flow graph {nodes,edges} (inline or @path)')
+  .option('--description <text>', 'optional description')
+  .action((opts: LeafOpts) =>
+    emit('workflow create', opts, async () => {
+      ensureDbCredentials();
+      const { validateGraph } = await import('../lib/workflows');
+      const { createWorkflow } = await import('../lib/workflow-store');
+      const { getProjectIdBySlug } = await import('../lib/queries');
+      const projectId = await getProjectIdBySlug(String(opts.project));
+      if (!projectId) throw new NotFoundError('project', String(opts.project), NO_SLUG_HINT);
+      const graph = opts.graph ? parseGraphArg(String(opts.graph)) : { nodes: [], edges: [] };
+      if (graph.nodes.length) validateGraph(graph); // empty = draft; a provided graph must be runnable
+      const slug = slugify(String(opts.slug ?? opts.name));
+      const wf = await createWorkflow({
+        projectId,
+        slug,
+        name: String(opts.name),
+        description: opts.description ? String(opts.description) : null,
+        graph,
+      });
+      return { data: wf, human: () => console.log(`created workflow ${wf.slug} (${wf.id})`) };
+    }),
+  );
+
+withFlags(workflow.command('run'))
+  .description('Run a workflow now (synchronous; short prompts — durable async lands in a later slice)')
+  .argument('<slug>')
+  .option('--timeout <sec>', 'per-agent-node timeout', (v) => parseInt(v, 10))
+  .option('--allow-concurrent', 'bypass the single-flight guard')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow run', opts, async () => {
+      ensureDbCredentials();
+      const { runWorkflow } = await import('../daemon/workflow-runner');
+      const result = await runWorkflow(slug, {
+        trigger: 'manual',
+        timeoutSec: typeof opts.timeout === 'number' ? (opts.timeout as number) : undefined,
+        allowConcurrent: !!opts.allowConcurrent,
+        log: (m) => process.stderr.write(`[wf] ${m}\n`),
+      });
+      return { data: result, human: () => console.log(`workflow ${slug} → ${result.status} (run ${result.workflowRunId})`) };
+    }),
+  );
+
+withFlags(workflow.command('status'))
+  .description('Show a workflow run + its per-node steps')
+  .argument('<runId>')
+  .action((runId: string, opts: LeafOpts) =>
+    emit('workflow status', opts, async () => {
+      ensureDbCredentials();
+      const { getWorkflowRun, listStepRuns } = await import('../lib/workflow-store');
+      const run = await getWorkflowRun(runId);
+      if (!run) throw new NotFoundError('workflow run', runId);
+      const steps = await listStepRuns(runId);
+      return {
+        data: { run, steps },
+        human: () => {
+          console.log(`run ${run.id}  ${run.status}  (trigger ${run.trigger})`);
+          steps.forEach((s) => console.log(`  ${s.nodeId}  ${s.status}${s.runId ? `  run=${s.runId.slice(0, 8)}` : ''}${s.error ? `  ${s.error}` : ''}`));
+        },
+      };
+    }),
+  );
+
+withFlags(workflow.command('cancel'))
+  .description('Request cancellation of a workflow run (propagates to the active agent run)')
+  .argument('<runId>')
+  .action((runId: string, opts: LeafOpts) =>
+    emit('workflow cancel', opts, async () => {
+      ensureDbCredentials();
+      const { getWorkflowRun, requestWorkflowRunCancel, listStepRuns } = await import('../lib/workflow-store');
+      const { setRunCancelRequested } = await import('../lib/mutations');
+      const run = await getWorkflowRun(runId);
+      if (!run) throw new NotFoundError('workflow run', runId);
+      const cancelled = await requestWorkflowRunCancel(runId);
+      // Propagate to the in-flight agent node's run so a long node aborts (kill-switch), not just the next gap.
+      const active = (await listStepRuns(runId)).find((s) => s.status === 'running' && s.runId);
+      if (active?.runId) await setRunCancelRequested(active.runId);
+      return { data: cancelled, human: () => console.log(`workflow run ${runId} cancel requested`) };
+    }),
+  );
+
+withFlags(workflow.command('pause'))
+  .description('Pause a workflow (status → paused)')
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow pause', opts, async () => {
+      ensureDbCredentials();
+      const { setWorkflowStatus } = await import('../lib/workflow-store');
+      const wf = await setWorkflowStatus(slug, 'paused');
+      if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
+      return { data: wf, human: () => console.log(`${wf.slug}: ${wf.status}`) };
     }),
   );
 

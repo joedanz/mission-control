@@ -114,6 +114,15 @@ mc task import-issues <slug> [--state open|closed|all] [--label <name>] [--limit
 mc integration set <slug> <type> <status>   # upsert by (project, type); idempotent
 mc integration list <slug>
 
+# Agentic workflows — node graphs (React Flow {nodes,edges}) that chain agent runs + integrations
+mc workflow list [--project <slug>]
+mc workflow get <slug>
+mc workflow create --project <slug> --name <n> [--slug <s>] [--graph <json|@file>] [--description <d>]   # a provided graph is validated (DAG, exactly one trigger, agent nodes need a prompt); omit --graph for an empty draft. Node types: trigger | agent | integration | branch | gate (slice 1 runs trigger + agent). Agent node data = {prompt (required), profileSlug?, projectSlug?, responseSchema?}
+mc workflow run <slug> [--timeout <sec>] [--allow-concurrent]   # run now, SYNCHRONOUSLY (short prompts; durable async lands later). RUN-ONLY: an agent node opens a real run (cost/heartbeat/feed/cancel) — NO claimable task, so the auto-claim daemon can't race it. Graph is snapshotted onto the run; single-flight unless --allow-concurrent
+mc workflow status <runId>                  # the workflow run + its per-node step rows (agent steps link a runs id + captured output)
+mc workflow cancel <runId>                  # cancel a workflow run; propagates to the in-flight agent run (kill-switch)
+mc workflow pause <slug>                    # status → paused
+
 # Agent profiles — capability bundles (skills/MCP/model/tools/persona) + auto-routing rules
 mc profile list [--enabled] [--runtime claude-code|exec] [--schedulable]   # --schedulable = enabled + scheduled check-ins on
 mc profile get <slug>
