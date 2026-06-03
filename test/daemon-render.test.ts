@@ -126,6 +126,14 @@ describe('planSpawn — no profile (back-compat)', () => {
     ]);
     expect(plan.runtime).toBe('claude-code');
   });
+
+  it('appends --json-schema with the stringified schema when one is requested', () => {
+    const schema = { type: 'object', properties: { city: { type: 'string' } } };
+    const plan = planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {}, jsonSchema: schema });
+    const i = plan.args.indexOf('--json-schema');
+    expect(i).toBeGreaterThan(-1);
+    expect(plan.args[i + 1]).toBe(JSON.stringify(schema));
+  });
 });
 
 describe('planSpawn — executor binary override (MC_CLAUDE_BIN)', () => {
@@ -190,6 +198,13 @@ describe('planSpawn — claude-code', () => {
     expect(plan.args[plan.args.indexOf('--permission-mode') + 1]).toBe('plan');
     expect(plan.args).not.toContain('--mcp-config'); // none configured
     expect(plan.args).not.toContain('--model');
+    expect(plan.args).not.toContain('--json-schema'); // none requested
+  });
+
+  it('renders --json-schema for a profile spawn when a responseSchema is requested', () => {
+    const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] };
+    const plan = planSpawn(profile({ model: 'haiku' }), { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {}, jsonSchema: schema });
+    expect(plan.args[plan.args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(schema));
   });
 
   it('merges extraAllowedTools into --allowedTools (the daemon grants self-serve mc access for check-ins)', () => {

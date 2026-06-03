@@ -1,10 +1,11 @@
-// ABOUTME: The workflow graph walker (slice 1). Drives a manual-trigger → agent-node graph: for each agent
-// ABOUTME: node it spawns a real run via the shared runner primitives (spawnExecutor/monitorAndFinalize),
-// ABOUTME: writes run state through the `mc` CLI (so mc_agent scoping stays at the CLI boundary, like the
-// ABOUTME: auto-claim + scheduler daemons), and records per-node step state. RUN-ONLY: an agent node links a
-// ABOUTME: runs row (cost/heartbeat/fleet feed/cancel come from it) — it never creates a claimable task.
-// ABOUTME: Workflow + step state IS written directly via lib/workflow-store (new runner-owned tables, no
-// ABOUTME: mc_agent-sensitive surface yet); those writes move behind the mc boundary when async execution lands.
+// ABOUTME: The workflow graph walker (slices 1+3). Drives a manual-trigger → agent-node graph: for each
+// ABOUTME: agent node it interpolates {{nodeId.field}} data-passing refs from upstream step outputs, spawns a
+// ABOUTME: real run (optionally requesting structured output via responseSchema), writes run state through the
+// ABOUTME: `mc` CLI (mc_agent scoping at the CLI boundary, like auto-claim + scheduler), and records per-node
+// ABOUTME: step state. RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it)
+// ABOUTME: — it never creates a claimable task. A failed node halts the workflow unless its onError='continue'.
+// ABOUTME: Workflow + step state IS written directly via lib/workflow-store; those writes move behind the mc
+// ABOUTME: boundary when async execution lands.
 
 import { randomUUID } from 'node:crypto';
 import { mc, spawnExecutor, monitorAndFinalize, type Log } from './runner';
@@ -20,9 +21,10 @@ import {
   listStepRuns,
 } from '../lib/workflow-store';
 import { validateGraph, topoOrder, nodeById, readAgentNodeData } from '../lib/workflows';
+import { normalizeStepOutput, interpolate, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/validation';
-import type { Project, WorkflowNode, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
+import type { Project, WorkflowNode, WorkflowOnError, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
 
 const DEFAULT_TIMEOUT_SEC = 900;
 const DEFAULT_GRACE_SEC = 15;
@@ -82,10 +84,16 @@ export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Pro
   log(`workflow ${slug} run ${wfRun.id.slice(0, 8)} started (${snapshot.nodes.length} nodes)`);
 
   // Resume: nodes a prior attempt already completed are skipped (the (run, node) unique key makes re-running
-  // safe). Read once up front — the set is fixed at run start — instead of re-reading the step list per node.
-  const completed = new Set((await listStepRuns(wfRun.id)).filter((s) => s.status === 'completed').map((s) => s.nodeId));
+  // safe). `views` doubles as the skip-set AND the {{nodeId.field}} data-passing substrate — seed it from
+  // those completed steps' outputs (normalized once each) so refs resolve even across a resume. Read once up
+  // front — fixed at run start — not per node.
+  const views = new Map<string, RefView>();
+  for (const s of await listStepRuns(wfRun.id)) {
+    if (s.status === 'completed') views.set(s.nodeId, normalizeStepOutput(s.output));
+  }
 
   let finalStatus: WorkflowRunStatus = 'completed';
+  let anyFailed = false; // a node failed but onError='continue' kept the walk going → run ends 'failed'
   try {
     for (const nodeId of topoOrder(snapshot)) {
       // Cancellation is checked between nodes; the active agent node is cancelled via its own runs row.
@@ -95,38 +103,38 @@ export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Pro
       }
       await touchWorkflowRun(wfRun.id); // liveness heartbeat for the reaper
 
-      if (completed.has(nodeId)) continue;
+      if (views.has(nodeId)) continue; // already completed (this run or a prior attempt)
 
       const node = nodeById(snapshot, nodeId);
       if (!node) continue; // topoOrder only yields graph node ids; defensive
 
       if (node.type === 'trigger') {
-        await upsertStepRun(wfRun.id, nodeId, {
-          status: 'completed',
-          startedAt: new Date(),
-          endedAt: new Date(),
-          output: { trigger: opts.trigger ?? 'manual' },
-        });
+        const output = { trigger: opts.trigger ?? 'manual' };
+        await upsertStepRun(wfRun.id, nodeId, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
+        views.set(nodeId, normalizeStepOutput(output));
         continue;
       }
 
       if (node.type === 'agent') {
-        const ok = await runAgentNode(wfRun.id, slug, node, home, opts, log);
-        if (!ok) {
-          finalStatus = 'failed';
-          break; // halt the workflow on a failed step (slice 1; onError policy lands in slice 3)
+        const res = await runAgentNode(wfRun.id, slug, node, home, opts, log, views);
+        if (res.ok) {
+          views.set(nodeId, normalizeStepOutput(res.output));
+          continue;
         }
-        continue;
+        anyFailed = true;
+        if (res.onError === 'continue') continue; // keep walking; downstream refs to this node hard-fail
+        break; // onError='halt' (default) — stop; the post-loop reconciliation marks the run failed
       }
 
-      // trigger + agent are all slice 1 supports; anything else is an honest not-yet error.
-      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (slice 1 handles trigger + agent)`);
+      // trigger + agent are all the walker executes; anything else is an honest not-yet error.
+      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent)`);
     }
   } catch (err) {
     await setWorkflowRunStatus(wfRun.id, 'failed');
     throw err; // surface ValidationError/etc. to the CLI envelope
   }
 
+  if (finalStatus === 'completed' && anyFailed) finalStatus = 'failed'; // a continued failure still fails the run
   await setWorkflowRunStatus(wfRun.id, finalStatus);
   const steps = await listStepRuns(wfRun.id);
   log(`workflow ${slug} run ${wfRun.id.slice(0, 8)} → ${finalStatus}`);
@@ -138,7 +146,11 @@ async function failStep(wfRunId: string, nodeId: string, error: string): Promise
   await upsertStepRun(wfRunId, nodeId, { status: 'failed', startedAt: new Date(), endedAt: new Date(), error });
 }
 
-/** Spawn one agent node as a real run. Returns true on a completed run, false on any failure (caller halts). */
+type AgentNodeResult = { ok: boolean; output?: unknown; onError: WorkflowOnError };
+
+/** Spawn one agent node as a real run. Interpolates {{nodeId.field}} data-passing refs from `views` first
+ *  (an unresolved ref hard-fails the node — the source is missing/failed). Returns `ok` + the captured output
+ *  (stored on the step for downstream refs) + the node's onError policy (so the caller halts or continues). */
 async function runAgentNode(
   wfRunId: string,
   slug: string,
@@ -146,27 +158,38 @@ async function runAgentNode(
   home: Project,
   opts: RunWorkflowOpts,
   log: Log,
-): Promise<boolean> {
+  views: Map<string, RefView>,
+): Promise<AgentNodeResult> {
   const data = readAgentNodeData(node);
+  const onError = data.onError ?? 'halt';
+  const fail = async (error: string): Promise<AgentNodeResult> => {
+    await failStep(wfRunId, node.id, error);
+    return { ok: false, onError };
+  };
 
-  // Cross-project agent nodes are deferred — a slice-1 node runs in the workflow's home project.
+  // Cross-project agent nodes are deferred — a node runs in the workflow's home project.
   if (data.projectSlug && data.projectSlug !== home.slug) {
     throw new ValidationError('node.data.projectSlug', `cross-project nodes are deferred; node "${node.id}" must target the workflow's home project "${home.slug}"`);
   }
   if (!home.repoPath) {
-    await failStep(wfRunId, node.id, `home project "${home.slug}" has no repoPath (set one with: mc project set-repo)`);
     log(`node ${node.id}: home project has no repoPath — failing step`);
-    return false;
+    return fail(`home project "${home.slug}" has no repoPath (set one with: mc project set-repo)`);
+  }
+
+  // Data passing: resolve {{nodeId.field}} refs against completed upstream outputs (normalized into `views`
+  // by the caller). validateGraph already proved each ref targets an ancestor; a runtime miss (ancestor
+  // failed under onError:continue, or no such field) is a hard fail of THIS node (per the missing-ref decision).
+  const { text: prompt, missing } = interpolate(data.prompt, views);
+  if (missing.length) {
+    log(`node ${node.id}: unresolved data refs ${missing.join(', ')} — failing step`);
+    return fail(`unresolved data references: ${missing.join(', ')}`);
   }
 
   // Profile: an explicit slug must exist; otherwise auto-route (may be null → planSpawn's back-compat path).
   const profile = data.profileSlug
     ? await getProfileBySlug(data.profileSlug)
-    : await resolveProfile({ projectSlug: home.slug, taskKind: 'custom', taskLabel: data.prompt.split('\n')[0] });
-  if (data.profileSlug && !profile) {
-    await failStep(wfRunId, node.id, `profile "${data.profileSlug}" not found`);
-    return false;
-  }
+    : await resolveProfile({ projectSlug: home.slug, taskKind: 'custom', taskLabel: prompt.split('\n')[0] });
+  if (data.profileSlug && !profile) return fail(`profile "${data.profileSlug}" not found`);
 
   const runId = randomUUID();
 
@@ -176,21 +199,19 @@ async function runAgentNode(
   if (profile) startArgs.push('--profile', profile.slug);
   if (profile?.model) startArgs.push('--model', profile.model);
   const started = await mc(startArgs);
-  if (!started.ok) {
-    await failStep(wfRunId, node.id, `mc run start failed (${started.error?.code ?? started.code})`);
-    return false;
-  }
+  if (!started.ok) return fail(`mc run start failed (${started.error?.code ?? started.code})`);
   const step = await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date(), runId });
 
   let spawned;
   try {
     spawned = spawnExecutor({
-      prompt: data.prompt,
+      prompt, // the interpolated prompt — {{refs}} already substituted with upstream values
       runId,
       repoPath: home.repoPath,
       profile,
       effectiveModel: profile?.model ?? null,
       basePermissionMode: opts.basePermissionMode ?? DEFAULT_PERMISSION_MODE,
+      jsonSchema: data.responseSchema, // structured output → captured as result.structured_output
       teeStream: process.stderr, // keep stdout clean for the CLI's JSON envelope
     });
   } catch (e) {
@@ -198,7 +219,7 @@ async function runAgentNode(
     await mc(['run', 'end', runId, 'failed']);
     await setStepRunStatus(step.id, 'failed', { error: (e as Error).message });
     log(`node ${node.id}: spawn failed — ${(e as Error).message}`);
-    return false;
+    return { ok: false, onError };
   }
 
   const { status } = await monitorAndFinalize(
@@ -208,8 +229,10 @@ async function runAgentNode(
     log,
   );
 
-  const output = { runId, runStatus: status, result: parseClaudeResult(spawned.output()) };
+  // Persist the resolved prompt alongside the run result so the substrate is fully self-describing (what ran,
+  // what came back) — feeds downstream {{nodeId.result|output}} refs and the canvas inspector later.
+  const output = { runId, runStatus: status, prompt, result: parseClaudeResult(spawned.output()) };
   const stepStatus = status === 'completed' ? 'completed' : 'failed';
   await setStepRunStatus(step.id, stepStatus, { output, ...(stepStatus === 'failed' ? { error: `run ${status}` } : {}) });
-  return stepStatus === 'completed';
+  return { ok: stepStatus === 'completed', output, onError };
 }

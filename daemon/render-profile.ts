@@ -97,6 +97,10 @@ export type PlanOpts = {
   // this to grant `Bash(mc:*)` so a check-in can self-serve (claim/work tasks) via the mc CLI without the
   // operator having to remember to allow-list it. Applies only to the claude-code runtime.
   extraAllowedTools?: string[];
+  // A JSON Schema for structured output — rendered as claude's `--json-schema` (claude-code runtime only).
+  // The workflow walker passes an agent node's responseSchema here; the result line then carries a schema-
+  // validated `structured_output` object (the substrate for {{nodeId.output}} data-passing). exec ignores it.
+  jsonSchema?: Record<string, unknown>;
 };
 
 export type ModelChoice = { model: string | null; downgraded: boolean };
@@ -139,6 +143,8 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
   // node_modules/.bin walk prepended, which can shadow the real install with a stale/broken one. MC_CLAUDE_BIN
   // lets the deployment pin an absolute path (mirrors MC_BIN for the mc CLI). See INSTALL.md.
   const claudeBin = hostEnv.MC_CLAUDE_BIN || 'claude';
+  // Structured-output request (claude-code only) — appended to whichever claude-code branch renders below.
+  const jsonSchemaArgs = opts.jsonSchema ? ['--json-schema', JSON.stringify(opts.jsonSchema)] : [];
 
   if (!profile) {
     // Historical back-compat invocation when nothing is auto-fed. With auto-fed Composio servers
@@ -146,6 +152,7 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
     // the profileless agent then sees those servers and nothing else (no host MCP bleed-in).
     const args = ['-p', prompt, '--permission-mode', basePermissionMode, '--output-format', 'json'];
     if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+    args.push(...jsonSchemaArgs);
     return { runtime: 'claude-code', bin: claudeBin, args, extraEnv: {} };
   }
 
@@ -180,5 +187,6 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
   if (profile.disallowedTools.length) args.push('--disallowed-tools', profile.disallowedTools.join(','));
   // --strict-mcp-config makes the profile's server set authoritative (no host MCP bleed-in → reproducible).
   if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+  args.push(...jsonSchemaArgs);
   return { runtime: 'claude-code', bin: claudeBin, args, extraEnv };
 }
