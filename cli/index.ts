@@ -333,6 +333,7 @@ const SPEC = [
   { name: 'composio status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
   { name: 'composio list', readonly: true, summary: "List a project's Composio connections", args: ['<slug>'] },
   { name: 'composio disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
+  { name: 'composio mcp-config', readonly: true, summary: "Resolve a project's active connections into an mcpServers map", args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
   { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
@@ -925,6 +926,24 @@ withFlags(composio.command('disconnect'))
       const { disconnect } = await import('../lib/composio-connections');
       const connection = await disconnect(slug, toolkit);
       return { data: connection, human: () => console.log(`${slug}/${toolkit}: ${connection.status}`) };
+    }),
+  );
+
+withFlags(composio.command('mcp-config'))
+  .description("Resolve a project's active connections into an mcpServers map (placeholder secrets)")
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('composio mcp-config', opts, async () => {
+      ensureDbCredentials();
+      const { resolveProjectMcpServers } = await import('../lib/composio-connections');
+      const mcpServers = await resolveProjectMcpServers(slug);
+      return {
+        data: { mcpServers },
+        human: () => {
+          const keys = Object.keys(mcpServers);
+          console.log(keys.length ? keys.join('\n') : '(no active connections)');
+        },
+      };
     }),
   );
 
