@@ -3,6 +3,9 @@
 
 import type { McpServerConfig } from './db/schema';
 
+/** One already-joined active-connection row: the inputs needed to emit a single mcpServers entry. */
+export type ConnectionMcpRow = { toolkitSlug: string; userId: string; mcpUrl: string };
+
 /** Stable mcpServers key for a toolkit (matches the slice-1 proof's "composio-linear"). */
 export function composioServerKey(toolkitSlug: string): string {
   return `composio-${toolkitSlug}`;
@@ -12,7 +15,7 @@ export function composioServerKey(toolkitSlug: string): string {
  *  entry carrying the ${COMPOSIO_API_KEY} placeholder (the daemon resolves it at spawn, never here).
  *  The caller passes ONLY the rows it wants emitted (active, with a known mcpUrl). */
 export function buildConnectionMcpServers(
-  rows: { toolkitSlug: string; userId: string; mcpUrl: string }[],
+  rows: ConnectionMcpRow[],
 ): Record<string, McpServerConfig> {
   const out: Record<string, McpServerConfig> = {};
   for (const { toolkitSlug, userId, mcpUrl } of rows) {

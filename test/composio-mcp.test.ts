@@ -29,6 +29,19 @@ describe('buildConnectionMcpServers (pure)', () => {
       { toolkitSlug: 'slack', userId: 'u1', mcpUrl: 'https://x/v3/mcp/b' },
     ]);
     expect(Object.keys(map).sort()).toEqual(['composio-linear', 'composio-slack']);
+    expect(map['composio-linear'].url).toBe('https://x/v3/mcp/a?user_id=u1');
+    expect(map['composio-linear'].headers).toEqual({ 'x-api-key': '${COMPOSIO_API_KEY}' });
+    expect(map['composio-slack'].url).toBe('https://x/v3/mcp/b?user_id=u1');
+    expect(map['composio-slack'].headers).toEqual({ 'x-api-key': '${COMPOSIO_API_KEY}' });
+  });
+
+  it('lets the last row win on a duplicate toolkitSlug', () => {
+    const map = buildConnectionMcpServers([
+      { toolkitSlug: 'linear', userId: 'first', mcpUrl: 'https://x/v3/mcp/a' },
+      { toolkitSlug: 'linear', userId: 'second', mcpUrl: 'https://x/v3/mcp/a' },
+    ]);
+    expect(Object.keys(map)).toEqual(['composio-linear']);
+    expect(map['composio-linear'].url).toBe('https://x/v3/mcp/a?user_id=second');
   });
 
   it('url-encodes the user_id', () => {
