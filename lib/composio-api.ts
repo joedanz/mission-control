@@ -1,7 +1,7 @@
 // ABOUTME: Composio v3 HTTP client (auth-config / MCP-server / connected-account) + pure helpers
 // ABOUTME: (user_id derivation, status mapping). No DB (type-only schema import). Vercel-safe fetch, no SDK.
 
-import type { ConnectionStatus } from './db/schema';
+import type { ConnectionStatus, EventLevel } from './db/schema';
 
 const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3';
 
@@ -39,6 +39,19 @@ export function mapStatus(raw: string | undefined | null): ConnectionStatus {
  *  from the freshly-created one, else null (nothing to clean up). Pure. */
 export function orphanedConnectedAccountId(existingId: string | null | undefined, newId: string): string | null {
   return existingId && existingId !== newId ? existingId : null;
+}
+
+/** The event (if any) for a connection status transition. Null when nothing changed. A move to
+ *  'active' is an info recovery; any other move is a warn that names the re-auth command. Pure. */
+export function transitionEvent(
+  projectSlug: string,
+  toolkitSlug: string,
+  from: ConnectionStatus,
+  to: ConnectionStatus,
+): { level: EventLevel; summary: string } | null {
+  if (from === to) return null;
+  if (to === 'active') return { level: 'info', summary: `${toolkitSlug} connection recovered — now active` };
+  return { level: 'warn', summary: `${toolkitSlug} connection ${to} — re-auth needed (mc composio connect ${projectSlug} ${toolkitSlug})` };
 }
 
 async function composioFetch(path: string, init?: RequestInit): Promise<unknown> {
