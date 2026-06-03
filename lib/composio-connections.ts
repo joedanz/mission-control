@@ -4,7 +4,7 @@
 import { getCatalogEntry } from './composio-catalog';
 import { getProjectBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
-import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus } from './composio-api';
+import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, ComposioApiError } from './composio-api';
 import type { ComposioConnection } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
 
@@ -63,7 +63,14 @@ export async function disconnect(projectSlug: string, toolkitSlug: string): Prom
   if (!project) throw new NotFoundError('project', projectSlug);
   const conn = await getConnection(project.id, toolkitSlug);
   if (!conn) throw new NotFoundError('connection', `${projectSlug}/${toolkitSlug}`);
-  if (conn.connectedAccountId) await deleteConnection(conn.connectedAccountId);
+  if (conn.connectedAccountId) {
+    try {
+      await deleteConnection(conn.connectedAccountId);
+    } catch (e) {
+      // Already gone at Composio (expired/revoked) → still mark disconnected locally.
+      if (!(e instanceof ComposioApiError && e.status === 404)) throw e;
+    }
+  }
   const updated = await setConnectionStatus(conn.id, 'disconnected');
   return updated ?? conn;
 }
