@@ -12,32 +12,48 @@ type State =
   | { kind: 'error'; message: string }
   | { kind: 'data'; toolkits: ToolkitView[] };
 
+type GetResponse = { ok: boolean; error?: string; message?: string; data?: { toolkits: ToolkitView[] } };
+
+function toState(json: GetResponse): State {
+  if (json.ok && json.data) return { kind: 'data', toolkits: json.data.toolkits };
+  return { kind: 'error', message: json.message ?? json.error ?? 'Failed to load integrations' };
+}
+
 export function IntegrationsTab({ slug }: { slug: string }) {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const stateRef = useRef<State>(state);
-  stateRef.current = state;
-
   const loadSeq = useRef(0);
+
+  // Mirror the latest state into a ref (in an effect, not during render) so the focus listener can
+  // read the current toolkits without re-binding on every refresh.
+  useEffect(() => {
+    stateRef.current = state;
+  });
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     try {
       const res = await fetch(`/api/projects/${slug}/composio`);
-      const json = (await res.json()) as {
-        ok: boolean; error?: string; message?: string; data?: { toolkits: ToolkitView[] };
-      };
-      if (seq !== loadSeq.current) return; // a newer load() superseded this one
-      if (json.ok && json.data) setState({ kind: 'data', toolkits: json.data.toolkits });
-      else setState({ kind: 'error', message: json.message ?? json.error ?? 'Failed to load integrations' });
+      const json = (await res.json()) as GetResponse;
+      if (seq === loadSeq.current) setState(toState(json)); // ignore a superseded (out-of-order) load
     } catch (err) {
-      if (seq !== loadSeq.current) return;
-      setState({ kind: 'error', message: String(err) });
+      if (seq === loadSeq.current) setState({ kind: 'error', message: String(err) });
     }
   }, [slug]);
 
+  // Initial fetch on mount / slug change. Inlined with .then (rather than calling load()) so setState
+  // is deferred into the promise callback — keeps react-hooks/set-state-in-effect satisfied.
   useEffect(() => {
-    void load();
-  }, [load]);
+    const seq = ++loadSeq.current;
+    fetch(`/api/projects/${slug}/composio`)
+      .then((res) => res.json())
+      .then((json: GetResponse) => {
+        if (seq === loadSeq.current) setState(toState(json));
+      })
+      .catch((err: unknown) => {
+        if (seq === loadSeq.current) setState({ kind: 'error', message: String(err) });
+      });
+  }, [slug]);
 
   // On window focus, poll any still-initializing toolkit (the user just returned from authorizing), then refresh.
   useEffect(() => {
