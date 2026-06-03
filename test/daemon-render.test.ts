@@ -3,11 +3,12 @@
 // ABOUTME: No DB / no spawn / no fs — this is the testable core the daemon calls before it forks a child.
 
 import { describe, it, expect } from 'vitest';
-import type { AgentProfile } from '../lib/db/schema';
+import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import {
   resolvePlaceholders,
   resolveProfileEnv,
   resolveMcpConfigJson,
+  mergeMcpServers,
   planSpawn,
   chooseModel,
   MissingEnvError,
@@ -275,5 +276,27 @@ describe('planSpawn — exec (non-Claude runtime)', () => {
     expect(() =>
       planSpawn(profile({ runtime: 'exec', execTemplate: null }), { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {} }),
     ).toThrow();
+  });
+});
+
+describe('mergeMcpServers (pure)', () => {
+  const a: McpServerConfig = { type: 'http', url: 'https://a' };
+  const b: McpServerConfig = { type: 'http', url: 'https://b' };
+
+  it('returns null when both are empty', () => {
+    expect(mergeMcpServers(null, null)).toBeNull();
+    expect(mergeMcpServers({}, {})).toBeNull();
+  });
+
+  it('passes a base (profile) map through when there is no extra', () => {
+    expect(mergeMcpServers({ gh: a }, null)).toEqual({ gh: a });
+  });
+
+  it('unions disjoint keys', () => {
+    expect(mergeMcpServers({ gh: a }, { 'composio-linear': b })).toEqual({ gh: a, 'composio-linear': b });
+  });
+
+  it('profile (base) wins a key collision', () => {
+    expect(mergeMcpServers({ 'composio-linear': a }, { 'composio-linear': b })).toEqual({ 'composio-linear': a });
   });
 });
