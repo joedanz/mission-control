@@ -93,16 +93,13 @@ export function interpolateValue(value: unknown, viewsByNodeId: Map<string, RefV
   const missing: string[] = [];
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') {
+      // A whole-value ref keeps its resolved type. On a miss (or an embedded ref / plain text), fall through
+      // to interpolate — which collects the canonical missing token and string-splices any embedded refs.
       const sole = SOLE_REF_RE.exec(v);
       if (sole) {
-        const [, nodeId, path] = sole;
-        const view = viewsByNodeId.get(nodeId);
-        const resolved = view ? resolveRef(view, path) : { found: false, value: undefined };
-        if (!resolved.found) {
-          missing.push(sole[0].trim()); // canonical {{nodeId.path}} token (matches interpolate's raw)
-          return v;
-        }
-        return resolved.value; // raw typed value — NOT stringified
+        const view = viewsByNodeId.get(sole[1]);
+        const resolved = view ? resolveRef(view, sole[2]) : { found: false, value: undefined };
+        if (resolved.found) return resolved.value; // raw typed value — NOT stringified
       }
       const { text, missing: m } = interpolate(v, viewsByNodeId);
       missing.push(...m);

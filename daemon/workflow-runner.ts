@@ -270,8 +270,9 @@ async function runIntegrationNode(
 ): Promise<NodeResult> {
   const data = readIntegrationNodeData(node); // validates toolkit + action + onError (also gated at create)
   const onError = data.onError ?? 'halt';
+  const base = { kind: 'integration' as const, toolkit: data.toolkit, action: data.action }; // shared step-output shape
   const fail = async (error: string): Promise<NodeResult> => {
-    const output = { kind: 'integration', toolkit: data.toolkit, action: data.action, runStatus: 'failed', error };
+    const output = { ...base, runStatus: 'failed', error };
     await upsertStepRun(wfRunId, node.id, { status: 'failed', startedAt: new Date(), endedAt: new Date(), output, error });
     log(`node ${node.id}: ${error}`);
     return { ok: false, onError };
@@ -290,6 +291,8 @@ async function runIntegrationNode(
   if (conn.status !== 'active') return fail(`${data.toolkit} connection is ${conn.status}, not active (${reauth})`);
   if (!conn.connectedAccountId) return fail(`${data.toolkit} connection has no connected account (${reauth})`);
 
+  // Mark running before the (network) action so the canvas overlay shows it in-flight and the reaper can see a
+  // mid-action node — same rationale as the agent path's running write (here there's no runId to link).
   await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date() });
   let composioData: Record<string, unknown>;
   try {
@@ -299,7 +302,7 @@ async function runIntegrationNode(
   }
 
   // Store the resolved arguments (observability, like the agent's resolved prompt) + the response data.
-  const output = { kind: 'integration', toolkit: data.toolkit, action: data.action, runStatus: 'completed', arguments: args, data: composioData };
+  const output = { ...base, runStatus: 'completed', arguments: args, data: composioData };
   await upsertStepRun(wfRunId, node.id, { status: 'completed', endedAt: new Date(), output });
   log(`node ${node.id}: ${data.toolkit}.${data.action} ok`);
   return { ok: true, output, onError };
