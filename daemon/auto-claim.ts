@@ -115,8 +115,9 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
     return 'done';
   }
   if (choice.downgraded) await recordDowngrade(choice, profile!, spentToday, runId, a.project, log);
-  // Auto-feed the project's ACTIVE Composio connections as MCP servers (profileless spawns skip it).
-  const extraMcpServers = profile ? await fetchComposioMcpServers(a.project, runId, log) : undefined;
+  // Auto-feed the project's ACTIVE Composio connections as MCP servers — profiled and profileless
+  // spawns alike (a profileless spawn renders them with --strict-mcp-config; see planSpawn).
+  const extraMcpServers = await fetchComposioMcpServers(a.project, runId, log);
   const how = process.env.MC_DAEMON_EXEC
     ? 'executor (MC_DAEMON_EXEC)'
     : profile

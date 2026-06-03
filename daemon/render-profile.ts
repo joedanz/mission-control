@@ -141,12 +141,12 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
   const claudeBin = hostEnv.MC_CLAUDE_BIN || 'claude';
 
   if (!profile) {
-    return {
-      runtime: 'claude-code',
-      bin: claudeBin,
-      args: ['-p', prompt, '--permission-mode', basePermissionMode, '--output-format', 'json'],
-      extraEnv: {},
-    };
+    // Historical back-compat invocation when nothing is auto-fed. With auto-fed Composio servers
+    // (mcpConfigPath set), add --mcp-config + --strict-mcp-config exactly like the profile path —
+    // the profileless agent then sees those servers and nothing else (no host MCP bleed-in).
+    const args = ['-p', prompt, '--permission-mode', basePermissionMode, '--output-format', 'json'];
+    if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+    return { runtime: 'claude-code', bin: claudeBin, args, extraEnv: {} };
   }
 
   const extraEnv = resolveProfileEnv(profile.env, hostEnv);
