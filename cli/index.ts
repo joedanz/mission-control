@@ -334,6 +334,7 @@ const SPEC = [
   { name: 'composio list', readonly: true, summary: "List a project's Composio connections", args: ['<slug>'] },
   { name: 'composio disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
   { name: 'composio mcp-config', readonly: true, summary: "Resolve a project's active connections into an mcpServers map", args: ['<slug>'] },
+  { name: 'composio refresh', readonly: false, summary: "Re-poll a project's Composio connections; emit events on status changes", args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
   { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
@@ -942,6 +943,25 @@ withFlags(composio.command('mcp-config'))
         human: () => {
           const keys = Object.keys(mcpServers);
           console.log(keys.length ? keys.join('\n') : '(no active connections)');
+        },
+      };
+    }),
+  );
+
+withFlags(composio.command('refresh'))
+  .description("Re-poll a project's Composio connections; emit events on status changes")
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('composio refresh', opts, async () => {
+      ensureDbCredentials();
+      const { refreshConnections } = await import('../lib/composio-connections');
+      const refreshed = await refreshConnections(slug);
+      return {
+        data: { refreshed, count: refreshed.length },
+        human: () => {
+          refreshed.forEach((r) => console.log(`${r.toolkitSlug}: ${r.from}${r.changed ? ` → ${r.to}` : ' (unchanged)'}`));
+          const changed = refreshed.filter((r) => r.changed).length;
+          console.log(`\n${refreshed.length} connection${refreshed.length === 1 ? '' : 's'}, ${changed} changed`);
         },
       };
     }),
