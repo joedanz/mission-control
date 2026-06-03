@@ -6,25 +6,16 @@
 import { useState } from 'react';
 import type { ToolkitView, ToolkitStatus } from '@/lib/composio-view';
 
-function pillClass(status: ToolkitStatus): string {
-  switch (status) {
-    case 'active': return 'pill ok';
-    case 'initializing': return 'pill warn';
-    case 'error':
-    case 'expired': return 'pill bad';
-    default: return 'pill'; // not_connected | disconnected
-  }
-}
-
-function pillLabel(status: ToolkitStatus): string {
-  switch (status) {
-    case 'active': return 'Active';
-    case 'initializing': return 'Initializing';
-    case 'error': return 'Error';
-    case 'expired': return 'Expired';
-    default: return 'Off'; // not_connected | disconnected
-  }
-}
+// Status → pill className + label. A Record (not a switch) makes exhaustiveness compile-checked:
+// adding a ToolkitStatus value without an entry is a type error.
+const PILL: Record<ToolkitStatus, { cls: string; label: string }> = {
+  active: { cls: 'pill ok', label: 'Active' },
+  initializing: { cls: 'pill warn', label: 'Initializing' },
+  error: { cls: 'pill bad', label: 'Error' },
+  expired: { cls: 'pill bad', label: 'Expired' },
+  disconnected: { cls: 'pill', label: 'Off' },
+  not_connected: { cls: 'pill', label: 'Off' },
+};
 
 type PostResult =
   | { ok: true; data: { linkUrl?: string; status?: string } }
@@ -67,6 +58,7 @@ export function IntegrationRow({
     }
   }
 
+  const pill = PILL[view.status];
   const connected = view.status === 'active';
   const initializing = view.status === 'initializing';
 
@@ -84,7 +76,7 @@ export function IntegrationRow({
         {rowError && <span className="intg-error"> · {rowError}</span>}
       </span>
       <span className="intg-actions">
-        <span className={pillClass(view.status)}>{pillLabel(view.status)}</span>
+        <span className={pill.cls}>{pill.label}</span>
         {connected ? (
           <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run('disconnect')}>
             Disconnect

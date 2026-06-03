@@ -29,7 +29,7 @@ export function toolkitViews(connections: ComposioConnection[]): ToolkitView[] {
       // conn.status is the DB text column (typed string); its values are the closed set
       // initializing|active|error|expired|disconnected — a subset of ToolkitStatus — so the cast is safe.
       status: (conn?.status ?? 'not_connected') as ToolkitStatus,
-      linkUrl: conn?.status === 'initializing' ? (conn.linkUrl ?? null) : null,
+      linkUrl: conn?.status === 'initializing' ? conn.linkUrl : null,
       error: conn?.error ?? null,
     };
   });
