@@ -6,6 +6,10 @@
 // {{nodeId.path}} — nodeId has no dots; path is a dotted chain (e.g. result, output, output.foo.bar, status).
 // Inner whitespace is tolerated; literal <a.b> / {a.b} do NOT match (must be double braces).
 const REF_RE = /\{\{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_][A-Za-z0-9_.]*?)\s*\}\}/g;
+// The SAME token anchored to the whole string — a value that IS a single ref (e.g. an integration node's
+// arg `"{{i.output.count}}"`) resolves to the RAW typed value (number/object/array preserved), where an
+// embedded ref (`"issue #{{i.output.id}}"`) string-splices. Outer whitespace tolerated.
+const SOLE_REF_RE = /^\s*\{\{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_][A-Za-z0-9_.]*?)\s*\}\}\s*$/;
 
 export type Ref = { raw: string; nodeId: string; path: string };
 
@@ -22,13 +26,20 @@ export type RefView = { result: string | null; output: unknown; status: string |
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Project a step's stored `output` (jsonb: { runId, runStatus, result: <claude result line> | null, … })
- *  into the resolvable RefView. Defensive — a trigger/stub/exec step (no claude result line) yields nulls. */
+/** Project a step's stored `output` (jsonb) into the resolvable RefView. Two stored shapes:
+ *  - agent step  `{ runId, runStatus, result: <claude result line> | null, … }` — `result.result` is the free
+ *    text, `result.structured_output` the schema-validated output.
+ *  - integration step `{ kind:'integration', runStatus, data: <composio response>, … }` — `data` is the output
+ *    (no LLM free text). So `{{node.output.*}}` resolves identically regardless of which node produced it.
+ *  Defensive — a trigger/stub/exec step (neither shape) yields nulls. */
 export function normalizeStepOutput(stored: unknown): RefView {
   const s = isObject(stored) ? stored : {};
   const line = isObject(s.result) ? s.result : null; // the captured claude `--output-format json` result line
   const result = line && typeof line.result === 'string' ? line.result : null;
-  const output = line && line.structured_output !== undefined ? line.structured_output : null;
+  const output =
+    line && line.structured_output !== undefined ? line.structured_output // agent: schema-validated output
+    : s.data !== undefined ? s.data // integration: the Composio action's returned data
+    : null;
   const status = typeof s.runStatus === 'string' ? s.runStatus : null;
   return { result, output, status };
 }
@@ -71,4 +82,35 @@ export function interpolate(text: string, viewsByNodeId: Map<string, RefView>): 
     return render(resolved.value);
   });
   return { text: out, missing };
+}
+
+/** Deep, TYPE-PRESERVING interpolation for an integration node's structured `arguments` (slice 5). Recurses
+ *  objects/arrays; a string that IS a single ref (`"{{i.output.count}}"`) resolves to the RAW typed value
+ *  (number/object/array kept), while an embedded ref (`"issue #{{i.output.id}}"`) string-splices via
+ *  `interpolate`. Non-string scalars pass through. Unresolved refs (sole or embedded) are collected in
+ *  `missing` — the walker hard-fails the node, exactly like the agent prompt path. */
+export function interpolateValue(value: unknown, viewsByNodeId: Map<string, RefView>): { value: unknown; missing: string[] } {
+  const missing: string[] = [];
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      const sole = SOLE_REF_RE.exec(v);
+      if (sole) {
+        const [, nodeId, path] = sole;
+        const view = viewsByNodeId.get(nodeId);
+        const resolved = view ? resolveRef(view, path) : { found: false, value: undefined };
+        if (!resolved.found) {
+          missing.push(sole[0].trim()); // canonical {{nodeId.path}} token (matches interpolate's raw)
+          return v;
+        }
+        return resolved.value; // raw typed value — NOT stringified
+      }
+      const { text, missing: m } = interpolate(v, viewsByNodeId);
+      missing.push(...m);
+      return text;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (isObject(v)) return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, walk(val)]));
+    return v;
+  };
+  return { value: walk(value), missing };
 }

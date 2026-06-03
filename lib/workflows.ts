@@ -4,6 +4,7 @@
 
 import { assertEnum, ValidationError } from './validation';
 import { extractRefs } from './workflow-refs';
+import { getCatalogEntry, catalogSlugs } from './composio-catalog';
 import {
   WORKFLOW_STATUSES,
   WORKFLOW_RUN_STATUSES,
@@ -20,6 +21,7 @@ import {
   type WorkflowNodeType,
   type WorkflowOnError,
   type AgentNodeData,
+  type IntegrationNodeData,
 } from './db/schema';
 
 // ── Enum guards (narrow + agent-actionable error, via the shared assertEnum) ───────────
@@ -152,16 +154,27 @@ export function validateGraph(graph: WorkflowGraph): void {
   }
 
   for (const n of graph.nodes) {
-    if (n.type !== 'agent') continue;
-    const { prompt } = readAgentNodeData(n); // validates prompt + onError
-    // Data-passing: every {{ref}} in the prompt must point at an existing ANCESTOR (an edge-backed
-    // upstream node), so the visual graph and the data dependencies stay in sync. (incomers-based, so
-    // it's recomputed per node — fine at authoring/run scale.)
+    // Validate the per-type config and collect the text that may carry {{nodeId.field}} data-passing refs:
+    // an agent's prompt, or the JSON of an integration node's arguments (refs live inside string values).
+    let refText: string | null = null;
+    let field = '';
+    if (n.type === 'agent') {
+      refText = readAgentNodeData(n).prompt; // validates prompt + onError
+      field = 'node.data.prompt';
+    } else if (n.type === 'integration') {
+      refText = JSON.stringify(readIntegrationNodeData(n).arguments ?? {}); // validates toolkit + action + onError
+      field = 'node.data.arguments';
+    } else {
+      continue; // trigger (and future branch/gate) carry no refs
+    }
+
+    // Data-passing: every {{ref}} must point at an existing ANCESTOR (an edge-backed upstream node), so the
+    // visual graph and the data dependencies stay in sync. Same rule for every node type (single mechanism).
     const anc = ancestors(graph, n.id);
-    for (const ref of extractRefs(prompt)) {
-      if (!seen.has(ref.nodeId)) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references unknown node "${ref.nodeId}" in {{${ref.nodeId}.${ref.path}}}`);
-      if (ref.nodeId === n.id) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references itself in {{${ref.nodeId}.${ref.path}}}`);
-      if (!anc.has(ref.nodeId)) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references "${ref.nodeId}" but no edge connects it as an ancestor (data flows along edges)`);
+    for (const ref of extractRefs(refText)) {
+      if (!seen.has(ref.nodeId)) throw new ValidationError(field, `node "${n.id}" references unknown node "${ref.nodeId}" in {{${ref.nodeId}.${ref.path}}}`);
+      if (ref.nodeId === n.id) throw new ValidationError(field, `node "${n.id}" references itself in {{${ref.nodeId}.${ref.path}}}`);
+      if (!anc.has(ref.nodeId)) throw new ValidationError(field, `node "${n.id}" references "${ref.nodeId}" but no edge connects it as an ancestor (data flows along edges)`);
     }
   }
 }
@@ -177,6 +190,26 @@ export function readAgentNodeData(node: WorkflowNode): AgentNodeData {
   if (data.profileSlug !== undefined) out.profileSlug = String(data.profileSlug);
   if (data.projectSlug !== undefined) out.projectSlug = String(data.projectSlug);
   if (data.responseSchema !== undefined) out.responseSchema = data.responseSchema as Record<string, unknown>;
+  if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
+  return out;
+}
+
+/** Validate + return a type='integration' node's config (slice 5). `toolkit` must be a known catalog slug and
+ *  `action` one of that toolkit's allowed tools (so a bad action is caught at authoring, not at run time);
+ *  arguments/onError are optional. Throws ValidationError (listing the valid values) on a bad shape. */
+export function readIntegrationNodeData(node: WorkflowNode): IntegrationNodeData {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const toolkit = typeof data.toolkit === 'string' ? data.toolkit.trim() : '';
+  if (!toolkit) throw new ValidationError('node.data.toolkit', `integration node "${node.id}" is missing a toolkit`);
+  const entry = getCatalogEntry(toolkit);
+  if (!entry) throw new ValidationError('node.data.toolkit', `integration node "${node.id}" has unknown toolkit "${toolkit}" (supported: ${catalogSlugs().join(', ')})`);
+  const action = typeof data.action === 'string' ? data.action.trim() : '';
+  if (!action) throw new ValidationError('node.data.action', `integration node "${node.id}" is missing an action`);
+  if (!entry.allowedTools.includes(action)) {
+    throw new ValidationError('node.data.action', `integration node "${node.id}" action "${action}" is not allowed for ${toolkit} (allowed: ${entry.allowedTools.join(', ')})`);
+  }
+  const out: IntegrationNodeData = { toolkit, action };
+  if (data.arguments !== undefined) out.arguments = data.arguments as Record<string, unknown>;
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }

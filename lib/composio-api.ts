@@ -115,3 +115,21 @@ export async function getConnectionStatus(connectedAccountId: string): Promise<s
 export async function deleteConnection(connectedAccountId: string): Promise<void> {
   await composioFetch(`/connected_accounts/${connectedAccountId}`, { method: 'DELETE' });
 }
+
+/** Execute a Composio tool action on a specific connected account → its result `data` (slice 5 integration
+ *  nodes). POST /tools/execute/{ACTION} with { arguments, connected_account_id, user_id }; Composio returns
+ *  { data, successful, error }. Throws ComposioApiError on a failed execution (successful:false) or transport
+ *  error — so the walker records the step as failed. Pure HTTP (no spawn) — the daemon owns any test seam. */
+export async function executeAction(
+  action: string,
+  connectedAccountId: string,
+  userId: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const j = (await composioFetch(`/tools/execute/${encodeURIComponent(action)}`, {
+    method: 'POST',
+    body: JSON.stringify({ arguments: args, connected_account_id: connectedAccountId, user_id: userId }),
+  })) as { data?: Record<string, unknown>; error?: string | null; successful?: boolean };
+  if (j.successful === false) throw new ComposioApiError(j.error || `composio action ${action} failed`);
+  return j.data ?? {};
+}

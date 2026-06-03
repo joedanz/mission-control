@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, validateGraph, readAgentNodeData, assertWorkflowStatus,
+  hasCycle, topoOrder, validateGraph, readAgentNodeData, readIntegrationNodeData, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -155,6 +155,63 @@ describe('workflows — validateGraph data-passing refs', () => {
   it('rejects a self-reference', () => {
     const g = G([trigger('t'), { id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'use {{a.result}}' } }], [edge('e1', 't', 'a')]);
     expect(() => validateGraph(g)).toThrow(ValidationError);
+  });
+});
+
+const integration = (id: string, data: Record<string, unknown>): WorkflowNode => ({ id, type: 'integration', position: { x: 0, y: 0 }, data });
+
+describe('workflows — readIntegrationNodeData', () => {
+  it('returns the typed integration config', () => {
+    const d = readIntegrationNodeData(integration('i', { toolkit: 'linear', action: 'LINEAR_CREATE_LINEAR_ISSUE', arguments: { title: 'x' }, onError: 'continue' }));
+    expect(d.toolkit).toBe('linear');
+    expect(d.action).toBe('LINEAR_CREATE_LINEAR_ISSUE');
+    expect(d.arguments).toEqual({ title: 'x' });
+    expect(d.onError).toBe('continue');
+  });
+
+  it('rejects an unknown toolkit (lists the supported ones)', () => {
+    expect(() => readIntegrationNodeData(integration('i', { toolkit: 'jira', action: 'X' }))).toThrow(/toolkit|linear|slack/i);
+  });
+
+  it('rejects an action not in the toolkit allow-list', () => {
+    expect(() => readIntegrationNodeData(integration('i', { toolkit: 'linear', action: 'LINEAR_DELETE_EVERYTHING' }))).toThrow(/action|allow/i);
+  });
+
+  it('rejects a missing toolkit/action and a bad onError', () => {
+    expect(() => readIntegrationNodeData(integration('i', { action: 'LINEAR_CREATE_LINEAR_ISSUE' }))).toThrow(ValidationError);
+    expect(() => readIntegrationNodeData(integration('i', { toolkit: 'linear' }))).toThrow(ValidationError);
+    expect(() => readIntegrationNodeData(integration('i', { toolkit: 'linear', action: 'LINEAR_CREATE_LINEAR_ISSUE', onError: 'explode' }))).toThrow(ValidationError);
+  });
+});
+
+describe('workflows — validateGraph integration nodes', () => {
+  // t → i: a valid Composio action node.
+  const withIntegration = (data: Record<string, unknown>) =>
+    G([trigger('t'), integration('i', data)], [edge('e1', 't', 'i')]);
+
+  it('accepts a valid integration node', () => {
+    expect(() => validateGraph(withIntegration({ toolkit: 'linear', action: 'LINEAR_LIST_LINEAR_TEAMS' }))).not.toThrow();
+  });
+
+  it('rejects an unknown toolkit / disallowed action', () => {
+    expect(() => validateGraph(withIntegration({ toolkit: 'jira', action: 'X' }))).toThrow(ValidationError);
+    expect(() => validateGraph(withIntegration({ toolkit: 'slack', action: 'SLACK_NUKE' }))).toThrow(ValidationError);
+  });
+
+  it('accepts an arg {{ref}} to an ancestor and rejects one to a non-ancestor', () => {
+    // t → a → i: i may reference a (ancestor) in its arguments.
+    const ok = G(
+      [trigger('t'), agent('a'), integration('i', { toolkit: 'slack', action: 'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL', arguments: { text: 'topic: {{a.output.topic}}' } })],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'i')],
+    );
+    expect(() => validateGraph(ok)).not.toThrow();
+
+    // d has no edge into i — referencing it from an arg is not edge-backed.
+    const bad = G(
+      [trigger('t'), agent('a'), agent('d'), integration('i', { toolkit: 'slack', action: 'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL', arguments: { text: '{{d.result}}' } })],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'i')],
+    );
+    expect(() => validateGraph(bad)).toThrow(/ancestor|edge|reference|unknown/i);
   });
 });
 
