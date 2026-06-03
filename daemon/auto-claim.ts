@@ -14,7 +14,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentProfile } from '../lib/db/schema';
+import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import { chooseModel, type ModelChoice } from './render-profile';
 import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, type Spawned } from './runner';
 
@@ -115,6 +115,19 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
     return 'done';
   }
   if (choice.downgraded) await recordDowngrade(choice, profile!, spentToday, runId, a.project, log);
+  // Auto-feed: a project's ACTIVE Composio connections become MCP servers this agent inherits. Fetch via
+  // the CLI (DB scope stays at the mc_agent boundary). Non-fatal — a blip just spawns without auto-feed.
+  let extraMcpServers: Record<string, McpServerConfig> | undefined;
+  if (profile) {
+    const cfg = await mc(['composio', 'mcp-config', a.project]);
+    if (cfg.ok) {
+      extraMcpServers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
+      const keys = Object.keys(extraMcpServers ?? {});
+      if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => k.replace('composio-', '')).join(', ')}] into run ${runId.slice(0, 8)}`);
+    } else {
+      log(`composio mcp-config for ${a.project} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
+    }
+  }
   const how = process.env.MC_DAEMON_EXEC
     ? 'executor (MC_DAEMON_EXEC)'
     : profile
@@ -132,6 +145,7 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
       effectiveModel: choice.model,
       basePermissionMode: a.permissionMode,
       extraEnv: { MC_TASK_LABEL: task.label, MC_TASK_NOTES: task.notes ?? '' },
+      extraMcpServers,
     });
   } catch (e) {
     // Render failed (e.g. a profile secret's ${ENV} is unset) — fail the run cleanly, don't spawn broken.

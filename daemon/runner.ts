@@ -8,8 +8,8 @@ import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { AgentProfile } from '../lib/db/schema';
-import { planSpawn, resolveMcpConfigJson, type ModelChoice } from './render-profile';
+import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
+import { planSpawn, resolveMcpConfigJson, mergeMcpServers, type ModelChoice } from './render-profile';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MC_BIN = process.env.MC_BIN || `node ${join(ROOT, 'bin', 'mc.mjs')}`;
@@ -128,6 +128,9 @@ export type SpawnExecutorOpts = {
   /** Tools granted on top of the profile's allowedTools (claude-code only) — e.g. the scheduler's Bash(mc:*)
    *  so a check-in can self-serve via the mc CLI. See planSpawn. */
   extraAllowedTools?: string[];
+  /** Project-derived Composio MCP servers (from `mc composio mcp-config`), merged UNDER the profile's
+   *  own mcpServers (the profile wins a key collision). Ignored when there is no profile. */
+  extraMcpServers?: Record<string, McpServerConfig>;
 };
 
 /** Build + spawn the executor as its OWN process group (detached) so we can SIGTERM the whole tree on cancel.
@@ -153,7 +156,7 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   // argv (which `ps` would expose). resolveMcpConfigJson may throw MissingEnvError before any file exists.
   let mcpConfigPath: string | null = null;
   let cleanup = noCleanup;
-  const mcpJson = profile ? resolveMcpConfigJson(profile.mcpServers, process.env) : null;
+  const mcpJson = profile ? resolveMcpConfigJson(mergeMcpServers(profile.mcpServers, opts.extraMcpServers), process.env) : null;
   if (mcpJson) {
     const path = join(tmpdir(), `mc-mcp-${runId}.json`);
     writeFileSync(path, mcpJson, { mode: 0o600 });

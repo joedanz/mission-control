@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentProfile } from '../lib/db/schema';
+import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import { chooseModel, type ModelChoice } from './render-profile';
 import { CHECK_IN_MAX_TASKS } from '../lib/constants';
 import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, type Spawned } from './runner';
@@ -111,6 +111,16 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
   const prompt = buildCheckInPrompt(profile, project, claimedTask, a.maxTasks);
 
   if (choice.downgraded) await recordDowngrade(choice, profile, spentToday, runId, project.slug, log);
+  // Auto-feed the project's ACTIVE Composio connections (same as auto-claim). Non-fatal on failure.
+  let extraMcpServers: Record<string, McpServerConfig> | undefined;
+  const cfg = await mc(['composio', 'mcp-config', project.slug]);
+  if (cfg.ok) {
+    extraMcpServers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
+    const keys = Object.keys(extraMcpServers ?? {});
+    if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => k.replace('composio-', '')).join(', ')}] into run ${runId.slice(0, 8)}`);
+  } else {
+    log(`composio mcp-config for ${project.slug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
+  }
 
   const how = process.env.MC_DAEMON_EXEC ? 'executor (MC_DAEMON_EXEC)' : `profile ${profile.slug} (${profile.runtime}${choice.model ? `, model ${choice.model}` : ''})`;
   const work = claimedTask ? `task "${claimedTask.label}"` : 'mission only';
@@ -118,7 +128,7 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
 
   let spawned: Spawned;
   try {
-    spawned = spawnExecutor({ prompt, runId, repoPath, profile, effectiveModel: choice.model, basePermissionMode: a.permissionMode, extraAllowedTools: CHECK_IN_TOOLS });
+    spawned = spawnExecutor({ prompt, runId, repoPath, profile, effectiveModel: choice.model, basePermissionMode: a.permissionMode, extraAllowedTools: CHECK_IN_TOOLS, extraMcpServers });
   } catch (e) {
     const msg = (e as Error).message;
     log(`spawn render failed for "${profile.slug}": ${msg} — failing run`);
