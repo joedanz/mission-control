@@ -118,9 +118,20 @@ the rest of the schema.
 | last_check_in_at · consecutive_failures | When the profile last checked in (the "is it due?" baseline, advanced at spawn), and the failure streak that auto-pauses the schedule at three. |
 | created_at · updated_at | Timestamps. |
 
-A **settings** key/value table and the four **BetterAuth** tables (`users`, `sessions`,
-`accounts`, `verification`) round out the database. The agent role **cannot see the auth tables
-at all** — see [Access](/access).
+## settings — "app-level key/value store"
+
+A tiny key/value table for global app configuration — one row per setting. It's defined and
+ready, but no application code reads or writes it yet (it's reserved for future app-level
+settings).
+
+| Column | Notes |
+|---|---|
+| `key` | The setting's name — the primary key, so there's exactly one row per setting. |
+| `value` | The setting's value, stored as text. |
+| `updated_at` | When the row last changed (`timestamptz`, defaults to now). |
+
+The four **BetterAuth** tables (`users`, `sessions`, `accounts`, `verification`) round out the
+database. The agent role **cannot see the auth tables at all** — see [Access](/access).
 
 ## Enums & allow-lists
 
