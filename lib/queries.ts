@@ -112,6 +112,13 @@ export async function getProjectIdBySlug(slug: string): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
+/** A full project row by id (or null) — the workflow walker needs a workflow's home project's slug
+ *  + repoPath from its stored projectId without paying for the whole task list. */
+export async function getProjectById(id: string): Promise<Project | null> {
+  const rows = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
 /** A project id whose repoPath exactly matches `repoPath`, or null. Lets the ingest route
  *  auto-associate an agent run with a project from the hook's `cwd` (no slug needed). */
 export async function getProjectIdByRepoPath(repoPath: string): Promise<string | null> {

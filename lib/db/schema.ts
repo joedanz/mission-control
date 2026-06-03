@@ -395,6 +395,128 @@ export const composioConnections = pgTable(
 export type ComposioToolkit = typeof composioToolkits.$inferSelect;
 export type ComposioConnection = typeof composioConnections.$inferSelect;
 
+// ── Agentic workflow engine ───────────────────────────────────────────────────────
+// A workflow is a node graph (React Flow's native {nodes, edges}) that chains agent runs, integration
+// calls, and logic into a defined flow. Stored per-project (home); the graph is ONE JSONB blob so the
+// canvas round-trips losslessly. A workflow_run is one execution — its graph is SNAPSHOTTED at start so
+// editing workflows.graph can't corrupt an in-flight walker. A workflow_step_run is one node per
+// execution; for agent nodes it links a real runs row (RUN-ONLY visibility — cost / heartbeat / the
+// fleet feed / cancellation all come from that row; we never create a claimable task, which would race
+// the auto-claim daemon).
+export const WORKFLOW_STATUSES = ['draft', 'active', 'paused'] as const;
+export const WORKFLOW_RUN_STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const;
+export const WORKFLOW_TRIGGERS = ['manual', 'cron', 'event', 'webhook'] as const;
+export const WORKFLOW_STEP_STATUSES = ['pending', 'running', 'completed', 'failed', 'skipped'] as const;
+export const WORKFLOW_NODE_TYPES = ['trigger', 'agent', 'integration', 'branch', 'gate'] as const;
+export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+export type WorkflowTrigger = (typeof WORKFLOW_TRIGGERS)[number];
+export type WorkflowStepStatus = (typeof WORKFLOW_STEP_STATUSES)[number];
+export type WorkflowNodeType = (typeof WORKFLOW_NODE_TYPES)[number];
+
+// React Flow's native node/edge shape — we persist only AUTHORING fields (id/type/position/data,
+// source/target/handles), never transient measured/selected/dragging state.
+export type WorkflowNode = {
+  id: string;
+  type: WorkflowNodeType;
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+};
+export type WorkflowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  label?: string;
+};
+export type WorkflowGraph = { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+
+// Config for a type='agent' node (node.data). prompt is REQUIRED — spawnExecutor needs it; profile
+// resolves by slug or via resolveProfile; project defaults to the workflow's home (provides repoPath).
+// responseSchema (JSON Schema) is the slice-3 structured-output contract (carried but unused in slice 1).
+export type AgentNodeData = {
+  prompt: string;
+  profileSlug?: string;
+  projectSlug?: string;
+  responseSchema?: Record<string, unknown>;
+};
+
+export const workflows = pgTable(
+  'workflows',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()`),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('draft'), // WORKFLOW_STATUSES
+    graph: jsonb('graph').$type<WorkflowGraph>().notNull().default({ nodes: [], edges: [] }),
+    version: integer('version').notNull().default(1), // bumped on each graph edit
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('workflows_slug_uq').on(t.slug), // globally slug-addressed, like projects
+    index('workflows_project_idx').on(t.projectId),
+  ],
+);
+
+export const workflowRuns = pgTable(
+  'workflow_runs',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()`),
+    workflowId: text('workflow_id')
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('running'), // WORKFLOW_RUN_STATUSES
+    trigger: text('trigger').notNull().default('manual'), // WORKFLOW_TRIGGERS
+    // The graph this run executes — pinned at start so a mid-run edit to workflows.graph can't corrupt it.
+    graphSnapshot: jsonb('graph_snapshot').$type<WorkflowGraph>().notNull(),
+    context: jsonb('context'), // trigger payload / inputs
+    cancelRequested: boolean('cancel_requested').notNull().default(false), // mc workflow cancel
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('workflow_runs_workflow_status_idx').on(t.workflowId, t.status), // single-flight guard
+    index('workflow_runs_status_heartbeat_idx').on(t.status, t.lastHeartbeatAt), // reaper sweep
+  ],
+);
+
+export const workflowStepRuns = pgTable(
+  'workflow_step_runs',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()`),
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').notNull(), // the node's id within the (snapshotted) graph
+    status: text('status').notNull().default('pending'), // WORKFLOW_STEP_STATUSES
+    runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }), // agent nodes link a real run
+    output: jsonb('output'), // full captured run result (the data-passing substrate, slice 3)
+    error: text('error'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One step row per node per run — the idempotency key that makes the walker resumable.
+    uniqueIndex('workflow_step_runs_run_node_uq').on(t.workflowRunId, t.nodeId),
+    index('workflow_step_runs_run_idx').on(t.workflowRunId),
+  ],
+);
+
+export type Workflow = typeof workflows.$inferSelect;
+export type NewWorkflow = typeof workflows.$inferInsert;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type NewWorkflowRun = typeof workflowRuns.$inferInsert;
+export type WorkflowStepRun = typeof workflowStepRuns.$inferSelect;
+export type NewWorkflowStepRun = typeof workflowStepRuns.$inferInsert;
+
 // ── Settings (key/value) ───────────────────────────────────────────────────────
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
