@@ -4,27 +4,28 @@
 // ABOUTME: `mc` CLI (mc_agent scoping at the CLI boundary, like auto-claim + scheduler), and records per-node
 // ABOUTME: step state. RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it)
 // ABOUTME: — it never creates a claimable task. A failed node halts the workflow unless its onError='continue'.
-// ABOUTME: Workflow + step state IS written directly via lib/workflow-store; those writes move behind the mc
-// ABOUTME: boundary when async execution lands.
+// ABOUTME: Slice 4 split create from walk: runWorkflow (sync, born 'running') and enqueueWorkflowRun (born
+// ABOUTME: 'queued', no spawn — the web Run button + `--async`) both create a run; walkWorkflowRun executes an
+// ABOUTME: existing run and is shared by the sync path and the workflow-daemon (which claims queued runs).
 
 import { randomUUID } from 'node:crypto';
 import { mc, spawnExecutor, monitorAndFinalize, type Log } from './runner';
 import {
-  getWorkflowBySlug,
+  getWorkflowById,
   getWorkflowRun,
   createWorkflowRun,
-  countActiveWorkflowRuns,
   setWorkflowRunStatus,
   touchWorkflowRun,
   upsertStepRun,
   setStepRunStatus,
   listStepRuns,
 } from '../lib/workflow-store';
-import { validateGraph, topoOrder, nodeById, readAgentNodeData } from '../lib/workflows';
+import { prepareWorkflowRun } from '../lib/workflow-enqueue';
+import { topoOrder, nodeById, readAgentNodeData } from '../lib/workflows';
 import { normalizeStepOutput, interpolate, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
-import { NotFoundError, ConflictError, ValidationError } from '../lib/validation';
-import type { Project, WorkflowNode, WorkflowOnError, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
+import { NotFoundError, ValidationError } from '../lib/validation';
+import type { Project, WorkflowNode, WorkflowOnError, WorkflowRun, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
 
 const DEFAULT_TIMEOUT_SEC = 900;
 const DEFAULT_GRACE_SEC = 15;
@@ -64,31 +65,40 @@ function parseClaudeResult(stdout: string): Record<string, unknown> | null {
   return result;
 }
 
-/** Walk a workflow's graph to completion. Synchronous (slice 1): the calling process supervises the run, so
- *  keep prompts short — durable/async execution + full reaper reconciliation arrive with the slice-4 daemon. */
+/** Run a workflow SYNCHRONOUSLY (the slice-1 CLI default): the calling process owns the walk, so the run is
+ *  born 'running' — the workflow-daemon only ever lists/claims 'queued' runs, so a manual `mc workflow run`
+ *  and a live daemon never race the same row. Keep prompts short; durable async = enqueueWorkflowRun (lib) +
+ *  the daemon. Same return shape as before, so every existing e2e test is unchanged. */
 export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Promise<RunWorkflowResult> {
+  const wf = await prepareWorkflowRun(slug, opts); // shared validate + single-flight guard (lib-tier)
   const log = opts.log ?? (() => {});
-  const wf = await getWorkflowBySlug(slug);
-  if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list' to see slugs");
-  validateGraph(wf.graph); // ValidationError on a malformed graph (single source of truth)
+  const run = await createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'running' });
+  log(`workflow ${slug} run ${run.id.slice(0, 8)} started (${wf.graph.nodes.length} nodes)`);
+  return walkWorkflowRun(run, opts);
+}
 
-  if (!opts.allowConcurrent && (await countActiveWorkflowRuns(wf.id)) > 0) {
-    throw new ConflictError('workflow', `workflow "${slug}" already has a run in progress`);
+/** Walk an EXISTING, already-'running' workflow_run to completion. Self-contained — resolves the workflow's
+ *  slug + home project from the run row — so the sync path (runWorkflow) and the workflow-daemon (after it
+ *  claims a queued run) call it identically. Resumable: seeds the data-passing/skip `views` from completed
+ *  steps, so a re-walk skips done nodes and refs still resolve across a resume. */
+export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = {}): Promise<RunWorkflowResult> {
+  const log = opts.log ?? (() => {});
+  const wf = await getWorkflowById(run.workflowId);
+  const slug = wf?.slug ?? run.workflowId; // FK guarantees wf; fall back to the id for a defensive log label
+  const home = wf ? await getProjectById(wf.projectId) : null;
+  if (!home) {
+    await setWorkflowRunStatus(run.id, 'failed');
+    throw new NotFoundError('project', wf?.projectId ?? run.workflowId, "the workflow's home project was deleted");
   }
 
-  const home = await getProjectById(wf.projectId);
-  if (!home) throw new NotFoundError('project', wf.projectId, "the workflow's home project was deleted");
-
-  const snapshot = wf.graph; // pinned onto the run so a mid-run edit can't corrupt this walk
-  const wfRun = await createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: snapshot });
-  log(`workflow ${slug} run ${wfRun.id.slice(0, 8)} started (${snapshot.nodes.length} nodes)`);
+  const snapshot = run.graphSnapshot; // pinned at create — a mid-run edit to workflows.graph can't corrupt it
+  const trigger = run.trigger as WorkflowTrigger;
 
   // Resume: nodes a prior attempt already completed are skipped (the (run, node) unique key makes re-running
   // safe). `views` doubles as the skip-set AND the {{nodeId.field}} data-passing substrate — seed it from
-  // those completed steps' outputs (normalized once each) so refs resolve even across a resume. Read once up
-  // front — fixed at run start — not per node.
+  // those completed steps' outputs (normalized once each). Read once up front, not per node.
   const views = new Map<string, RefView>();
-  for (const s of await listStepRuns(wfRun.id)) {
+  for (const s of await listStepRuns(run.id)) {
     if (s.status === 'completed') views.set(s.nodeId, normalizeStepOutput(s.output));
   }
 
@@ -97,11 +107,11 @@ export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Pro
   try {
     for (const nodeId of topoOrder(snapshot)) {
       // Cancellation is checked between nodes; the active agent node is cancelled via its own runs row.
-      if ((await getWorkflowRun(wfRun.id))?.cancelRequested) {
+      if ((await getWorkflowRun(run.id))?.cancelRequested) {
         finalStatus = 'cancelled';
         break;
       }
-      await touchWorkflowRun(wfRun.id); // liveness heartbeat for the reaper
+      await touchWorkflowRun(run.id); // liveness heartbeat for the reaper
 
       if (views.has(nodeId)) continue; // already completed (this run or a prior attempt)
 
@@ -109,14 +119,14 @@ export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Pro
       if (!node) continue; // topoOrder only yields graph node ids; defensive
 
       if (node.type === 'trigger') {
-        const output = { trigger: opts.trigger ?? 'manual' };
-        await upsertStepRun(wfRun.id, nodeId, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
+        const output = { trigger };
+        await upsertStepRun(run.id, nodeId, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
         views.set(nodeId, normalizeStepOutput(output));
         continue;
       }
 
       if (node.type === 'agent') {
-        const res = await runAgentNode(wfRun.id, slug, node, home, opts, log, views);
+        const res = await runAgentNode(run.id, slug, node, home, opts, log, views);
         if (res.ok) {
           views.set(nodeId, normalizeStepOutput(res.output));
           continue;
@@ -130,15 +140,15 @@ export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Pro
       throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent)`);
     }
   } catch (err) {
-    await setWorkflowRunStatus(wfRun.id, 'failed');
+    await setWorkflowRunStatus(run.id, 'failed');
     throw err; // surface ValidationError/etc. to the CLI envelope
   }
 
   if (finalStatus === 'completed' && anyFailed) finalStatus = 'failed'; // a continued failure still fails the run
-  await setWorkflowRunStatus(wfRun.id, finalStatus);
-  const steps = await listStepRuns(wfRun.id);
-  log(`workflow ${slug} run ${wfRun.id.slice(0, 8)} → ${finalStatus}`);
-  return { workflowRunId: wfRun.id, status: finalStatus, steps };
+  await setWorkflowRunStatus(run.id, finalStatus);
+  const steps = await listStepRuns(run.id);
+  log(`workflow ${slug} run ${run.id.slice(0, 8)} → ${finalStatus}`);
+  return { workflowRunId: run.id, status: finalStatus, steps };
 }
 
 /** Record a node's step as failed (a pre-spawn exit, before/without a runs row). */

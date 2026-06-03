@@ -12,9 +12,14 @@ export async function GET(request: Request): Promise<Response> {
   if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
     return Response.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-  const { reaped, reconciled } = await runReaperTick();
+  const { reaped, reconciled, staleWorkflows } = await runReaperTick();
   return Response.json({
     ok: true,
-    data: { reaped: reaped.length, ids: reaped.map((r) => r.id), reconciled: reconciled.length },
+    data: {
+      reaped: reaped.length,
+      ids: reaped.map((r) => r.id),
+      reconciled: reconciled.length,
+      staleWorkflows: staleWorkflows.length,
+    },
   });
 }

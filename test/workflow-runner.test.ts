@@ -53,7 +53,6 @@ type StepOut = { prompt?: string; result?: { structured_output?: Record<string, 
 
 describe('workflow runner — mc workflow run (stub executor)', () => {
   let projectId: string;
-  let projectSlug: string;
   let repoPath: string;
 
   beforeEach(async () => {
@@ -65,7 +64,6 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
       repoPath,
     });
     projectId = p.id;
-    projectSlug = p.slug;
   });
 
   afterEach(async () => {
@@ -220,5 +218,25 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     const res = runWorkflowCli('does-not-exist-' + Date.now(), 'exit 0');
     expect(res.ok).toBe(false);
     expect(res.error?.code).toBe('NOT_FOUND');
+  });
+
+  it('enqueueWorkflowRun creates a queued run and does NOT walk it (the daemon will)', async () => {
+    const slug = `vt-wf-enq-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: graph() });
+    const { enqueueWorkflowRun } = await import('../lib/workflow-enqueue');
+    const run = await enqueueWorkflowRun(slug, { trigger: 'manual' });
+    expect(run.status).toBe('queued');
+    // Nothing walked: no step rows, and the run is still queued (no in-process execution on the async path).
+    expect((await listStepRuns(run.id)).length).toBe(0);
+    expect((await getWorkflowRun(run.id))?.status).toBe('queued');
+  });
+
+  it('single-flight: enqueue refuses a second run while one is queued', async () => {
+    const slug = `vt-wf-sf-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: graph() });
+    const { enqueueWorkflowRun } = await import('../lib/workflow-enqueue');
+    const { ConflictError } = await import('../lib/validation');
+    await enqueueWorkflowRun(slug, { trigger: 'manual' });
+    await expect(enqueueWorkflowRun(slug, { trigger: 'manual' })).rejects.toBeInstanceOf(ConflictError);
   });
 });

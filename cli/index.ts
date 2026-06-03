@@ -362,7 +362,7 @@ const SPEC = [
   { name: 'workflow list', readonly: true, summary: 'List workflows', options: ['--project'] },
   { name: 'workflow get', readonly: true, summary: 'Get one workflow by slug', args: ['<slug>'] },
   { name: 'workflow create', readonly: false, summary: 'Create a workflow from a node graph', required: ['--project', '--name'], options: ['--slug', '--graph', '--description'] },
-  { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous)', args: ['<slug>'], options: ['--timeout', '--allow-concurrent'] },
+  { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
@@ -1069,13 +1069,24 @@ withFlags(workflow.command('create'))
   );
 
 withFlags(workflow.command('run'))
-  .description('Run a workflow now (synchronous; short prompts — durable async lands in a later slice)')
+  .description('Run a workflow now — synchronous by default (short prompts); --async enqueues for the workflow-daemon')
   .argument('<slug>')
-  .option('--timeout <sec>', 'per-agent-node timeout', (v) => parseInt(v, 10))
+  .option('--timeout <sec>', 'per-agent-node timeout (sync only)', (v) => parseInt(v, 10))
   .option('--allow-concurrent', 'bypass the single-flight guard')
+  .option('--async', 'enqueue a queued run for the workflow-daemon and return immediately (no inline walk)')
   .action((slug: string, opts: LeafOpts) =>
     emit('workflow run', opts, async () => {
       ensureDbCredentials();
+      // --async = the durable path: write a 'queued' run (lib-tier, no spawn) and let the workflow-daemon
+      // claim + execute it. Default stays synchronous: this process owns the walk and blocks to completion.
+      if (opts.async) {
+        const { enqueueWorkflowRun } = await import('../lib/workflow-enqueue');
+        const run = await enqueueWorkflowRun(slug, { trigger: 'manual', allowConcurrent: !!opts.allowConcurrent });
+        return {
+          data: { workflowRunId: run.id, status: run.status },
+          human: () => console.log(`workflow ${slug} enqueued → ${run.status} (run ${run.id})`),
+        };
+      }
       const { runWorkflow } = await import('../daemon/workflow-runner');
       const result = await runWorkflow(slug, {
         trigger: 'manual',
@@ -1113,15 +1124,19 @@ withFlags(workflow.command('cancel'))
   .action((runId: string, opts: LeafOpts) =>
     emit('workflow cancel', opts, async () => {
       ensureDbCredentials();
-      const { getWorkflowRun, requestWorkflowRunCancel, listStepRuns } = await import('../lib/workflow-store');
+      const { getWorkflowRun, requestWorkflowRunCancel, setWorkflowRunStatus, listStepRuns } = await import('../lib/workflow-store');
       const { setRunCancelRequested } = await import('../lib/mutations');
       const run = await getWorkflowRun(runId);
       if (!run) throw new NotFoundError('workflow run', runId);
-      const cancelled = await requestWorkflowRunCancel(runId);
+      const wasQueued = run.status === 'queued';
+      await requestWorkflowRunCancel(runId); // sets cancelRequested — a running walk stops at the next node check
+      // A queued run never started: mark it terminal NOW so the daemon (which only lists 'queued') never claims
+      // it. (cancelRequested above also covers the rare race where the daemon claimed it in this same window.)
+      const result = wasQueued ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? run) : run;
       // Propagate to the in-flight agent node's run so a long node aborts (kill-switch), not just the next gap.
       const active = (await listStepRuns(runId)).find((s) => s.status === 'running' && s.runId);
       if (active?.runId) await setRunCancelRequested(active.runId);
-      return { data: cancelled, human: () => console.log(`workflow run ${runId} cancel requested`) };
+      return { data: result, human: () => console.log(`workflow run ${runId} ${wasQueued ? 'cancelled (was queued)' : 'cancel requested'}`) };
     }),
   );
 
