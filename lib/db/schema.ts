@@ -58,6 +58,7 @@ export const EVENT_TYPES = [
   'profile.updated',
   'profile.deleted',
   'tool_call',
+  'composio.connection_changed',
   'note',
 ] as const;
 // Suggested labels for agent/system actors. NOTE: actorLabel/agentLabel are free-text

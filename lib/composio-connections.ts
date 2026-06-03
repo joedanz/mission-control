@@ -4,9 +4,10 @@
 import { getCatalogEntry } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
-import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, ComposioApiError } from './composio-api';
+import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent, ComposioApiError } from './composio-api';
 import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
-import type { ComposioConnection, McpServerConfig } from './db/schema';
+import { createEvent } from './mutations';
+import type { ComposioConnection, ConnectionStatus, McpServerConfig } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
 
 /** Ensure the shared auth-config + MCP server exist for a toolkit; cache + return their ids. Idempotent
@@ -103,4 +104,41 @@ export async function resolveProjectMcpServers(projectSlug: string): Promise<Rec
   );
   const rows: ConnectionMcpRow[] = joined.filter((r): r is ConnectionMcpRow => r !== null);
   return buildConnectionMcpServers(rows);
+}
+
+export type ConnectionRefresh = { toolkitSlug: string; from: ConnectionStatus; to: ConnectionStatus; changed: boolean };
+
+/** Re-poll every linked connection of a project against Composio; persist changes and emit a
+ *  composio.connection_changed event per transition (best-effort). A per-connection poll failure is
+ *  skipped (status left unchanged) so a transient Composio blip never clobbers a known status. */
+export async function refreshConnections(projectSlug: string): Promise<ConnectionRefresh[]> {
+  const projectId = await getProjectIdBySlug(projectSlug);
+  if (!projectId) throw new NotFoundError('project', projectSlug);
+  const conns = await listConnectionsByProject(projectId);
+  const results: ConnectionRefresh[] = [];
+  for (const conn of conns) {
+    if (!conn.connectedAccountId) continue; // never linked → nothing to poll
+    const from = conn.status;
+    let to = from;
+    try {
+      to = mapStatus(await getConnectionStatus(conn.connectedAccountId));
+    } catch (e) {
+      console.warn(`composio refresh: poll failed for ${conn.toolkitSlug} (${conn.connectedAccountId}): ${e instanceof Error ? e.message : e}`);
+      results.push({ toolkitSlug: conn.toolkitSlug, from, to: from, changed: false });
+      continue;
+    }
+    if (to !== from) {
+      await setConnectionStatus(conn.id, to);
+      const ev = transitionEvent(projectSlug, conn.toolkitSlug, from, to);
+      if (ev) {
+        try {
+          await createEvent({ type: 'composio.connection_changed', projectId, level: ev.level, summary: ev.summary });
+        } catch (err) {
+          console.warn(`composio refresh: event write failed for ${conn.toolkitSlug}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+    results.push({ toolkitSlug: conn.toolkitSlug, from, to, changed: to !== from });
+  }
+  return results;
 }

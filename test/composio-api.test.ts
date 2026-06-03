@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  deriveUserId, mapStatus, orphanedConnectedAccountId,
+  deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent,
   createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection,
   ComposioApiError,
 } from '../lib/composio-api';
@@ -38,6 +38,18 @@ describe('Composio API pure helpers', () => {
     expect(orphanedConnectedAccountId('ca_same', 'ca_same')).toBeNull();
     expect(orphanedConnectedAccountId(null, 'ca_new')).toBeNull();
     expect(orphanedConnectedAccountId(undefined, 'ca_new')).toBeNull();
+  });
+  it('maps a connection status transition to an event (or null)', () => {
+    expect(transitionEvent('proj', 'linear', 'active', 'active')).toBeNull();
+    expect(transitionEvent('proj', 'linear', 'expired', 'active')).toEqual({
+      level: 'info',
+      summary: 'linear connection recovered — now active',
+    });
+    const expired = transitionEvent('proj', 'linear', 'active', 'expired');
+    expect(expired?.level).toBe('warn');
+    expect(expired?.summary).toContain('linear connection expired');
+    expect(expired?.summary).toContain('mc composio connect proj linear');
+    expect(transitionEvent('proj', 'slack', 'active', 'error')?.level).toBe('warn');
   });
 });
 
