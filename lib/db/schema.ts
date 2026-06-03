@@ -408,11 +408,14 @@ export const WORKFLOW_RUN_STATUSES = ['running', 'completed', 'failed', 'cancell
 export const WORKFLOW_TRIGGERS = ['manual', 'cron', 'event', 'webhook'] as const;
 export const WORKFLOW_STEP_STATUSES = ['pending', 'running', 'completed', 'failed', 'skipped'] as const;
 export const WORKFLOW_NODE_TYPES = ['trigger', 'agent', 'integration', 'branch', 'gate'] as const;
+// Per-node failure policy (slice 3): halt the whole workflow (default) or continue past a failed node.
+export const WORKFLOW_ON_ERROR = ['halt', 'continue'] as const;
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
 export type WorkflowTrigger = (typeof WORKFLOW_TRIGGERS)[number];
 export type WorkflowStepStatus = (typeof WORKFLOW_STEP_STATUSES)[number];
 export type WorkflowNodeType = (typeof WORKFLOW_NODE_TYPES)[number];
+export type WorkflowOnError = (typeof WORKFLOW_ON_ERROR)[number];
 
 // React Flow's native node/edge shape — we persist only AUTHORING fields (id/type/position/data,
 // source/target/handles), never transient measured/selected/dragging state.
@@ -434,12 +437,15 @@ export type WorkflowGraph = { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
 
 // Config for a type='agent' node (node.data). prompt is REQUIRED — spawnExecutor needs it; profile
 // resolves by slug or via resolveProfile; project defaults to the workflow's home (provides repoPath).
-// responseSchema (JSON Schema) is the slice-3 structured-output contract (carried but unused in slice 1).
+// The prompt may carry {{nodeId.field}} data-passing refs (slice 3) resolved from upstream step outputs.
+// responseSchema (JSON Schema) → claude `--json-schema`; the captured structured_output feeds {{id.output}}.
+// onError sets this node's failure policy ('halt' default | 'continue').
 export type AgentNodeData = {
   prompt: string;
   profileSlug?: string;
   projectSlug?: string;
   responseSchema?: Record<string, unknown>;
+  onError?: WorkflowOnError;
 };
 
 export const workflows = pgTable(

@@ -152,7 +152,24 @@ export type SpawnExecutorOpts = {
    *  unchanged). The workflow runner passes process.stderr so a synchronous `mc workflow run` keeps its
    *  JSON envelope on stdout uncorrupted by the child's result stream. */
   teeStream?: NodeJS.WritableStream;
+  /** JSON Schema for structured output (claude-code only) → claude's `--json-schema`. The workflow walker
+   *  passes an agent node's responseSchema; the captured result line then carries `structured_output`. */
+  jsonSchema?: Record<string, unknown>;
 };
+
+/** Pipe a spawned child's stdout into an accumulator AND tee it through to `tee` (so it stays visible in
+ *  the daemon log / the CLI's stderr). Returns an `output()` accessor over the accumulated text. Shared by
+ *  the claude-code spawn (reads claude's result line) and the MC_DAEMON_EXEC stub (lets a test stub `echo`
+ *  a result line — the $0 seam for structured-output / data-passing tests). */
+function pipeAndCapture(child: ReturnType<typeof spawn>, tee: NodeJS.WritableStream): () => string {
+  let captured = '';
+  child.stdout?.on('data', (chunk: Buffer) => {
+    const s = chunk.toString();
+    captured += s;
+    tee.write(s);
+  });
+  return () => captured;
+}
 
 /** Build + spawn the executor as its OWN process group (detached) so we can SIGTERM the whole tree on cancel.
  *  MC_DAEMON_EXEC short-circuits everything (deterministic test seam, no real model). Else: render the
@@ -169,8 +186,12 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   const noCleanup = () => {};
 
   if (process.env.MC_DAEMON_EXEC) {
-    const o: SpawnOptions = { cwd: repoPath, env: baseEnv, stdio: ['ignore', 'inherit', 'inherit'], detached: true };
-    return { child: spawn('sh', ['-c', process.env.MC_DAEMON_EXEC], o), cleanup: noCleanup, output: () => '' };
+    // Capture+tee the stub's stdout (was discarded) so a stub can `echo` a claude-style result line — the
+    // seam that makes structured-output / {{ref}} data-passing testable at $0. Teeing to teeStream (stderr
+    // for the CLI walker) also keeps a stub's output off the CLI's JSON envelope on stdout.
+    const o: SpawnOptions = { cwd: repoPath, env: baseEnv, stdio: ['ignore', 'pipe', 'inherit'], detached: true };
+    const child = spawn('sh', ['-c', process.env.MC_DAEMON_EXEC], o);
+    return { child, cleanup: noCleanup, output: pipeAndCapture(child, opts.teeStream ?? process.stdout) };
   }
 
   // Resolve the profile's MCP servers and write them to a 0600 temp file — keeps resolved secrets out of
@@ -192,24 +213,16 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   }
 
   try {
-    const plan = planSpawn(profile, { prompt, basePermissionMode, mcpConfigPath, hostEnv: process.env, effectiveModel, extraAllowedTools: opts.extraAllowedTools });
+    const plan = planSpawn(profile, { prompt, basePermissionMode, mcpConfigPath, hostEnv: process.env, effectiveModel, extraAllowedTools: opts.extraAllowedTools, jsonSchema: opts.jsonSchema });
     const env: NodeJS.ProcessEnv = { ...baseEnv, ...plan.extraEnv };
     // Capture stdout for the claude-code runtime so we can read claude's authoritative result JSON
-    // (total_cost_usd + usage); tee it through to our own stdout so the daemon log is unchanged. The exec
+    // (total_cost_usd + usage + structured_output); tee it through so the daemon log is unchanged. The exec
     // runtime has no such result, so it keeps inheriting. (stderr always inherits → straight to the log.)
     const capture = plan.runtime === 'claude-code';
     const o: SpawnOptions = { cwd: repoPath, env, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'], detached: true };
     const child = spawn(plan.bin, plan.args, o);
-    let captured = '';
-    if (capture && child.stdout) {
-      const tee = opts.teeStream ?? process.stdout;
-      child.stdout.on('data', (chunk: Buffer) => {
-        const s = chunk.toString();
-        captured += s;
-        tee.write(s); // tee → keep the result line visible in the daemon log (stderr for the CLI walker)
-      });
-    }
-    return { child, cleanup, output: () => captured };
+    const output = capture ? pipeAndCapture(child, opts.teeStream ?? process.stdout) : () => '';
+    return { child, cleanup, output };
   } catch (e) {
     cleanup(); // env-placeholder resolution failed after the temp file was written — don't leak it
     throw e;

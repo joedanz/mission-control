@@ -45,6 +45,12 @@ const graph = (): WorkflowGraph => ({
   edges: [{ id: 'e1', source: 't', target: 'a' }],
 });
 
+// A stub that emits a claude-style result line carrying structured_output — the $0 seam for slice-3
+// data passing. Every agent spawn in the run runs this same command (MC_DAEMON_EXEC is process-wide).
+const STRUCTURED_STUB = `echo '{"type":"result","result":"ok","structured_output":{"topic":"otters"},"total_cost_usd":0}'`;
+
+type StepOut = { prompt?: string; result?: { structured_output?: Record<string, unknown> } | null };
+
 describe('workflow runner — mc workflow run (stub executor)', () => {
   let projectId: string;
   let projectSlug: string;
@@ -107,6 +113,105 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
       // Per-node step rows persisted (resumable substrate).
       const steps = await listStepRuns(res.data!.workflowRunId);
       expect(steps.map((s) => s.nodeId).sort()).toEqual(['a', 't']);
+    },
+    60000,
+  );
+
+  it(
+    'passes structured output from one agent node to the next via {{nodeId.field}}',
+    async () => {
+      const slug = `vt-wf-pass-${Date.now()}`;
+      // t → a → b; b's prompt consumes a's structured_output. (a's prompt has no refs.)
+      await createWorkflow({
+        projectId,
+        slug,
+        name: slug,
+        graph: {
+          nodes: [
+            { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+            { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'find a topic' } },
+            { id: 'b', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'write about {{a.output.topic}} now' } },
+          ],
+          edges: [{ id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 'a', target: 'b' }],
+        },
+      });
+
+      const res = runWorkflowCli(slug, STRUCTURED_STUB);
+      expect(res.ok).toBe(true);
+      expect(res.data?.status).toBe('completed');
+
+      const steps = await listStepRuns(res.data!.workflowRunId);
+      const a = steps.find((s) => s.nodeId === 'a')!;
+      const b = steps.find((s) => s.nodeId === 'b')!;
+      expect(a.status).toBe('completed');
+      expect(b.status).toBe('completed');
+      // a captured its schema-validated structured output…
+      expect((a.output as StepOut).result?.structured_output).toEqual({ topic: 'otters' });
+      // …and b's resolved prompt has the {{a.output.topic}} ref substituted with it.
+      expect((b.output as StepOut).prompt).toBe('write about otters now');
+    },
+    60000,
+  );
+
+  it(
+    'hard-fails a node whose {{ref}} resolves to a missing field (default onError=halt stops the run)',
+    async () => {
+      const slug = `vt-wf-miss-${Date.now()}`;
+      await createWorkflow({
+        projectId,
+        slug,
+        name: slug,
+        graph: {
+          nodes: [
+            { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+            { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'find a topic' } },
+            { id: 'b', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'use {{a.output.nope}}' } },
+          ],
+          edges: [{ id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 'a', target: 'b' }],
+        },
+      });
+
+      const res = runWorkflowCli(slug, STRUCTURED_STUB);
+      expect(res.data?.status).toBe('failed');
+      const steps = await listStepRuns(res.data!.workflowRunId);
+      expect(steps.find((s) => s.nodeId === 'a')!.status).toBe('completed');
+      const b = steps.find((s) => s.nodeId === 'b')!;
+      expect(b.status).toBe('failed');
+      expect(b.error).toMatch(/unresolved data references/i);
+      expect(b.runId).toBeNull(); // failed before opening a run (no spawn)
+    },
+    60000,
+  );
+
+  it(
+    'onError:continue walks past a failed node — a node sequenced after it still runs',
+    async () => {
+      const slug = `vt-wf-cont-${Date.now()}`;
+      // t → a → b → c. b fails (missing ref) but onError=continue; c is edge-after b but references nothing.
+      await createWorkflow({
+        projectId,
+        slug,
+        name: slug,
+        graph: {
+          nodes: [
+            { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+            { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'find a topic' } },
+            { id: 'b', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'use {{a.output.nope}}', onError: 'continue' } },
+            { id: 'c', type: 'agent', position: { x: 480, y: 0 }, data: { prompt: 'wrap up' } },
+          ],
+          edges: [
+            { id: 'e1', source: 't', target: 'a' },
+            { id: 'e2', source: 'a', target: 'b' },
+            { id: 'e3', source: 'b', target: 'c' },
+          ],
+        },
+      });
+
+      const res = runWorkflowCli(slug, STRUCTURED_STUB);
+      expect(res.data?.status).toBe('failed'); // a continued failure still fails the overall run
+      const steps = await listStepRuns(res.data!.workflowRunId);
+      expect(steps.find((s) => s.nodeId === 'b')!.status).toBe('failed');
+      expect(steps.find((s) => s.nodeId === 'c')!.status).toBe('completed'); // walk continued past b
     },
     60000,
   );

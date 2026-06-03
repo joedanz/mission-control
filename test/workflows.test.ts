@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  nodeById, outgoers, incomers, triggerNodes, entryNode,
+  nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
   hasCycle, topoOrder, validateGraph, readAgentNodeData, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
@@ -94,18 +94,67 @@ describe('workflows — validateGraph', () => {
   });
 });
 
+describe('workflows — ancestors', () => {
+  it('returns every node with a directed path into the target', () => {
+    const g = G([trigger('t'), agent('a'), agent('b')], [edge('e1', 't', 'a'), edge('e2', 'a', 'b')]);
+    expect([...ancestors(g, 'b')].sort()).toEqual(['a', 't']);
+    expect([...ancestors(g, 'a')]).toEqual(['t']);
+    expect([...ancestors(g, 't')]).toEqual([]);
+  });
+
+  it('does not count an unconnected earlier node as an ancestor', () => {
+    // c is a second trigger-less branch with no edge into b — topologically earlier but NOT an ancestor.
+    const g = G([trigger('t'), agent('a'), agent('c')], [edge('e1', 't', 'a')]);
+    expect(ancestors(g, 'a').has('c')).toBe(false);
+  });
+});
+
 describe('workflows — readAgentNodeData', () => {
   it('returns the typed agent config', () => {
-    const node: WorkflowNode = { id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'go', profileSlug: 'researcher', projectSlug: 'acme' } };
+    const node: WorkflowNode = { id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'go', profileSlug: 'researcher', projectSlug: 'acme', onError: 'continue' } };
     const d = readAgentNodeData(node);
     expect(d.prompt).toBe('go');
     expect(d.profileSlug).toBe('researcher');
     expect(d.projectSlug).toBe('acme');
+    expect(d.onError).toBe('continue');
   });
 
   it('throws when the prompt is missing or blank', () => {
     expect(() => readAgentNodeData({ id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: {} })).toThrow(ValidationError);
     expect(() => readAgentNodeData({ id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: '   ' } })).toThrow(/prompt/i);
+  });
+
+  it('rejects an invalid onError value', () => {
+    expect(() => readAgentNodeData({ id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'go', onError: 'explode' } })).toThrow(ValidationError);
+  });
+});
+
+describe('workflows — validateGraph data-passing refs', () => {
+  // t → a → b: b may reference a (an ancestor).
+  const chain = (bPrompt: string) =>
+    G([trigger('t'), agent('a'), { id: 'b', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: bPrompt } }],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'b')]);
+
+  it('accepts a reference to an ancestor node', () => {
+    expect(() => validateGraph(chain('use {{a.output.topic}} and {{a.result}}'))).not.toThrow();
+  });
+
+  it('rejects a reference to a non-ancestor node', () => {
+    // d exists but has no path into b — referencing it is not edge-backed.
+    const g = G(
+      [trigger('t'), agent('a'), agent('d'), { id: 'b', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'use {{d.result}}' } }],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'b')],
+    );
+    expect(() => validateGraph(g)).toThrow(/ancestor|edge|reference/i);
+  });
+
+  it('rejects a reference to a nonexistent node', () => {
+    expect(() => validateGraph(chain('use {{ghost.result}}'))).toThrow(ValidationError);
+  });
+
+  it('rejects a self-reference', () => {
+    const g = G([trigger('t'), { id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: { prompt: 'use {{a.result}}' } }], [edge('e1', 't', 'a')]);
+    expect(() => validateGraph(g)).toThrow(ValidationError);
   });
 });
 

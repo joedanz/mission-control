@@ -3,12 +3,14 @@
 // ABOUTME: spawn, no fs (mirrors lib/profiles.ts + daemon/render-profile.ts), so it's unit-testable alone.
 
 import { assertEnum, ValidationError } from './validation';
+import { extractRefs } from './workflow-refs';
 import {
   WORKFLOW_STATUSES,
   WORKFLOW_RUN_STATUSES,
   WORKFLOW_TRIGGERS,
   WORKFLOW_STEP_STATUSES,
   WORKFLOW_NODE_TYPES,
+  WORKFLOW_ON_ERROR,
   type WorkflowGraph,
   type WorkflowNode,
   type WorkflowStatus,
@@ -16,6 +18,7 @@ import {
   type WorkflowTrigger,
   type WorkflowStepStatus,
   type WorkflowNodeType,
+  type WorkflowOnError,
   type AgentNodeData,
 } from './db/schema';
 
@@ -25,6 +28,7 @@ export const assertWorkflowRunStatus = (v: string): WorkflowRunStatus => assertE
 export const assertWorkflowTrigger = (v: string): WorkflowTrigger => assertEnum(v, WORKFLOW_TRIGGERS, 'trigger');
 export const assertWorkflowStepStatus = (v: string): WorkflowStepStatus => assertEnum(v, WORKFLOW_STEP_STATUSES, 'stepStatus');
 export const assertWorkflowNodeType = (v: string): WorkflowNodeType => assertEnum(v, WORKFLOW_NODE_TYPES, 'node.type');
+export const assertWorkflowOnError = (v: string): WorkflowOnError => assertEnum(v, WORKFLOW_ON_ERROR, 'node.data.onError');
 
 // ── Traversal ──────────────────────────────────────────────────────────────────────
 export function nodeById(graph: WorkflowGraph, id: string): WorkflowNode | undefined {
@@ -49,6 +53,21 @@ export function incomers(graph: WorkflowGraph, nodeId: string): WorkflowNode[] {
 
 export function triggerNodes(graph: WorkflowGraph): WorkflowNode[] {
   return graph.nodes.filter((n) => n.type === 'trigger');
+}
+
+/** Every node with a directed edge-path INTO `nodeId` (its transitive predecessors). Reverse BFS over
+ *  `incomers`. Used to gate {{nodeId.field}} data-passing refs: a reference is only valid from an ancestor
+ *  (data flows along wired edges), so this is the single source of truth for that check (CLI + canvas). */
+export function ancestors(graph: WorkflowGraph, nodeId: string): Set<string> {
+  const seen = new Set<string>();
+  const stack = incomers(graph, nodeId).map((n) => n.id);
+  while (stack.length) {
+    const id = stack.pop() as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const up of incomers(graph, id)) stack.push(up.id);
+  }
+  return seen;
 }
 
 /** The single entry (trigger) node. Assumes a validated graph (validateGraph enforces exactly one). */
@@ -108,7 +127,8 @@ export function topoOrder(graph: WorkflowGraph): string[] {
 // ── Validation (the gate run by the CLI before a run, and the canvas later) ───────────
 /** Throw ValidationError on the first structural problem; return void when the graph is runnable.
  *  Checks: non-empty, unique ids, known node types, edges reference existing nodes, acyclic (DAG),
- *  exactly one trigger node, and every agent node carries a non-blank prompt. */
+ *  exactly one trigger node, every agent node carries a non-blank prompt + valid onError, and every
+ *  {{nodeId.field}} data-passing ref points at an existing ancestor (data flows along wired edges). */
 export function validateGraph(graph: WorkflowGraph): void {
   if (!graph.nodes.length) throw new ValidationError('graph', 'a workflow has no nodes');
 
@@ -132,13 +152,23 @@ export function validateGraph(graph: WorkflowGraph): void {
   }
 
   for (const n of graph.nodes) {
-    if (n.type === 'agent') readAgentNodeData(n); // validates the prompt
+    if (n.type !== 'agent') continue;
+    const { prompt } = readAgentNodeData(n); // validates prompt + onError
+    // Data-passing: every {{ref}} in the prompt must point at an existing ANCESTOR (an edge-backed
+    // upstream node), so the visual graph and the data dependencies stay in sync. (incomers-based, so
+    // it's recomputed per node — fine at authoring/run scale.)
+    const anc = ancestors(graph, n.id);
+    for (const ref of extractRefs(prompt)) {
+      if (!seen.has(ref.nodeId)) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references unknown node "${ref.nodeId}" in {{${ref.nodeId}.${ref.path}}}`);
+      if (ref.nodeId === n.id) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references itself in {{${ref.nodeId}.${ref.path}}}`);
+      if (!anc.has(ref.nodeId)) throw new ValidationError('node.data.prompt', `agent node "${n.id}" references "${ref.nodeId}" but no edge connects it as an ancestor (data flows along edges)`);
+    }
   }
 }
 
 // ── Node config reads ────────────────────────────────────────────────────────────────
 /** Validate + return a type='agent' node's config. `prompt` is required (the runner can't spawn without
- *  it); profileSlug/projectSlug/responseSchema are optional. Throws ValidationError on a bad shape. */
+ *  it); profileSlug/projectSlug/responseSchema/onError are optional. Throws ValidationError on a bad shape. */
 export function readAgentNodeData(node: WorkflowNode): AgentNodeData {
   const data = (node.data ?? {}) as Record<string, unknown>;
   const prompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
@@ -147,5 +177,6 @@ export function readAgentNodeData(node: WorkflowNode): AgentNodeData {
   if (data.profileSlug !== undefined) out.profileSlug = String(data.profileSlug);
   if (data.projectSlug !== undefined) out.projectSlug = String(data.projectSlug);
   if (data.responseSchema !== undefined) out.responseSchema = data.responseSchema as Record<string, unknown>;
+  if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }
