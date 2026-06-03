@@ -14,18 +14,19 @@ import { projects, runs, events, type WorkflowGraph } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
 import { getNextClaimableTask } from '../lib/queries';
 import { createWorkflow, getWorkflowRun, listStepRuns } from '../lib/workflow-store';
+import { upsertConnection } from '../lib/composio-store';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
 /** Invoke the worktree CLI as a subprocess (the real `mc workflow run` path). `exec` becomes the stub
  *  executor's command (run in the project's repoPath); returns the parsed JSON envelope from stdout. */
-function runWorkflowCli(slug: string, exec: string): { ok: boolean; data?: { status: string; workflowRunId: string; steps: { nodeId: string; status: string; runId: string | null }[] }; error?: { code: string } } {
+function runWorkflowCli(slug: string, exec: string, extraEnv: Record<string, string> = {}): { ok: boolean; data?: { status: string; workflowRunId: string; steps: { nodeId: string; status: string; runId: string | null }[] }; error?: { code: string } } {
   // mc exits non-zero on error codes (NOT_FOUND=3 etc.) — execFileSync throws but still carries stdout (the
   // JSON envelope). Capture stdout either way; surface stderr only when stdout has no parseable envelope.
   let out: string;
   try {
     out = execFileSync(tsxBin, ['cli/index.ts', 'workflow', 'run', slug, '--json'], {
-      env: { ...process.env, MC_DAEMON_EXEC: exec, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '' },
+      env: { ...process.env, MC_DAEMON_EXEC: exec, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '', ...extraEnv },
       encoding: 'utf8',
       timeout: 55000,
     });
@@ -238,5 +239,105 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     const { ConflictError } = await import('../lib/validation');
     await enqueueWorkflowRun(slug, { trigger: 'manual' });
     await expect(enqueueWorkflowRun(slug, { trigger: 'manual' })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  // ── Integration nodes (slice 5): a deterministic Composio action, NO LLM. The MC_COMPOSIO_EXEC stub
+  // ── returns a canned { successful, data } so the whole path runs at $0 with no network + no real connection.
+  type IntStepOut = { kind?: string; data?: Record<string, unknown>; arguments?: Record<string, unknown>; runStatus?: string };
+  const seedActiveLinear = (cid = 'ca_test') =>
+    upsertConnection(projectId, 'linear', { userId: `mc-proj-${projectId}`, connectedAccountId: cid, status: 'active' });
+
+  it('runs trigger → integration (no run row), capturing the resolved args + the Composio data', async () => {
+    const slug = `vt-wf-int-${Date.now()}`;
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'i', type: 'integration', position: { x: 160, y: 0 }, data: { toolkit: 'linear', action: 'LINEAR_LIST_LINEAR_TEAMS', arguments: { limit: 5 } } },
+        ],
+        edges: [{ id: 'e1', source: 't', target: 'i' }],
+      },
+    });
+    await seedActiveLinear();
+
+    const res = runWorkflowCli(slug, 'exit 0', { MC_COMPOSIO_EXEC: '{"successful":true,"data":{"teams":[{"id":"T1"}]}}' });
+    expect(res.ok).toBe(true);
+    expect(res.data?.status).toBe('completed');
+
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const i = steps.find((s) => s.nodeId === 'i')!;
+    expect(i.status).toBe('completed');
+    expect(i.runId).toBeNull(); // integration node opens NO runs row (no LLM)
+    const out = i.output as IntStepOut;
+    expect(out.kind).toBe('integration');
+    expect(out.data).toEqual({ teams: [{ id: 'T1' }] }); // the Composio response is captured
+    expect(out.arguments).toEqual({ limit: 5 }); // the resolved arguments are recorded (number preserved)
+  });
+
+  it('passes integration output to a downstream agent via {{i.output.field}} (typed)', async () => {
+    const slug = `vt-wf-int-pass-${Date.now()}`;
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'i', type: 'integration', position: { x: 160, y: 0 }, data: { toolkit: 'linear', action: 'LINEAR_GET_LINEAR_ISSUE' } },
+          { id: 'a', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'work on {{i.output.issueId}} now' } },
+        ],
+        edges: [{ id: 'e1', source: 't', target: 'i' }, { id: 'e2', source: 'i', target: 'a' }],
+      },
+    });
+    await seedActiveLinear();
+
+    // Agent spawn stub (MC_DAEMON_EXEC) + integration stub (MC_COMPOSIO_EXEC) both in play.
+    const res = runWorkflowCli(slug, STRUCTURED_STUB, { MC_COMPOSIO_EXEC: '{"successful":true,"data":{"issueId":"ISS-9"}}' });
+    expect(res.ok).toBe(true);
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect(steps.find((s) => s.nodeId === 'i')!.status).toBe('completed');
+    expect((steps.find((s) => s.nodeId === 'a')!.output as StepOut).prompt).toBe('work on ISS-9 now');
+  });
+
+  it('fails the node (and run) when the toolkit connection is not active', async () => {
+    const slug = `vt-wf-int-noconn-${Date.now()}`;
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'i', type: 'integration', position: { x: 160, y: 0 }, data: { toolkit: 'linear', action: 'LINEAR_LIST_LINEAR_TEAMS' } },
+        ],
+        edges: [{ id: 'e1', source: 't', target: 'i' }],
+      },
+    });
+    await upsertConnection(projectId, 'linear', { userId: `mc-proj-${projectId}`, connectedAccountId: 'ca_x', status: 'expired' });
+
+    const res = runWorkflowCli(slug, 'exit 0', { MC_COMPOSIO_EXEC: '{"successful":true,"data":{}}' });
+    expect(res.data?.status).toBe('failed');
+    const i = (await listStepRuns(res.data!.workflowRunId)).find((s) => s.nodeId === 'i')!;
+    expect(i.status).toBe('failed');
+    expect(i.error).toMatch(/not active|expired/i);
+  });
+
+  it('fails the node when the Composio action returns successful:false', async () => {
+    const slug = `vt-wf-int-fail-${Date.now()}`;
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'i', type: 'integration', position: { x: 160, y: 0 }, data: { toolkit: 'linear', action: 'LINEAR_LIST_LINEAR_TEAMS' } },
+        ],
+        edges: [{ id: 'e1', source: 't', target: 'i' }],
+      },
+    });
+    await seedActiveLinear();
+
+    const res = runWorkflowCli(slug, 'exit 0', { MC_COMPOSIO_EXEC: '{"successful":false,"error":"rate limited"}' });
+    expect(res.data?.status).toBe('failed');
+    const i = (await listStepRuns(res.data!.workflowRunId)).find((s) => s.nodeId === 'i')!;
+    expect(i.status).toBe('failed');
+    expect(i.error).toMatch(/rate limited|composio/i);
   });
 });

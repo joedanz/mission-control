@@ -452,6 +452,18 @@ export type AgentNodeData = {
   onError?: WorkflowOnError;
 };
 
+// Config for a type='integration' node (node.data, slice 5) — a deterministic Composio action, NO LLM.
+// toolkit is a COMPOSIO_CATALOG slug (linear | slack | …); action must be in that toolkit's allowedTools.
+// arguments are the action's params; string values may carry {{nodeId.field}} refs (resolved type-preserving
+// against upstream step outputs — a sole-ref keeps its type, an embedded ref string-splices). onError sets
+// this node's failure policy ('halt' default | 'continue'), same as an agent node.
+export type IntegrationNodeData = {
+  toolkit: string;
+  action: string;
+  arguments?: Record<string, unknown>;
+  onError?: WorkflowOnError;
+};
+
 export const workflows = pgTable(
   'workflows',
   {

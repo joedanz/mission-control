@@ -3,7 +3,7 @@
 // ABOUTME: No DB, no spawn (mirrors test/workflows.test.ts). The runtime substrate is a step's stored output.
 
 import { describe, it, expect } from 'vitest';
-import { extractRefs, normalizeStepOutput, resolveRef, interpolate } from '../lib/workflow-refs';
+import { extractRefs, normalizeStepOutput, resolveRef, interpolate, interpolateValue } from '../lib/workflow-refs';
 
 // A stored agent step output as the walker persists it: { runId, runStatus, result: <claude result line> }.
 const agentOutput = (structured: unknown, text = 'free text answer') => ({
@@ -50,6 +50,13 @@ describe('workflow-refs — normalizeStepOutput', () => {
     expect(v.result).toBeNull();
     expect(v.output).toBeNull();
     expect(v.status).toBeNull();
+  });
+
+  it('projects an integration step: data → output, null result, runStatus → status', () => {
+    const v = normalizeStepOutput({ kind: 'integration', toolkit: 'linear', action: 'X', runStatus: 'completed', data: { id: 'ISSUE-1', count: 3 } });
+    expect(v.result).toBeNull(); // no LLM free text
+    expect(v.output).toEqual({ id: 'ISSUE-1', count: 3 }); // the Composio response feeds {{node.output.*}}
+    expect(v.status).toBe('completed');
   });
 });
 
@@ -105,5 +112,40 @@ describe('workflow-refs — interpolate', () => {
     const { text, missing } = interpolate('a static prompt', views);
     expect(text).toBe('a static prompt');
     expect(missing).toEqual([]);
+  });
+});
+
+describe('workflow-refs — interpolateValue (typed, deep — integration node arguments)', () => {
+  const views = new Map([
+    ['i', normalizeStepOutput({ kind: 'integration', runStatus: 'completed', data: { id: 'ISSUE-42', count: 3, tags: ['a', 'b'], meta: { k: 'v' } } })],
+  ]);
+
+  it('resolves a sole-ref string to the RAW TYPED value (number preserved, not stringified)', () => {
+    const { value, missing } = interpolateValue({ limit: '{{i.output.count}}' }, views);
+    expect(value).toEqual({ limit: 3 }); // 3, not "3"
+    expect(missing).toEqual([]);
+  });
+
+  it('resolves a sole-ref to an object/array value (structure preserved)', () => {
+    expect(interpolateValue('{{i.output.meta}}', views).value).toEqual({ k: 'v' });
+    expect(interpolateValue('{{ i.output.tags }}', views).value).toEqual(['a', 'b']); // inner whitespace tolerated
+  });
+
+  it('string-splices an EMBEDDED ref (not a whole-value ref)', () => {
+    expect(interpolateValue('issue #{{i.output.id}}', views).value).toBe('issue #ISSUE-42');
+  });
+
+  it('recurses nested objects and arrays', () => {
+    const { value } = interpolateValue({ a: ['{{i.output.id}}', 'x'], b: { c: '{{i.output.count}}' } }, views);
+    expect(value).toEqual({ a: ['ISSUE-42', 'x'], b: { c: 3 } });
+  });
+
+  it('leaves non-string scalars untouched', () => {
+    expect(interpolateValue({ n: 5, ok: true, z: null }, views).value).toEqual({ n: 5, ok: true, z: null });
+  });
+
+  it('collects missing refs from both sole and embedded positions (canonical token)', () => {
+    const { missing } = interpolateValue({ a: '{{i.output.nope}}', b: 'x {{ghost.result}}' }, views);
+    expect(missing).toEqual(['{{i.output.nope}}', '{{ghost.result}}']);
   });
 });

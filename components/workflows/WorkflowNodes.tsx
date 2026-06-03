@@ -1,7 +1,7 @@
 'use client';
 
-// ABOUTME: MC-themed @xyflow/react custom nodes for the read-only workflow canvas. One component per slice-1
-// ABOUTME: node type (trigger, agent) + a generic fallback so future graphs (integration/branch/gate) still
+// ABOUTME: MC-themed @xyflow/react custom nodes for the read-only workflow canvas. One component per executable
+// ABOUTME: node type (trigger, agent, integration) + a generic fallback so future graphs (branch/gate) still
 // ABOUTME: render. Each is memo()'d and reads its live step status from node.data (ephemeral overlay, never
 // ABOUTME: persisted). nodeTypes is a module-level const so React Flow doesn't re-instantiate it per render.
 
@@ -15,6 +15,8 @@ export type WfNodeData = {
   prompt?: string;
   profileSlug?: string;
   trigger?: string;
+  toolkit?: string;
+  action?: string;
   stepStatus?: WorkflowStepStatus;
 };
 
@@ -66,7 +68,19 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
   );
 });
 
-// integration / branch / gate aren't executed until later slices, but render so the whole graph is visible.
+export const IntegrationNode = memo(function IntegrationNode({ data }: NodeProps) {
+  const d = data as WfNodeData;
+  return (
+    <Shell data={d} kind="integration" accent="integration">
+      {TARGET}
+      {d.toolkit && <div className="wf-node__body">{d.toolkit}</div>}
+      {d.action && <div className="wf-node__meta wf-node__body--mono">{d.action}</div>}
+      {SOURCE}
+    </Shell>
+  );
+});
+
+// branch / gate aren't executed until later slices, but render so the whole graph is visible.
 export const GenericNode = memo(function GenericNode({ data }: NodeProps) {
   const d = data as WfNodeData;
   return (
@@ -82,11 +96,11 @@ function firstLine(text: string): string {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
-// Every persisted node.type maps to a renderer; the three not-yet-executed types share GenericNode.
+// Every persisted node.type maps to a renderer; the not-yet-executed types (branch/gate) share GenericNode.
 export const nodeTypes = {
   trigger: TriggerNode,
   agent: AgentNode,
-  integration: GenericNode,
+  integration: IntegrationNode,
   branch: GenericNode,
   gate: GenericNode,
 } as const;

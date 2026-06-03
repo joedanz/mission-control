@@ -1,9 +1,10 @@
-// ABOUTME: The workflow graph walker (slices 1+3). Drives a manual-trigger → agent-node graph: for each
-// ABOUTME: agent node it interpolates {{nodeId.field}} data-passing refs from upstream step outputs, spawns a
-// ABOUTME: real run (optionally requesting structured output via responseSchema), writes run state through the
-// ABOUTME: `mc` CLI (mc_agent scoping at the CLI boundary, like auto-claim + scheduler), and records per-node
-// ABOUTME: step state. RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it)
-// ABOUTME: — it never creates a claimable task. A failed node halts the workflow unless its onError='continue'.
+// ABOUTME: The workflow graph walker (slices 1+3+5). Drives a manual-trigger graph: an agent node interpolates
+// ABOUTME: {{nodeId.field}} data-passing refs from upstream step outputs, spawns a real run (optionally
+// ABOUTME: requesting structured output via responseSchema), and writes run state through the `mc` CLI
+// ABOUTME: (mc_agent scoping at the CLI boundary, like auto-claim + scheduler); an integration node runs a
+// ABOUTME: deterministic Composio action (no LLM, no run, no spawn). It records per-node step state. RUN-ONLY:
+// ABOUTME: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it) — it never creates a
+// ABOUTME: claimable task. A failed node halts the workflow unless its onError='continue'.
 // ABOUTME: Slice 4 split create from walk: runWorkflow (sync, born 'running') and enqueueWorkflowRun (born
 // ABOUTME: 'queued', no spawn — the web Run button + `--async`) both create a run; walkWorkflowRun executes an
 // ABOUTME: existing run and is shared by the sync path and the workflow-daemon (which claims queued runs).
@@ -21,9 +22,11 @@ import {
   listStepRuns,
 } from '../lib/workflow-store';
 import { prepareWorkflowRun } from '../lib/workflow-enqueue';
-import { topoOrder, nodeById, readAgentNodeData } from '../lib/workflows';
-import { normalizeStepOutput, interpolate, type RefView } from '../lib/workflow-refs';
+import { topoOrder, nodeById, readAgentNodeData, readIntegrationNodeData } from '../lib/workflows';
+import { normalizeStepOutput, interpolate, interpolateValue, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
+import { getConnection } from '../lib/composio-store';
+import { executeAction } from '../lib/composio-api';
 import { NotFoundError, ValidationError } from '../lib/validation';
 import type { Project, WorkflowNode, WorkflowOnError, WorkflowRun, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
 
@@ -125,8 +128,12 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
         continue;
       }
 
-      if (node.type === 'agent') {
-        const res = await runAgentNode(run.id, slug, node, home, opts, log, views);
+      if (node.type === 'agent' || node.type === 'integration') {
+        // Agent = a spawned run (LLM); integration = a deterministic Composio action (no run, no spawn). Both
+        // capture an output for downstream refs and carry the same halt|continue failure policy.
+        const res = node.type === 'agent'
+          ? await runAgentNode(run.id, slug, node, home, opts, log, views)
+          : await runIntegrationNode(run.id, node, home, log, views);
         if (res.ok) {
           views.set(nodeId, normalizeStepOutput(res.output));
           continue;
@@ -136,8 +143,8 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
         break; // onError='halt' (default) — stop; the post-loop reconciliation marks the run failed
       }
 
-      // trigger + agent are all the walker executes; anything else is an honest not-yet error.
-      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent)`);
+      // trigger + agent + integration are all the walker executes; anything else is an honest not-yet error.
+      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration)`);
     }
   } catch (err) {
     await setWorkflowRunStatus(run.id, 'failed');
@@ -156,7 +163,9 @@ async function failStep(wfRunId: string, nodeId: string, error: string): Promise
   await upsertStepRun(wfRunId, nodeId, { status: 'failed', startedAt: new Date(), endedAt: new Date(), error });
 }
 
-type AgentNodeResult = { ok: boolean; output?: unknown; onError: WorkflowOnError };
+// The walker's per-node outcome — `ok` + the captured output (stored on the step, seeds downstream refs) +
+// the node's onError policy (so the caller halts or continues). Shared by agent + integration nodes.
+type NodeResult = { ok: boolean; output?: unknown; onError: WorkflowOnError };
 
 /** Spawn one agent node as a real run. Interpolates {{nodeId.field}} data-passing refs from `views` first
  *  (an unresolved ref hard-fails the node — the source is missing/failed). Returns `ok` + the captured output
@@ -169,10 +178,10 @@ async function runAgentNode(
   opts: RunWorkflowOpts,
   log: Log,
   views: Map<string, RefView>,
-): Promise<AgentNodeResult> {
+): Promise<NodeResult> {
   const data = readAgentNodeData(node);
   const onError = data.onError ?? 'halt';
-  const fail = async (error: string): Promise<AgentNodeResult> => {
+  const fail = async (error: string): Promise<NodeResult> => {
     await failStep(wfRunId, node.id, error);
     return { ok: false, onError };
   };
@@ -245,4 +254,69 @@ async function runAgentNode(
   const stepStatus = status === 'completed' ? 'completed' : 'failed';
   await setStepRunStatus(step.id, stepStatus, { output, ...(stepStatus === 'failed' ? { error: `run ${status}` } : {}) });
   return { ok: stepStatus === 'completed', output, onError };
+}
+
+/** Run one integration node: a single deterministic Composio action, NO LLM (no run row, no spawn, no
+ *  monitor — it's the trigger node's twin, not the agent's). Interpolates {{nodeId.field}} refs into the
+ *  action arguments type-preserving (a runtime miss hard-fails the node), resolves the project's live
+ *  connection for the toolkit, executes, and stores `{ kind, toolkit, action, runStatus, arguments, data }`
+ *  on the step — `data` is the Composio response that feeds downstream {{node.output.*}} refs. */
+async function runIntegrationNode(
+  wfRunId: string,
+  node: WorkflowNode,
+  home: Project,
+  log: Log,
+  views: Map<string, RefView>,
+): Promise<NodeResult> {
+  const data = readIntegrationNodeData(node); // validates toolkit + action + onError (also gated at create)
+  const onError = data.onError ?? 'halt';
+  const base = { kind: 'integration' as const, toolkit: data.toolkit, action: data.action }; // shared step-output shape
+  const fail = async (error: string): Promise<NodeResult> => {
+    const output = { ...base, runStatus: 'failed', error };
+    await upsertStepRun(wfRunId, node.id, { status: 'failed', startedAt: new Date(), endedAt: new Date(), output, error });
+    log(`node ${node.id}: ${error}`);
+    return { ok: false, onError };
+  };
+
+  // Data passing: resolve {{nodeId.field}} refs inside the arguments, TYPE-PRESERVING (a sole-ref keeps its
+  // number/object/array). A runtime miss (source failed under onError:continue, or no such field) hard-fails
+  // THIS node — same contract as the agent prompt path.
+  const { value: args, missing } = interpolateValue(data.arguments ?? {}, views);
+  if (missing.length) return fail(`unresolved data references: ${missing.join(', ')}`);
+
+  // The action runs on behalf of the project's connection for this toolkit — it must be live.
+  const conn = await getConnection(home.id, data.toolkit);
+  const reauth = `re-auth: mc composio connect ${home.slug} ${data.toolkit}`;
+  if (!conn) return fail(`no ${data.toolkit} connection for project "${home.slug}" (${reauth})`);
+  if (conn.status !== 'active') return fail(`${data.toolkit} connection is ${conn.status}, not active (${reauth})`);
+  if (!conn.connectedAccountId) return fail(`${data.toolkit} connection has no connected account (${reauth})`);
+
+  // Mark running before the (network) action so the canvas overlay shows it in-flight and the reaper can see a
+  // mid-action node — same rationale as the agent path's running write (here there's no runId to link).
+  await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date() });
+  let composioData: Record<string, unknown>;
+  try {
+    composioData = await executeIntegration(data.action, conn.connectedAccountId, conn.userId, args as Record<string, unknown>);
+  } catch (e) {
+    return fail(`composio ${data.action} failed: ${(e as Error).message}`);
+  }
+
+  // Store the resolved arguments (observability, like the agent's resolved prompt) + the response data.
+  const output = { ...base, runStatus: 'completed', arguments: args, data: composioData };
+  await upsertStepRun(wfRunId, node.id, { status: 'completed', endedAt: new Date(), output });
+  log(`node ${node.id}: ${data.toolkit}.${data.action} ok`);
+  return { ok: true, output, onError };
+}
+
+/** Execute the Composio action — or a $0 stub when MC_COMPOSIO_EXEC is set (mirrors MC_DAEMON_EXEC for the
+ *  spawn path). The stub is a JSON `{ successful?, data?, error? }`, so tests exercise the whole integration
+ *  path with no network call. The real path is lib's pure `executeAction` (keeps the spawn-free lib boundary). */
+async function executeIntegration(action: string, connectedAccountId: string, userId: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const stub = process.env.MC_COMPOSIO_EXEC;
+  if (stub) {
+    const parsed = JSON.parse(stub) as { successful?: boolean; data?: Record<string, unknown>; error?: string };
+    if (parsed.successful === false) throw new Error(parsed.error || `composio action ${action} failed (stub)`);
+    return parsed.data ?? {};
+  }
+  return executeAction(action, connectedAccountId, userId, args);
 }
