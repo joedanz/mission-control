@@ -14,10 +14,10 @@
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
+import type { AgentProfile } from '../lib/db/schema';
 import { chooseModel, type ModelChoice } from './render-profile';
 import { CHECK_IN_MAX_TASKS } from '../lib/constants';
-import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, type Spawned } from './runner';
+import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
 import { isDue, buildCheckInPrompt } from './schedule';
 
 const AGENT_LABEL = process.env.MC_SCHEDULER_AGENT || 'mc-scheduler';
@@ -111,17 +111,8 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
   const prompt = buildCheckInPrompt(profile, project, claimedTask, a.maxTasks);
 
   if (choice.downgraded) await recordDowngrade(choice, profile, spentToday, runId, project.slug, log);
-  // Auto-feed the project's ACTIVE Composio connections (same as auto-claim). Non-fatal on failure.
-  // (no profile guard: runCheckIn is only ever called with a resolved profile)
-  let extraMcpServers: Record<string, McpServerConfig> | undefined;
-  const cfg = await mc(['composio', 'mcp-config', project.slug]);
-  if (cfg.ok) {
-    extraMcpServers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
-    const keys = Object.keys(extraMcpServers ?? {});
-    if (keys.length) log(`fed ${keys.length} composio server(s) [${keys.map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k)).join(', ')}] into run ${runId.slice(0, 8)}`);
-  } else {
-    log(`composio mcp-config for ${project.slug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
-  }
+  // Auto-feed the project's ACTIVE Composio connections as MCP servers (runCheckIn always has a profile).
+  const extraMcpServers = await fetchComposioMcpServers(project.slug, runId, log);
 
   const how = process.env.MC_DAEMON_EXEC ? 'executor (MC_DAEMON_EXEC)' : `profile ${profile.slug} (${profile.runtime}${choice.model ? `, model ${choice.model}` : ''})`;
   const work = claimedTask ? `task "${claimedTask.label}"` : 'mission only';
