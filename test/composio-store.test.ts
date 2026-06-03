@@ -30,7 +30,7 @@ async function freshProject() {
 
 describe('composio store', () => {
   it('upserts the toolkit cache row (provided fields only)', async () => {
-    const slug = `vt-${tag()}`;
+    const slug = tag();
     toolkitSlugs.push(slug);
     await upsertToolkitRow(slug, { authConfigId: 'ac_1' });
     await upsertToolkitRow(slug, { mcpServerId: 'srv_1', mcpUrl: 'https://x/v3/mcp/srv_1' });

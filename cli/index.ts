@@ -68,7 +68,7 @@ function classify(err: unknown): ErrInfo {
     return { code: 'GITHUB', message: redact(err.message), exit: 1 };
   }
   if (err instanceof ComposioApiError) {
-    return { code: 'COMPOSIO', message: err.message, exit: 1 };
+    return { code: 'COMPOSIO', message: redact(err.message), exit: 1 };
   }
   // Postgres unique violation (e.g. duplicate slug, duplicate integration row).
   const e = err as { code?: string; sourceError?: { code?: string }; message?: string };

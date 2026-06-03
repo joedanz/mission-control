@@ -1,7 +1,7 @@
 // ABOUTME: Composio API client — pure helpers (user_id, status map, MCP URL) + fetch-mocked wrappers.
 // ABOUTME: No network: global fetch is stubbed per case. CI-safe.
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   deriveUserId, deriveMcpUrl, mapStatus,
   createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection,
@@ -39,28 +39,24 @@ describe('Composio API pure helpers', () => {
 });
 
 describe('Composio API wrappers (mocked fetch)', () => {
+  beforeEach(() => vi.stubEnv('COMPOSIO_API_KEY', 'ak_test'));
   it('createAuthConfig returns the new id', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
     mockFetch(201, { auth_config: { id: 'ac_9' } });
     expect(await createAuthConfig('linear')).toBe('ac_9');
   });
   it('createMcpServer returns id + url', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
     mockFetch(201, { id: 'srv_9', mcp_url: 'https://b/v3/mcp/srv_9' });
     expect(await createMcpServer('linear', 'ac_9', ['T'])).toEqual({ mcpServerId: 'srv_9', mcpUrl: 'https://b/v3/mcp/srv_9' });
   });
   it('initiateConnection returns redirect + connected account', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
     mockFetch(201, { redirect_url: 'https://connect/x', connected_account_id: 'ca_9' });
     expect(await initiateConnection('ac_9', 'mc-proj-x')).toEqual({ redirectUrl: 'https://connect/x', connectedAccountId: 'ca_9' });
   });
   it('getConnectionStatus returns the raw status', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
     mockFetch(200, { status: 'ACTIVE' });
     expect(await getConnectionStatus('ca_9')).toBe('ACTIVE');
   });
   it('throws ComposioApiError on a non-2xx', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
     mockFetch(400, { error: 'bad' });
     await expect(getConnectionStatus('ca_9')).rejects.toBeInstanceOf(ComposioApiError);
   });
@@ -69,11 +65,9 @@ describe('Composio API wrappers (mocked fetch)', () => {
     await expect(getConnectionStatus('ca_9')).rejects.toBeInstanceOf(ComposioApiError);
   });
   it('deleteConnection issues a DELETE to the connected account', async () => {
-    vi.stubEnv('COMPOSIO_API_KEY', 'ak_test');
-    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' }));
-    vi.stubGlobal('fetch', f);
+    mockFetch(200, {});
     await deleteConnection('ca_9');
-    expect(f).toHaveBeenCalledWith(
+    expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/connected_accounts/ca_9'),
       expect.objectContaining({ method: 'DELETE' }),
     );
