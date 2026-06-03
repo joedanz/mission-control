@@ -382,6 +382,11 @@ export const composioConnections = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    // INTENTIONAL single-account invariant: one connection per (project, toolkit). Multiple accounts
+    // per project+toolkit is an explicit NON-GOAL for this single-user tool — the agent-facing MCP URL
+    // routes by a per-PROJECT user_id (deriveUserId = mc-proj-<projectId>) and the mcpServers key is
+    // per-toolkit (composioServerKey), so two same-toolkit accounts can't be independently routed without
+    // a per-connection user_id rework. Do NOT drop this index to "allow multiple" without that redesign.
     uniqueIndex('composio_connections_project_toolkit_uq').on(t.projectId, t.toolkitSlug),
     index('composio_connections_project_idx').on(t.projectId),
   ],
