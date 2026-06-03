@@ -343,6 +343,48 @@ export const events = pgTable(
   ],
 );
 
+// ── Composio connections (Integrations reshape) ───────────────────────────────────
+// Per-toolkit shared Composio resources (auth-config + MCP server) created once and cached here.
+export const composioToolkits = pgTable('composio_toolkits', {
+  slug: text('slug').primaryKey(), // matches a COMPOSIO_CATALOG key
+  authConfigId: text('auth_config_id'), // Composio ac_… (created once)
+  mcpServerId: text('mcp_server_id'), // Composio MCP server id (created once)
+  mcpUrl: text('mcp_url'), // base, e.g. https://backend.composio.dev/v3/mcp/<id>
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One connection per (project, toolkit). Holds only Composio resource IDs — never a secret.
+export const composioConnections = pgTable(
+  'composio_connections',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()`),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // References a COMPOSIO_CATALOG key (the code catalog is the authority for valid toolkits) —
+    // intentionally NOT a FK to composio_toolkits.slug: that table is a lazily-populated resource
+    // CACHE, and a connection is "for the linear toolkit" independent of whether the cache row
+    // exists yet. Orchestration validates the slug via getCatalogEntry + ensures the cache row
+    // (ensure-before-connect) before any connection is written.
+    toolkitSlug: text('toolkit_slug').notNull(),
+    userId: text('user_id').notNull(), // mc-proj-<projectId> — the Composio user_id
+    connectedAccountId: text('connected_account_id'), // Composio ca_… (set once link initiated)
+    status: text('status').notNull().default('initializing'), // initializing|active|error|expired|disconnected
+    linkUrl: text('link_url'), // transient hosted link for an in-flight connect
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('composio_connections_project_toolkit_uq').on(t.projectId, t.toolkitSlug),
+    index('composio_connections_project_idx').on(t.projectId),
+  ],
+);
+
+export type ComposioToolkit = typeof composioToolkits.$inferSelect;
+export type ComposioConnection = typeof composioConnections.$inferSelect;
+
 // ── Settings (key/value) ───────────────────────────────────────────────────────
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
