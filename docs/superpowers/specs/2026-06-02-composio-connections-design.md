@@ -168,3 +168,9 @@ IDs (`ac_…`, `ca_…`, server id) + URLs — **no secrets**. Consistent with t
   rare dup).
 - **Slack allow-list** is curated during planning by querying `GET /api/v3/tools?toolkit_slug=slack`
   (the Linear slugs carried a `_LINEAR_` infix; Slack likely similar).
+- **Orphaned connected accounts on re-connect (deferred).** `connectStart` always calls
+  `initiateConnection`, minting a fresh `connectedAccountId` and overwriting the row; the prior account
+  is left dangling in the operator's Composio workspace. Not a data-integrity issue (the DB row is
+  always consistent) — workspace cleanup only. Deferred: a later slice can delete the prior account
+  (reusing `disconnect`'s 404-tolerant guard) before re-initiating. `disconnect` itself now tolerates an
+  already-revoked account (404 → still marks the row `disconnected`).
