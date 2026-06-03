@@ -145,7 +145,8 @@ export type SpawnExecutorOpts = {
    *  so a check-in can self-serve via the mc CLI. See planSpawn. */
   extraAllowedTools?: string[];
   /** Project-derived Composio MCP servers (from `mc composio mcp-config`), merged UNDER the profile's
-   *  own mcpServers (the profile wins a key collision). Ignored when there is no profile. */
+   *  own mcpServers (the profile wins a key collision). With no profile they are used as-is (rendered
+   *  with --strict-mcp-config, so the profileless agent sees exactly these). */
   extraMcpServers?: Record<string, McpServerConfig>;
 };
 
@@ -172,7 +173,7 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   // argv (which `ps` would expose). resolveMcpConfigJson may throw MissingEnvError before any file exists.
   let mcpConfigPath: string | null = null;
   let cleanup = noCleanup;
-  const mcpJson = profile ? resolveMcpConfigJson(mergeMcpServers(profile.mcpServers, opts.extraMcpServers), process.env) : null;
+  const mcpJson = resolveMcpConfigJson(mergeMcpServers(profile?.mcpServers, opts.extraMcpServers), process.env);
   if (mcpJson) {
     const path = join(tmpdir(), `mc-mcp-${runId}.json`);
     writeFileSync(path, mcpJson, { mode: 0o600 });
