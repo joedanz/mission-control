@@ -108,7 +108,7 @@ describe('resolveMcpConfigJson (pure)', () => {
 });
 
 describe('planSpawn — no profile (back-compat)', () => {
-  it('renders the daemon historical claude -p plan spawn', () => {
+  it('renders the daemon historical claude -p plan spawn (no auto-fed servers)', () => {
     const plan = planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {} });
     expect(plan).toEqual({
       runtime: 'claude-code',
@@ -116,6 +116,15 @@ describe('planSpawn — no profile (back-compat)', () => {
       args: ['-p', PROMPT, '--permission-mode', 'plan', '--output-format', 'json'],
       extraEnv: {},
     });
+  });
+
+  it('appends --mcp-config + --strict-mcp-config when servers are auto-fed (mcpConfigPath set)', () => {
+    const plan = planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', mcpConfigPath: '/tmp/mc-mcp-x.json', hostEnv: {} });
+    expect(plan.args).toEqual([
+      '-p', PROMPT, '--permission-mode', 'plan', '--output-format', 'json',
+      '--mcp-config', '/tmp/mc-mcp-x.json', '--strict-mcp-config',
+    ]);
+    expect(plan.runtime).toBe('claude-code');
   });
 });
 
