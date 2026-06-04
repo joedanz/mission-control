@@ -40,6 +40,19 @@ Every bit of jargon used above, translated.
 | Composio | A third-party OAuth broker that exposes long-tail services (Linear, Slack, and more) as hosted remote MCP servers, so a project can connect to them without bespoke wiring. |
 | Connection (Composio) | A per-project link to one Composio toolkit. There is at most one connection per (project, toolkit). Has a status: `initializing`, `active`, `error`, `expired`, or `disconnected`. |
 | Connected account | Composio's term for the authorized third-party account that backs a connection — e.g. the specific Linear workspace or Slack team the user signed into. |
+| Workflow | A defined flow of work drawn as a graph of nodes (trigger, agent, integration, branch, gate) and edges. Composes agents and tools into a repeatable, multi-step process. Drive it with `mc workflow`. |
+| Node | One step in a workflow. Five kinds: **trigger** (the single start), **agent** (spawns an AI run), **integration** (a deterministic Composio action), **branch** (a conditional fork), **gate** (a human approval pause). |
+| Edge | A wire from one node to another — it both sequences the steps and is the path data flows along. |
+| Workflow run | One execution of a workflow. Snapshots the graph at start (so edits can't disturb it) and records a *step* per node. Status: `queued → running → completed / failed / cancelled`, plus `paused` at a gate. |
+| Step | One node's execution within a run — its status, its captured output, and (for an agent node) the run it spawned. |
+| Data passing | Embedding `{{nodeId.field}}` in a prompt or an integration's arguments to pull an upstream node's output; the reference must point at an ancestor, so data flows along the edges. |
+| Trigger | How a workflow starts: **manual** (you press Run), **cron** (a schedule), or **event** (an external webhook). One per workflow. |
+| Webhook trigger | An external `POST` that fires a workflow, authenticated by an HMAC signature over the request body — no session, the signature is the auth. |
+| Approval gate | A node that pauses the whole run and waits for a person to approve or reject before a costly or irreversible step. A paused run waits indefinitely (the reaper leaves it alone). |
+| Fan-out / merge | Graph *shapes*, not node types: a node with several outgoing edges fans out into parallel branches; a node with several incoming edges merges, waiting for every branch (a wait-all join). |
+| Workflow daemon | The background program that executes workflows off the web tier — draining queued runs and firing due cron/event triggers. |
+| Run-only | A workflow's agent node opens a real run (for cost, heartbeat, and the kill-switch) but creates no claimable task — so it can't race the auto-claim daemon. |
+| Single-flight guard | The rule that refuses a second run of a workflow while one is already queued, running, or paused (unless you opt out). |
 | Telemetry | The automatic stream of status updates agents send about what they're doing. |
 | Integration | Standard "plumbing" a project may need — payments (Stripe), error tracking (Sentry), email, or Google sign-in — plus any Composio-brokered service (Linear, Slack, …) connected as a remote MCP tool. |
 | Optimistic concurrency | Letting many workers reach for the same row, but writing in a way where only one can win — no locks held up front. |

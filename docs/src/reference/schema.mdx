@@ -2,13 +2,13 @@
 "$schema": https://holocron.so/frontmatter.json
 rendering: static
 title: Schema
-description: Eight working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+description: Eleven working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
 icon: table
 ---
 
 # The database, column by column
 
-Eight working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
+Eleven working tables and the auth tables, defined with Drizzle ORM on Neon Postgres.
 
 Every `id` is a UUID stored as text. Enumerated values are split deliberately into two kinds:
 **hard `pgEnum` types** for sets that almost never change, and **plain text validated in the
@@ -118,6 +118,48 @@ the rest of the schema.
 | last_check_in_at · consecutive_failures | When the profile last checked in (the "is it due?" baseline, advanced at spawn), and the failure streak that auto-pauses the schedule at three. |
 | created_at · updated_at | Timestamps. |
 
+## workflows — "a defined flow of nodes"
+
+One row per [workflow](/workflows) — the authored graph and its lifecycle. Node types, statuses, and
+triggers are all validated text (in `lib/workflows.ts`), so a new node type never needs a migration.
+
+| Column | Notes |
+|---|---|
+| `id` · project_id · slug · name | UUID; the FK to the home `projects` row (`ON DELETE CASCADE`); a **globally unique** slug (the `mc workflow` address); a display name. |
+| description | Optional text. |
+| status | Validated text: `draft · active · paused`. Only an `active` workflow fires from a cron or event trigger. |
+| graph | `jsonb` `{nodes, edges}` — the React Flow authoring graph (each node: `id`, `type`, `position`, `data`). The single source of truth the canvas and CLI both edit. |
+| version | Integer, bumped on every graph save — the observability counter. |
+| created_at · updated_at | Timestamps; `updated_at` is the cron anchor before a workflow's first scheduled fire. |
+
+## workflow_runs — "one execution of a workflow"
+
+One row per run. Pins a **snapshot** of the graph so editing the workflow can't corrupt a walk in
+flight, and carries the payload that fired it.
+
+| Column | Notes |
+|---|---|
+| `id` · workflow_id | UUID and the FK to `workflows`. |
+| status | Validated text: `queued → running → completed \| failed \| cancelled`, plus `paused` (a gate is awaiting a human). `queued` is the daemon's to claim; `paused` is **not** terminal — the reaper skips it, but the single-flight guard still counts it. |
+| trigger | How it fired: `manual · cron · event · webhook`. |
+| graph_snapshot | `jsonb` — the graph copied at run start; the walker reads this, never the live `workflows.graph`. |
+| context | `jsonb` — the trigger payload (e.g. a webhook body), surfaced to the graph as `{{trigger.output.*}}`. |
+| cancel_requested | The kill-switch flag; propagated to the in-flight agent node's run. |
+| started_at · ended_at · last_heartbeat_at | `last_heartbeat_at` is what the reaper watches to fail a dead `running` walker. |
+
+## workflow_step_runs — "one node's execution within a run"
+
+One row per executed node — idempotent and resumable on the `(workflow_run, node)` unique key.
+
+| Column | Notes |
+|---|---|
+| `id` · workflow_run_id · node_id | UUID, the FK to `workflow_runs`, and the node's id within the graph. |
+| status | Validated text: `pending · running · completed · failed · skipped` (a node off a not-taken branch is `skipped`; a node `running` indefinitely is an awaiting gate). |
+| run_id | FK to `runs` (`ON DELETE SET NULL`) — the agent run an **agent** node opened. Null for deterministic nodes (trigger / integration / branch / gate). |
+| output | `jsonb` — the full captured result: an agent's result line + `structured_output`, an integration's response `data`, a branch's chosen case, or a gate's decision. The substrate `{{node.field}}` references read from. |
+| error | Last error message, if the node failed. |
+| started_at · ended_at · created_at | Timestamps. |
+
 ## settings — "app-level key/value store"
 
 A tiny key/value table for global app configuration — one row per setting. It's defined and
@@ -148,6 +190,13 @@ database. The agent role **cannot see the auth tables at all** — see [Access](
 | app/CLI text | profile runtime | `claude-code · exec` |
 | app/CLI text | permission mode | `plan · acceptEdits · bypassPermissions · default` |
 | app/CLI text | `ConnectionStatus` | `initializing · active · error · expired · disconnected` |
+| app/CLI text | workflow status | `draft · active · paused` |
+| app/CLI text | workflow run status | `queued · running · paused · completed · failed · cancelled` |
+| app/CLI text | workflow trigger | `manual · cron · event · webhook` |
+| app/CLI text | workflow step status | `pending · running · completed · failed · skipped` |
+| app/CLI text | workflow node type | `trigger · agent · integration · branch · gate` |
+| app/CLI text | node `onError` | `halt · continue` |
+| app/CLI text | branch op | `eq · ne · gt · gte · lt · lte · contains · truthy · falsy` |
 
 ## Indexes that matter
 
@@ -162,6 +211,9 @@ database. The agent role **cannot see the auth tables at all** — see [Access](
 | `agent_profiles_default_uq` | Partial unique over `is_default = true` — enforces *at most one* global default profile. |
 | `agent_profiles_schedulable_idx` | Partial over rows with `schedule_enabled` — the scheduler's scan for profiles that might be due. |
 | `composio_connections_project_toolkit_uq` | UNIQUE on `(project_id, toolkit_slug)` — enforces the intentional one-connection-per-(project, toolkit) invariant. Two connections for the same toolkit in the same project are an explicit non-goal; dropping this index requires a per-connection `user_id` redesign. |
+| `workflows_slug_uq` | UNIQUE on `slug` — the globally-unique handle you address with `mc workflow`. |
+| `workflow_runs_status_heartbeat_idx` | The reaper's index over `workflow_runs` — finds `running` runs whose heartbeat went stale (a dead walker). `queued` and `paused` runs are excluded by design. |
+| `workflow_step_runs_run_node_uq` | UNIQUE on `(workflow_run_id, node_id)` — makes step writes idempotent so the walker is resumable: it re-derives completed nodes from the table, not from memory. |
 
 <Note>
 **Why two agents never do the same task.** A claim is a **single conditional write**: "set

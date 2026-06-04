@@ -64,6 +64,13 @@
   <text x="864" y="290" text-anchor="end" class="t-mono" font-size="9.5" fill="#9a9082" letter-spacing="1">SPAWNS WORKERS</text>
   <path d="M670,262 L584,262" fill="none" stroke="#6b6358" stroke-width="1.8" marker-end="url(#ar)"/>
 
+  <!-- right-lower workflow daemon -->
+  <rect x="670" y="314" width="206" height="72" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
+  <text x="864" y="341" text-anchor="end" class="t-disp" font-size="14" fill="#2a2620">Workflow daemon</text>
+  <text x="864" y="361" text-anchor="end" class="t-serif" font-size="12.5" font-style="italic" fill="#6b6358">runs workflow graphs</text>
+  <text x="864" y="378" text-anchor="end" class="t-mono" font-size="9.5" fill="#9a9082" letter-spacing="1">WALKS QUEUED RUNS</text>
+  <path d="M670,350 C608,350 578,318 568,292" fill="none" stroke="#6b6358" stroke-width="1.8" marker-end="url(#ar)"/>
+
   <!-- bottom-left reaper -->
   <rect x="232" y="402" width="206" height="72" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.3"/>
   <text x="335" y="429" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">The reaper</text>

@@ -127,6 +127,34 @@ emits a `composio.connection_changed` event for any that changed. See [Integrati
 for the full connection lifecycle.
 </Note>
 
+## Workflows
+
+Author and operate [workflows](/workflows) — graphs of nodes (trigger · agent · integration · branch
+· gate) executed by the [workflow daemon](/reference/operating#the-workflow-daemon). Graphs are
+validated by the same rules the runner uses, so the CLI and canvas can never disagree.
+
+| Command | What it does |
+|---|---|
+| `workflow list [--project <slug>]` | List workflows (graph size, status, version, latest-run summary). |
+| `workflow get <slug>` | One workflow — its graph, status, and version. |
+| `workflow create --project <slug> --name <n> [--slug --graph --description]` | Create a workflow from a React Flow `{nodes,edges}` graph (`--graph <json>` or `@file`). A provided graph is validated (one trigger, acyclic, nothing wired into the trigger, agent prompts present, every `{{ref}}` an ancestor); omit `--graph` for an empty draft. Slug defaults to the slugified name (globally unique). |
+| `workflow update <slug> [--graph --name --description]` | Replace a workflow's graph (and/or rename) and bump its version — the CLI twin of canvas authoring, validated through the same rules. Omit `--graph` to keep the current graph. |
+| `workflow run <slug> [--timeout --max-parallel --allow-concurrent --async]` | Run now. **Synchronous by default** (this process owns the walk; keep prompts short). `--async` enqueues a `queued` run for the workflow daemon and returns. `--max-parallel <n>` caps concurrent nodes (default 4). `--allow-concurrent` bypasses the single-flight guard. |
+| `workflow status <runId>` | A run plus its per-node step rows (each agent step links its `runId` and captured output). |
+| `workflow cancel <runId>` | Cancel a run. A `queued` or `paused` run is marked `cancelled` outright; a `running` run gets `cancelRequested`, propagated to the in-flight agent node's run. |
+| `workflow approve <runId> <nodeId> [--reject --reason <t> --async]` | Decide a **paused gate** and resume. Default approves and re-walks synchronously; `--reject` fails the gate step (its `onError` then applies); `--async` requeues for the daemon. |
+| `workflow activate <slug>` | Set status `active` — a cron/event trigger then fires on its schedule / webhook. |
+| `workflow pause <slug>` | Set status `paused` (stops cron/event firing). |
+| `workflow webhook-url <slug>` | Print the external webhook URL and `X-Hub-Signature-256` signing details for an event-triggered workflow. Read-only. |
+
+<Note>
+**Run-only, with a single-flight guard.** An agent node opens a real `runs` row (so cost, heartbeat,
+fleet feed, and the kill-switch work) but creates **no** claimable task — so it can't race the
+auto-claim daemon. A second run of the same workflow is refused while one is `queued`, `running`, or
+`paused` unless you pass `--allow-concurrent`. The graph is snapshotted onto each run, so editing the
+workflow never disturbs a walk in flight.
+</Note>
+
 ## Integrations & self-description
 
 | Command | What it does |

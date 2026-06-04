@@ -30,21 +30,28 @@
   </defs>
 
   <!-- ── LEFT COLUMN: Tab boxes ── -->
-  <!-- Tab: Overview  y=52 -->
-  <rect x="60" y="52" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
-  <text x="140" y="74" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Overview</text>
-  <text x="140" y="93" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
+  <!-- Database-read tabs (Overview, Mission, Integrations, Workflows) -->
+  <!-- Tab: Overview  y=40 -->
+  <rect x="60" y="40" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
+  <text x="140" y="62" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Overview</text>
+  <text x="140" y="81" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
-  <!-- Tab: Mission  y=132 -->
-  <rect x="60" y="132" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
-  <text x="140" y="154" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Mission</text>
-  <text x="140" y="173" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
+  <!-- Tab: Mission  y=104 -->
+  <rect x="60" y="104" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
+  <text x="140" y="126" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Mission</text>
+  <text x="140" y="145" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
-  <!-- Tab: Integrations  y=212 -->
-  <rect x="60" y="212" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
-  <text x="140" y="234" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Integrations</text>
-  <text x="140" y="253" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
+  <!-- Tab: Integrations  y=168 -->
+  <rect x="60" y="168" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
+  <text x="140" y="190" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Integrations</text>
+  <text x="140" y="209" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
+  <!-- Tab: Workflows  y=232 -->
+  <rect x="60" y="232" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
+  <text x="140" y="254" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Workflows</text>
+  <text x="140" y="273" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
+
+  <!-- Live-service tabs -->
   <!-- Tab: Errors  y=312 -->
   <rect x="60" y="312" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
   <text x="140" y="334" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Errors</text>
@@ -61,10 +68,10 @@
   <text x="140" y="513" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
   <!-- ── RIGHT COLUMN: Source boxes ── -->
-  <!-- Neon database (shared by Overview, Mission, Integrations) y=132 center of 3 tabs -->
+  <!-- Neon database (shared by Overview, Mission, Integrations, Workflows) -->
   <rect x="620" y="152" width="224" height="72" rx="4" fill="#ecebf8" stroke="#4a45c2" stroke-width="1.6"/>
   <text x="732" y="177" text-anchor="middle" class="t-disp" font-size="15" fill="#2a2620">Neon database</text>
-  <text x="732" y="198" text-anchor="middle" class="t-serif" font-size="12" font-style="italic" fill="#6b6358">projects, tasks, runs, events</text>
+  <text x="732" y="198" text-anchor="middle" class="t-serif" font-size="12" font-style="italic" fill="#6b6358">projects, tasks, runs, workflows</text>
   <text x="732" y="214" text-anchor="middle" class="t-mono" font-size="9" fill="#4a45c2" letter-spacing="1">DATABASE READ</text>
 
   <!-- Sentry API  y=298 -->
@@ -86,17 +93,14 @@
   <text x="732" y="516" text-anchor="middle" class="t-mono" font-size="9" fill="#2c8a6f" letter-spacing="1">LIVE</text>
 
   <!-- ── ARROWS ── -->
-  <!-- Overview → Neon (indigo) fan to y=164 on right box -->
-  <path d="M220,78 C380,78 480,164 618,173" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
-  <!-- Mission → Neon -->
-  <path d="M220,158 C420,158 500,188 618,188" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
-  <!-- Integrations → Neon -->
-  <path d="M220,238 C380,238 480,212 618,207" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
-  <!-- Errors → Sentry (green) -->
+  <!-- Database-read tabs → Neon (indigo) -->
+  <path d="M220,66 C400,66 480,158 618,162" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+  <path d="M220,130 C420,130 500,180 618,180" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+  <path d="M220,194 C400,194 500,196 618,198" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+  <path d="M220,258 C420,258 500,212 618,214" fill="none" stroke="#4a45c2" stroke-width="1.6" marker-end="url(#arI)"/>
+  <!-- Live-service tabs → external sources (green) -->
   <path d="M220,338 L618,338" fill="none" stroke="#2c8a6f" stroke-width="1.6" marker-end="url(#arG)"/>
-  <!-- Email → DNS (green) -->
   <path d="M220,418 L618,418" fill="none" stroke="#2c8a6f" stroke-width="1.6" marker-end="url(#arG)"/>
-  <!-- Revenue → Stripe (green) -->
   <path d="M220,498 L618,498" fill="none" stroke="#2c8a6f" stroke-width="1.6" marker-end="url(#arG)"/>
 
   <!-- ── LEGEND (top-right, clear of every box; Neon box starts at y=152) ── -->

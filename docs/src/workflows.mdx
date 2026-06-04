@@ -1,0 +1,265 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+rendering: static
+title: Workflows
+description: A visual orchestrator where a node can be a whole AI agent — wired alongside deterministic integration calls, branches, triggers, and human approval gates.
+icon: workflow
+---
+
+# Workflows: orchestrating agents, not just API calls
+
+A visual orchestrator where a single node can be a whole AI agent — wired alongside deterministic
+integration calls, branches, triggers, and human approval gates.
+
+[Autonomy](/autonomy) runs **one** task at a time: claim it, spawn an agent, report back. A
+**workflow** strings those steps into a defined flow — a graph you draw on a canvas. The
+differentiator versus tools like n8n or Zapier is the headline node type: an **agent node** is a
+real [run](/data-model) with a [profile](/profiles), skills, [MCP tools](/integrations), and a
+budget — not a fixed API call. You compose Claude agents the same way those tools compose webhooks.
+
+<Note>
+**Run-only, never a queued task.** An agent node opens a real `runs` row — so cost, the heartbeat,
+the live fleet feed, and the kill-switch all come for free — but it deliberately creates **no
+claimable task**. That keeps a workflow from racing the [auto-claim daemon](/autonomy), which only
+ever picks up `custom` `todo` tasks.
+</Note>
+
+## The five kinds of node
+
+A workflow is a graph of **nodes** joined by **edges**. Five node types cover every step; only the
+agent node spawns an AI — the rest are deterministic (no LLM, no cost, no spawn).
+
+<CardGroup cols={2}>
+  <Card title="Trigger" icon="play">
+    **Where it starts.** Every workflow has exactly one. A bare trigger fires manually; give it a
+    `schedule` and it fires on a clock; give it an `event` and it fires from a webhook. Nothing may
+    wire *into* a trigger — it's the single entry point.
+  </Card>
+  <Card title="Agent" icon="bot">
+    **The star.** Spawns a Claude agent with a `prompt`, resolved to a [profile](/profiles) (or the
+    default), running in the project's repo. Optionally pins a `profileSlug`, a `projectSlug`, and a
+    `responseSchema` for structured output. The only node that costs money.
+  </Card>
+  <Card title="Integration" icon="plug">
+    **A deterministic tool call.** Runs one [Composio](/integrations) action (e.g. create a Linear
+    issue, post to Slack) against the project's active connection — no agent, no run row. Carries a
+    `toolkit`, an `action`, and `arguments`.
+  </Card>
+  <Card title="Branch" icon="git-branch">
+    **A fork in the road.** Picks the first of an ordered list of `cases` whose condition is true and
+    routes to the matching edges; everything off the chosen path is marked `skipped`. Deterministic —
+    no agent.
+  </Card>
+  <Card title="Gate" icon="hand">
+    **A human checkpoint.** Pauses the whole run and waits — indefinitely — for a person to approve or
+    reject before a costly or irreversible step. No agent. See [the approval gate](#human-in-the-loop-the-approval-gate).
+  </Card>
+</CardGroup>
+
+Each node's behaviour is configured in its `data`:
+
+| Node | `data` shape |
+|---|---|
+| **trigger** | `{ schedule? }` **or** `{ event? }` — at most one (a manual trigger carries neither). |
+| **agent** | `{ prompt, profileSlug?, projectSlug?, responseSchema?, onError? }` — `prompt` required. |
+| **integration** | `{ toolkit, action, arguments?, onError? }` — a Composio catalog slug + one of its allowed actions. |
+| **branch** | `{ cases: [{ name, when: { left, op, right? } }], onError? }`. |
+| **gate** | `{ message?, onError? }`. |
+
+## A workflow's life: graph → run → steps
+
+Three records track everything, mirroring how a [run claims a task](/data-model):
+
+<Steps>
+  <Step title="The workflow holds the graph">
+    A `workflow` row owns the `{nodes, edges}` graph, a `slug`, a `status` (`draft` / `active` /
+    `paused`), and a `version` that bumps on every save. Authoring edits this graph.
+  </Step>
+  <Step title="A run snapshots the graph and walks it">
+    Starting a workflow creates a `workflow_run` that **pins a copy** of the graph at that instant —
+    so editing the workflow mid-run can never corrupt a walker in flight. The run carries a `status`
+    (`queued` → `running` → `completed` / `failed` / `cancelled`, plus `paused` for a gate) and a
+    heartbeat.
+  </Step>
+  <Step title="Each node records a step">
+    Every executed node writes one `workflow_step_run` — its `status`, the linked agent `runId` (for
+    an agent node), and the full captured `output`. The `(run, node)` pair is unique, so the walker is
+    **resumable**: it re-derives what's already done from the table rather than from memory.
+  </Step>
+</Steps>
+
+A node's captured `output` is the substrate for the next feature — passing data downstream.
+
+## Passing data between nodes
+
+Any agent prompt, or any value inside an integration node's `arguments`, may embed a **reference** to
+an upstream node's output using `{{nodeId.field}}` (mustache) syntax. A reference must point at an
+**ancestor** — a node with a wired edge-path into the consumer — so data only ever flows along the
+edges you drew.
+
+| Reference | Resolves to |
+|---|---|
+| `{{id.result}}` | An agent node's free-text result. |
+| `{{id.output}}` / `{{id.output.foo.bar}}` | An agent's structured output (from its `responseSchema`) **or** an integration node's response data, by dotted path. |
+| `{{id.status}}` | A node's terminal status. |
+| `{{trigger.output.*}}` | The trigger's payload — e.g. the body of the webhook that fired the run. |
+
+In an integration node's `arguments`, a string that **is** a single reference (`"{{i.output.count}}"`)
+resolves to the **raw typed value** — a number stays a number, an object stays an object. An
+**embedded** reference (`"issue #{{i.output.id}}"`) splices into the surrounding string. A reference
+that can't resolve at run time (the source failed, or there's no such field) hard-fails the node that
+consumes it.
+
+<Note>
+**Structured output is a real spawn flag.** An agent node's `responseSchema` (a JSON Schema) is
+rendered to `claude --json-schema`, and the validated `structured_output` object it returns is exactly
+what `{{id.output}}` reads. So one agent can hand a *typed* object to the next.
+</Note>
+
+## How a workflow runs
+
+### Synchronous or durable
+
+`mc workflow run <slug>` is **synchronous by default**: the calling process owns the walk and blocks
+until the run finishes (its run is born `running`). Pass `--async` — or click **Run** on the canvas —
+and it instead writes a `queued` run and returns immediately; a fourth always-on daemon, the
+**[workflow daemon](/reference/operating#the-workflow-daemon)**, claims it race-safe and executes it
+off-process. The web tier never spawns; it only ever writes the queued row.
+
+A **single-flight guard** refuses a second run while one is already queued, running, or paused (pass
+`--allow-concurrent` to override). If a walker dies mid-run, the [reaper](/reference/operating)
+reconciles its `running` run to `failed`; a `queued` run simply survives until a daemon claims it.
+
+### Many nodes at once
+
+The walker is a **ready-set scheduler**, not a single-file loop. A node becomes *decidable* the moment
+**all** its predecessors are terminal (a wait-all join), so independent branches run in parallel while
+a merge node waits for every incoming branch to finish. `--max-parallel <n>` caps how many run at once
+(default 4).
+
+<Note>
+**Fan-out and merge are shapes, not node types.** A node with several outgoing edges fans out; a node
+with several incoming edges is a merge (an OR-join once any active branch arrives). You draw
+parallelism — there's nothing special to add.
+</Note>
+
+### When a node fails
+
+Every executable node carries an `onError` policy:
+
+- **`halt`** (the default) — a failed node stops the run: no new nodes launch, in-flight ones drain,
+  and the run ends `failed`.
+- **`continue`** — keep walking past the failure; the run still ends `failed`, but independent
+  downstream nodes get their chance. (Anything that referenced the failed node hard-fails on the
+  missing data, which is consistent.)
+
+## Three ways a workflow starts
+
+The trigger node decides how a workflow fires. All three land on the same execution pipeline.
+
+<Steps>
+  <Step title="Manual — you press go">
+    A bare trigger (no `schedule`, no `event`) fires only when you run it: `mc workflow run <slug>`,
+    `mc workflow run <slug> --async`, or the canvas **Run** button.
+  </Step>
+  <Step title="Cron — on a clock">
+    Give the trigger a `schedule` of `{ cron }` **or** `{ intervalSec }` (plus an optional IANA
+    `timezone` for cron). Once the workflow is **active** (`mc workflow activate <slug>`), the workflow
+    daemon enqueues a `cron` run whenever the schedule is due. `intervalSec` has a 60-second floor —
+    each fire is a paid run. The first fire waits for the next real instant after activation, and the
+    single-flight guard suppresses pile-up if a previous run is still going.
+  </Step>
+  <Step title="Event — from an external webhook">
+    Give the trigger an `event` of `{ source?, types? }` and an **active** workflow fires from
+    `POST /api/workflows/<slug>/webhook`. The request is authenticated by an HMAC over the raw body
+    (`X-Hub-Signature-256`, GitHub-compatible), keyed by a single global `WORKFLOW_WEBHOOK_SECRET` — no
+    secret is ever stored in the database. The JSON body lands in the run's context and reaches the
+    graph as `{{trigger.output.*}}`. An optional `types` allowlist is matched against the
+    `X-GitHub-Event` header. Run `mc workflow webhook-url <slug>` for the exact URL and signing
+    details.
+  </Step>
+</Steps>
+
+<Note>
+**Deliberate non-fires answer 200.** A webhook that's authentic but shouldn't fire — the workflow
+isn't active, isn't an event trigger, the event type is filtered out, or a run is already in flight —
+returns `200 {fired:false}` so the sender doesn't retry. Only a bad signature (`401`), bad JSON
+(`400`), an unknown workflow (`404`), or an unset secret (`503`) are errors.
+</Note>
+
+## Human-in-the-loop: the approval gate
+
+A **gate** node stops the run before a costly or irreversible step and waits for a person. When the
+walk reaches a gate, the run settles into a new non-terminal status — **`paused`** — and quiesces:
+everything downstream of the gate is blocked, while independent branches elsewhere keep draining.
+
+A paused run is treated specially: the reaper **never** touches it (so it can wait for a human
+indefinitely), but the single-flight guard still **counts** it (so it blocks a duplicate run). An
+operator resumes it from the CLI or the canvas:
+
+```bash
+mc workflow approve <runId> <nodeId>                 # approve → the walk continues
+mc workflow approve <runId> <nodeId> --reject --reason "too risky"
+```
+
+Approving completes the gate step and the walk resumes. Rejecting **fails** the gate step, so its
+`onError` policy applies — exactly like any other failed node. On the canvas, a paused run shows an
+**Awaiting approval** panel with Approve / Reject buttons (and an optional reason). Either way the
+decision is recorded on the gate step; the resume is a synchronous re-walk from the CLI, or a
+`paused → queued` requeue that the workflow daemon picks up for the canvas and `--async`.
+
+## Authoring a workflow
+
+You build a graph two ways — both validated by the **same** rules, so they can never disagree.
+Validation requires exactly one trigger, a connected acyclic graph (no cycles, nothing wired into the
+trigger), a prompt on every agent node, and every `{{ref}}` pointing at a real ancestor.
+
+<CardGroup cols={2}>
+  <Card title="On the canvas" icon="mouse-pointer-click">
+    The **Workflows** tab on a project page renders the graph and, in **Edit** mode, lets you drag node
+    types from a palette onto the canvas, drag between handles to connect, edit the selected node in an
+    inspector (common fields plus a raw-JSON escape hatch), delete with Backspace, and **Save**. The
+    connection check that decides whether an edge can be drawn is the same validator the runner uses,
+    so the canvas physically can't draw a cycle, a self-loop, or an edge into the trigger.
+  </Card>
+  <Card title="From the CLI" icon="terminal">
+    Author the graph as JSON and pipe it in. `mc workflow create` makes a new workflow; `mc workflow
+    update` replaces an existing graph (and bumps its version) — the command-line twin of the canvas
+    Save.
+
+    ```bash
+    mc workflow create --project myapp --name "Triage" --graph @graph.json
+    mc workflow update triage --graph @graph.json
+    ```
+  </Card>
+</CardGroup>
+
+While a run is queued, running, or paused, Edit mode is disabled — you author a workflow when it's
+idle, and a live run keeps using its own snapshot regardless.
+
+## A worked example
+
+A daily triage flow: a cron trigger wakes an agent to summarise overnight error reports; a branch
+checks the agent's structured severity score; high severity files a Linear issue and pauses for a human
+before paging, while low severity just posts to Slack.
+
+```text
+trigger(cron 0 9 * * 1-5)
+   └─▶ agent "summarise overnight Sentry issues"  (responseSchema → {score, summary})
+          └─▶ branch  case "hot": {{agent.output.score}} gte 80
+                 ├─[hot]──▶ integration LINEAR_CREATE_ISSUE  (title: {{agent.output.summary}})
+                 │            └─▶ gate "page on-call?"  ──▶ integration SLACK_SEND (#oncall)
+                 └─[else]─▶ integration SLACK_SEND  (#triage, text: {{agent.output.summary}})
+```
+
+Every piece above is a node you'd wire on the canvas: an agent for judgement, integrations for the
+deterministic side effects, a branch for the decision, and a gate for the human check before paging.
+
+---
+
+Workflows compose the rest of the system: [agent profiles](/profiles) decide *how* an agent node runs,
+[Composio integrations](/integrations) back the integration nodes, and every agent node shows up in the
+same [telemetry](/telemetry), [cost](/cost), and [safety](/safety) surfaces as any other run. For the
+full command list see the [CLI reference](/reference/cli#workflows); for the tables, the
+[schema](/reference/schema#workflows-a-defined-flow-of-nodes); for the endpoints, the
+[HTTP surface](/reference/api); and for the daemon, [Operating](/reference/operating#the-workflow-daemon).
