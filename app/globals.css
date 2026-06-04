@@ -432,6 +432,35 @@ button:focus:not(:focus-visible) { outline: none; }
 }
 .tab.active .tab-count { color: var(--accent-ink); border-color: color-mix(in oklch, var(--accent) 30%, transparent); background: var(--accent-soft); }
 
+/* ===================== TASK VIEW TOGGLE ===================== */
+.view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--space-md);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.view-toggle button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  min-height: 32px;
+  padding: 5px 14px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.view-toggle button:hover { color: var(--ink-dim); }
+.view-toggle button.on { color: var(--accent-ink); background: var(--accent-soft); }
+
 /* ===================== SECTION HEAD ===================== */
 .section-head {
   display: flex; align-items: center; justify-content: space-between;
