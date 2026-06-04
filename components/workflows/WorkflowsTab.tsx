@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorkflowListItem, WorkflowRunSummary } from '@/lib/workflow-view';
 import { useWorkflowRun } from '@/lib/useWorkflowRun';
 import { WorkflowCanvas } from './WorkflowCanvas';
+import { WorkflowEditor } from './WorkflowEditor';
 
 type ListState =
   | { kind: 'loading' }
@@ -69,6 +70,10 @@ export function WorkflowsTab({ slug }: { slug: string }) {
   // the enqueue; until then `triggering` + the server-side single-flight guard (409) prevent a double-run.
   const latestStatus = detail?.latestRun?.status;
   const runActive = latestStatus === 'queued' || latestStatus === 'running';
+  // Edit mode (slice 9b authoring). Disabled while a run is in progress OR paused (a live run uses the
+  // snapshotted graph, so editing is safe, but it's confusing UX) — author when the workflow is idle.
+  const [editing, setEditing] = useState(false);
+  const canEdit = !!detail && !runActive && latestStatus !== 'paused';
 
   const onRun = useCallback(async () => {
     if (!selected) return;
@@ -189,21 +194,32 @@ export function WorkflowsTab({ slug }: { slug: string }) {
             <h3>{detail?.name ?? '—'}</h3>
             <RunBadge run={detail?.latestRun ?? null} />
           </div>
-          <div className="wf-main__run">
-            <button
-              type="button"
-              className="btn-sm"
-              disabled={!selected || triggering || runActive}
-              title={runActive ? 'a run is already queued or in progress' : `Enqueue a run of ${selected ?? ''} (executed by the workflow-daemon)`}
-              onClick={onRun}
-            >
-              {triggering ? 'Starting…' : runActive ? 'Running…' : 'Run ▸'}
-            </button>
-            {runMsg && <span className="wf-run-msg detail-muted">{runMsg}</span>}
-          </div>
+          {!editing && (
+            <div className="wf-main__run">
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={!canEdit}
+                title={canEdit ? `Edit ${selected ?? ''}` : 'finish or cancel the active run before editing'}
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={!selected || triggering || runActive}
+                title={runActive ? 'a run is already queued or in progress' : `Enqueue a run of ${selected ?? ''} (executed by the workflow-daemon)`}
+                onClick={onRun}
+              >
+                {triggering ? 'Starting…' : runActive ? 'Running…' : 'Run ▸'}
+              </button>
+              {runMsg && <span className="wf-run-msg detail-muted">{runMsg}</span>}
+            </div>
+          )}
         </header>
 
-        {awaitingGates.length > 0 && (
+        {!editing && awaitingGates.length > 0 && (
           <div className="wf-approval" role="region" aria-label="Awaiting approval">
             <div className="wf-approval__title">Awaiting approval</div>
             <input
@@ -228,7 +244,16 @@ export function WorkflowsTab({ slug }: { slug: string }) {
 
         {!loaded && <div className="wf-canvas wf-canvas--placeholder">Loading graph…</div>}
         {loaded && error && <p className="detail-muted">Failed to load graph: {error}</p>}
-        {loaded && !error && detail && (
+        {loaded && !error && detail && editing && (
+          <WorkflowEditor
+            projectSlug={slug}
+            workflowSlug={detail.slug}
+            graph={detail.graph}
+            onSaved={() => { setEditing(false); setRunMsg('graph saved'); void loadList(); }}
+            onCancel={() => setEditing(false)}
+          />
+        )}
+        {loaded && !error && detail && !editing && (
           <WorkflowCanvas graph={detail.graph} stepStatus={detail.stepStatus} />
         )}
       </section>

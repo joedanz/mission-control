@@ -5,10 +5,10 @@
 // ABOUTME: spawns — plan correction #2). The synchronous daemon runner reuses prepareWorkflowRun for the same
 // ABOUTME: validate + guard before it walks in-process.
 
-import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflowRun, getStepRun, upsertStepRun } from './workflow-store';
+import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflowRun, updateWorkflowGraph, getStepRun, upsertStepRun } from './workflow-store';
 import { validateGraph, nodeById } from './workflows';
 import { NotFoundError, ConflictError, ValidationError } from './validation';
-import type { Workflow, WorkflowRun, WorkflowTrigger } from './db/schema';
+import type { Workflow, WorkflowRun, WorkflowTrigger, WorkflowGraph } from './db/schema';
 
 // `context` (slice 8) is the trigger payload (e.g. a webhook body) persisted onto workflow_runs.context; the
 // walker exposes it to the graph as {{trigger.output.*}}. Manual/cron callers omit it (context stays null).
@@ -33,6 +33,24 @@ export async function prepareWorkflowRun(slug: string, opts: EnqueueOpts = {}): 
 export async function enqueueWorkflowRun(slug: string, opts: EnqueueOpts = {}): Promise<WorkflowRun> {
   const wf = await prepareWorkflowRun(slug, opts);
   return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued', context: opts.context });
+}
+
+/** Save an edited workflow graph (slice 9b authoring) — lib-tier, NO spawn, so BOTH the web `save` route and
+ *  `mc workflow update` import it (the run/gate pattern: one validate-then-persist home, not two). Validates
+ *  through the SAME validateGraph SSOT the runner uses; an EMPTY graph is a valid draft (skip validation,
+ *  matching `mc workflow create`). `graph` defaults to the current graph (a rename-only update). Throws
+ *  NotFoundError (unknown slug) / ValidationError (a non-empty graph that doesn't validate). */
+export async function saveWorkflowGraph(
+  slug: string,
+  opts: { graph?: WorkflowGraph; name?: string; description?: string } = {},
+): Promise<Workflow> {
+  const wf = await getWorkflowBySlug(slug);
+  if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list' to see slugs");
+  const graph = opts.graph ?? wf.graph;
+  if (graph.nodes.length) validateGraph(graph); // empty = a valid draft (like create); a provided graph must be runnable
+  const updated = await updateWorkflowGraph(slug, graph, { name: opts.name, description: opts.description });
+  if (!updated) throw new NotFoundError('workflow', slug);
+  return updated;
 }
 
 export type GateDecision = 'approve' | 'reject';

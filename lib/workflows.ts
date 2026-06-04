@@ -17,6 +17,7 @@ import {
   BRANCH_OPS,
   type WorkflowGraph,
   type WorkflowNode,
+  type WorkflowEdge,
   type WorkflowStatus,
   type WorkflowRunStatus,
   type WorkflowTrigger,
@@ -147,11 +148,28 @@ export function decidableNodes(graph: WorkflowGraph, terminal: Set<string>, star
     .map((n) => n.id);
 }
 
+/** Can a `source → target` edge be added to `graph`? The draw-time SSOT for the canvas's
+ *  `isValidConnection` (slice 9b authoring), derived from the SAME primitives `validateGraph` uses
+ *  (`nodeById`, `hasCycle`) — connection-level invariants only: both endpoints exist, no self-loop, the
+ *  target isn't a trigger (triggers have no inputs), and the edge keeps the graph acyclic. Whole-graph
+ *  rules (exactly-one-trigger, per-node config, {{ref}}-ancestor) can't run on an in-progress graph, so
+ *  they stay in `validateGraph`, which the save path runs on the finished graph. */
+export function canConnect(graph: WorkflowGraph, source: string, target: string): boolean {
+  if (source === target) return false;
+  const src = nodeById(graph, source);
+  const tgt = nodeById(graph, target);
+  if (!src || !tgt) return false;
+  if (tgt.type === 'trigger') return false;
+  const candidate: WorkflowEdge = { id: `__candidate__:${source}->${target}`, source, target };
+  return !hasCycle({ nodes: graph.nodes, edges: [...graph.edges, candidate] });
+}
+
 // ── Validation (the gate run by the CLI before a run, and the canvas later) ───────────
 /** Throw ValidationError on the first structural problem; return void when the graph is runnable.
- *  Checks: non-empty, unique ids, known node types, edges reference existing nodes, acyclic (DAG),
- *  exactly one trigger node, every agent node carries a non-blank prompt + valid onError, and every
- *  {{nodeId.field}} data-passing ref points at an existing ancestor (data flows along wired edges). */
+ *  Checks: non-empty, unique ids, known node types, edges reference existing nodes (and none targets the
+ *  trigger), acyclic (DAG), exactly one trigger node, every agent node carries a non-blank prompt + valid
+ *  onError, and every {{nodeId.field}} data-passing ref points at an existing ancestor (data flows along
+ *  wired edges). */
 export function validateGraph(graph: WorkflowGraph): void {
   if (!graph.nodes.length) throw new ValidationError('graph', 'a workflow has no nodes');
 
@@ -165,6 +183,11 @@ export function validateGraph(graph: WorkflowGraph): void {
   for (const e of graph.edges) {
     if (!seen.has(e.source)) throw new ValidationError('edges', `edge "${e.id}" has an unknown source "${e.source}"`);
     if (!seen.has(e.target)) throw new ValidationError('edges', `edge "${e.id}" has an unknown target "${e.target}"`);
+    // A trigger is the single entry node — nothing may point INTO it. This is the whole-graph home of the rule
+    // canConnect enforces at draw time, so the canvas and `mc workflow update` agree on the same edge.
+    if (nodeById(graph, e.target)?.type === 'trigger') {
+      throw new ValidationError('edges', `edge "${e.id}" targets trigger "${e.target}" — a trigger has no inputs`);
+    }
   }
 
   if (hasCycle(graph)) throw new ValidationError('graph', 'the workflow graph has a cycle');

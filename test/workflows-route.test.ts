@@ -27,13 +27,13 @@ const store = {
 };
 vi.mock('@/lib/workflow-store', () => store);
 
-const enqueue = { enqueueWorkflowRun: vi.fn(), decideGate: vi.fn() };
+const enqueue = { enqueueWorkflowRun: vi.fn(), decideGate: vi.fn(), saveWorkflowGraph: vi.fn() };
 vi.mock('@/lib/workflow-enqueue', () => enqueue);
 
-// Import AFTER mocks are registered. ConflictError is the REAL class (validation has no DB deps) so the
-// route's `instanceof ConflictError → 409` branch is exercised, not a mock.
+// Import AFTER mocks are registered. ConflictError/ValidationError are the REAL classes (validation has no DB
+// deps) so the route's `instanceof … → 409/422` branches are exercised, not a mock.
 const { GET, POST } = await import('../app/api/projects/[slug]/workflows/route');
-const { ConflictError } = await import('../lib/validation');
+const { ConflictError, ValidationError } = await import('../lib/validation');
 
 const GRAPH: WorkflowGraph = {
   nodes: [
@@ -206,6 +206,37 @@ describe('POST approve (gate decision)', () => {
     enqueue.decideGate.mockRejectedValue(new ConflictError('gate', 'not awaiting approval'));
     const res = await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'approve' });
     expect(res.status).toBe(409);
+  });
+});
+
+describe('POST save (slice 9b canvas authoring)', () => {
+  it('guards ownership then persists via saveWorkflowGraph, returning the bumped version', async () => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow()); // belongs to project p1
+    enqueue.saveWorkflowGraph.mockResolvedValue(wfRow({ version: 2 }));
+    const res = await post({ action: 'save', workflow: 'triage', graph: GRAPH });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.workflow.version).toBe(2);
+    expect(enqueue.saveWorkflowGraph).toHaveBeenCalledWith('triage', { graph: GRAPH });
+  });
+
+  it('maps a ValidationError from saveWorkflowGraph (the SSOT) to 422', async () => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow());
+    enqueue.saveWorkflowGraph.mockRejectedValue(new ValidationError('graph', 'the workflow graph has a cycle'));
+    const res = await post({ action: 'save', workflow: 'triage', graph: GRAPH });
+    expect(res.status).toBe(422);
+  });
+
+  it('422 when the graph is missing nodes/edges arrays (before any save)', async () => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow());
+    expect((await post({ action: 'save', workflow: 'triage' })).status).toBe(422);
+    expect(enqueue.saveWorkflowGraph).not.toHaveBeenCalled();
+  });
+
+  it('404 when the workflow belongs to another project (no save attempted)', async () => {
+    store.getWorkflowBySlug.mockResolvedValue(wfRow({ projectId: 'other' }));
+    const res = await post({ action: 'save', workflow: 'triage', graph: GRAPH });
+    expect(res.status).toBe(404);
+    expect(enqueue.saveWorkflowGraph).not.toHaveBeenCalled();
   });
 });
 

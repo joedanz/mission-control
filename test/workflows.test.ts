@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, readGateNodeData, triggerSchedule, triggerEvent, assertWorkflowStatus,
+  hasCycle, topoOrder, decidableNodes, canConnect, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, readGateNodeData, triggerSchedule, triggerEvent, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -89,6 +89,34 @@ describe('workflows — decidableNodes (concurrent scheduling)', () => {
   });
 });
 
+describe('workflows — canConnect (slice 9b draw-time edge SSOT)', () => {
+  // t → a already wired; b is a second free agent.
+  const base = () => G([trigger('t'), agent('a'), agent('b')], [edge('e1', 't', 'a')]);
+
+  it('accepts a valid new edge between existing nodes', () => {
+    expect(canConnect(base(), 'a', 'b')).toBe(true);
+  });
+
+  it('rejects a self-loop', () => {
+    expect(canConnect(base(), 'a', 'a')).toBe(false);
+  });
+
+  it('rejects an edge whose endpoint does not exist', () => {
+    expect(canConnect(base(), 'a', 'missing')).toBe(false);
+    expect(canConnect(base(), 'missing', 'a')).toBe(false);
+  });
+
+  it('rejects an edge INTO a trigger (triggers have no inputs)', () => {
+    expect(canConnect(base(), 'a', 't')).toBe(false);
+  });
+
+  it('rejects an edge that would create a cycle', () => {
+    // t → a → b already; adding b → a closes a cycle.
+    const g = G([trigger('t'), agent('a'), agent('b')], [edge('e1', 't', 'a'), edge('e2', 'a', 'b')]);
+    expect(canConnect(g, 'b', 'a')).toBe(false);
+  });
+});
+
 describe('workflows — validateGraph', () => {
   it('accepts a manual → agent graph', () => {
     expect(() => validateGraph(linear())).not.toThrow();
@@ -124,6 +152,11 @@ describe('workflows — validateGraph', () => {
   it('rejects an agent node with no prompt', () => {
     const bad = G([trigger('t'), { id: 'a', type: 'agent', position: { x: 0, y: 0 }, data: {} }], [edge('e1', 't', 'a')]);
     expect(() => validateGraph(bad)).toThrow(/prompt/i);
+  });
+
+  it('rejects an edge that targets the trigger (the same rule canConnect enforces at draw time)', () => {
+    const bad = G([trigger('t'), agent('a')], [edge('e1', 't', 'a'), edge('e2', 'a', 't')]);
+    expect(() => validateGraph(bad)).toThrow(/no inputs/i);
   });
 });
 
