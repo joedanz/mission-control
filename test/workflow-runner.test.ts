@@ -20,12 +20,12 @@ const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
 /** Invoke the worktree CLI as a subprocess (the real `mc workflow run` path). `exec` becomes the stub
  *  executor's command (run in the project's repoPath); returns the parsed JSON envelope from stdout. */
-function runWorkflowCli(slug: string, exec: string, extraEnv: Record<string, string> = {}): { ok: boolean; data?: { status: string; workflowRunId: string; steps: { nodeId: string; status: string; runId: string | null }[] }; error?: { code: string } } {
+function runWorkflowCli(slug: string, exec: string, extraEnv: Record<string, string> = {}, extraArgs: string[] = []): { ok: boolean; data?: { status: string; workflowRunId: string; steps: { nodeId: string; status: string; runId: string | null }[] }; error?: { code: string } } {
   // mc exits non-zero on error codes (NOT_FOUND=3 etc.) — execFileSync throws but still carries stdout (the
   // JSON envelope). Capture stdout either way; surface stderr only when stdout has no parseable envelope.
   let out: string;
   try {
-    out = execFileSync(tsxBin, ['cli/index.ts', 'workflow', 'run', slug, '--json'], {
+    out = execFileSync(tsxBin, ['cli/index.ts', 'workflow', 'run', slug, '--json', ...extraArgs], {
       env: { ...process.env, MC_DAEMON_EXEC: exec, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '', ...extraEnv },
       encoding: 'utf8',
       timeout: 55000,
@@ -420,5 +420,92 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     expect(b.error).toMatch(/unresolved data references/i);
     expect(b.runId).toBeNull();
     expect(steps.find((s) => s.nodeId === 'hi')).toBeUndefined(); // halt broke the walk before hi
+  }, 60000);
+
+  // ── Concurrency (slice 6b): the walker runs independent nodes in parallel (ready-set scheduler), and a
+  // ── merge node waits for ALL its branches (wait-all). Proven via overlapping step [startedAt, endedAt].
+  const sleepStub = (sec: number, score: number) =>
+    `sleep ${sec}; echo '{"type":"result","result":"ok","structured_output":{"score":${score}},"total_cost_usd":0}'`;
+  const ms = (d: Date | null) => (d ? new Date(d).getTime() : NaN);
+  const fanIn = (extra: WorkflowNode[] = [], extraEdges: { id: string; source: string; target: string }[] = []): WorkflowGraph => ({
+    nodes: [
+      { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+      { id: 'a', type: 'agent', position: { x: 160, y: -60 }, data: { prompt: 'branch a' } },
+      { id: 'b', type: 'agent', position: { x: 160, y: 60 }, data: { prompt: 'branch b' } },
+      ...extra,
+    ],
+    edges: [{ id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 't', target: 'b' }, ...extraEdges],
+  });
+
+  it('runs a fan-out concurrently — two independent agent nodes overlap in time', async () => {
+    const slug = `vt-wf-par-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: fanIn() });
+
+    const res = runWorkflowCli(slug, sleepStub(0.6, 1)); // each node sleeps 0.6s; default maxParallel=4
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const a = steps.find((s) => s.nodeId === 'a')!;
+    const b = steps.find((s) => s.nodeId === 'b')!;
+    expect(a.status).toBe('completed');
+    expect(b.status).toBe('completed');
+    // [startedAt, endedAt] intervals overlap ⇒ a and b were in flight at the same time (true concurrency).
+    expect(ms(a.startedAt) < ms(b.endedAt) && ms(b.startedAt) < ms(a.endedAt)).toBe(true);
+  }, 60000);
+
+  it('--max-parallel 1 serializes the fan-out (no overlap — the cap is honored)', async () => {
+    const slug = `vt-wf-ser-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: fanIn() });
+
+    const res = runWorkflowCli(slug, sleepStub(0.5, 1), {}, ['--max-parallel', '1']);
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const a = steps.find((s) => s.nodeId === 'a')!;
+    const b = steps.find((s) => s.nodeId === 'b')!;
+    // Declaration order is [a, b]; with one slot, b can't start until a has ended.
+    expect(ms(b.startedAt)).toBeGreaterThanOrEqual(ms(a.endedAt));
+  }, 60000);
+
+  it('a merge node waits for ALL branches and can reference each (wait-all join)', async () => {
+    const slug = `vt-wf-merge-${Date.now()}`;
+    // t → {a, b} → m; m references BOTH branches' outputs.
+    const merge: WorkflowNode = { id: 'm', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'merge {{a.output.score}} and {{b.output.score}}' } };
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: fanIn([merge], [{ id: 'e3', source: 'a', target: 'm' }, { id: 'e4', source: 'b', target: 'm' }]),
+    });
+
+    const res = runWorkflowCli(slug, sleepStub(0.3, 5));
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect(steps.find((s) => s.nodeId === 'm')!.status).toBe('completed');
+    // m only ran after both branches resolved — and both branch values are present in its prompt.
+    expect((steps.find((s) => s.nodeId === 'm')!.output as StepOut).prompt).toBe('merge 5 and 5');
+  }, 60000);
+
+  it('a fan-out branch failing under halt stops the run; the merge never runs', async () => {
+    const slug = `vt-wf-par-halt-${Date.now()}`;
+    // b references {{t.output.nope}} — the trigger has no output, so b hard-fails (default onError=halt).
+    const bFails: WorkflowNode = { id: 'b', type: 'agent', position: { x: 160, y: 60 }, data: { prompt: 'use {{t.output.nope}}' } };
+    const merge: WorkflowNode = { id: 'm', type: 'agent', position: { x: 320, y: 0 }, data: { prompt: 'merge {{a.output.score}}' } };
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'a', type: 'agent', position: { x: 160, y: -60 }, data: { prompt: 'branch a' } },
+          bFails, merge,
+        ],
+        edges: [
+          { id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 't', target: 'b' },
+          { id: 'e3', source: 'a', target: 'm' }, { id: 'e4', source: 'b', target: 'm' },
+        ],
+      },
+    });
+
+    const res = runWorkflowCli(slug, sleepStub(0.2, 1));
+    expect(res.data?.status).toBe('failed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect(steps.find((s) => s.nodeId === 'b')!.status).toBe('failed');
+    expect(steps.find((s) => s.nodeId === 'm')).toBeUndefined(); // halt stopped launching before the merge
   }, 60000);
 });
