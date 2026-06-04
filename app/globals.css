@@ -1954,6 +1954,7 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .wf-node--agent       { border-left-color: var(--accent); }
 .wf-node--integration { border-left-color: var(--ok); }
 .wf-node--branch      { border-left-color: var(--warn); }
+.wf-node--gate        { border-left-color: var(--accent); }
 .wf-node--generic     { border-left-color: var(--ink-mute); }
 .wf-node__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xs); }
 .wf-node__kind { font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); }
@@ -1967,6 +1968,17 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .wf-node--failed    { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
 .wf-node--skipped   { opacity: 0.6; }
 @keyframes wf-pulse { 0%, 100% { box-shadow: 0 0 0 3px var(--info-soft); } 50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--info) 14%, transparent); } }
+
+/* Gate approval panel (slice 9a) — shown above the canvas while a run is paused awaiting a human. */
+.wf-approval {
+  margin-bottom: var(--space-sm); padding: var(--space-sm); border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: var(--radius-sm); background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+.wf-approval__title { font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); margin-bottom: var(--space-xs); }
+.wf-approval__reason { width: 100%; margin-bottom: var(--space-xs); padding: 4px 6px; font-size: var(--fs-12); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); }
+.wf-approval__gate { display: flex; align-items: center; gap: var(--space-xs); margin-top: var(--space-xs); }
+.wf-approval__msg { flex: 1; min-width: 0; font-size: var(--fs-12); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-sm--bad { color: var(--bad-ink); border-color: color-mix(in oklch, var(--bad) 30%, transparent); }
 
 /* Step badge in the node head. */
 .wf-badge { padding: 0 5px; border-radius: var(--radius-sm); font-size: var(--fs-11); text-transform: lowercase; }

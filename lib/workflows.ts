@@ -30,6 +30,7 @@ import {
   type TriggerNodeData,
   type WorkflowSchedule,
   type WorkflowEventTrigger,
+  type GateNodeData,
 } from './db/schema';
 import { ELSE } from './workflow-branch';
 
@@ -190,8 +191,11 @@ export function validateGraph(graph: WorkflowGraph): void {
     } else if (n.type === 'trigger') {
       readTriggerNodeData(n); // validates the optional cron/interval schedule (slice 7); carries no refs
       continue;
+    } else if (n.type === 'gate') {
+      readGateNodeData(n); // validates the optional message + onError (slice 9a); carries no refs
+      continue;
     } else {
-      continue; // future gate carries no refs
+      continue;
     }
 
     // Data-passing: every {{ref}} must point at an existing ANCESTOR (an edge-backed upstream node), so the
@@ -265,6 +269,20 @@ export function readBranchNodeData(node: WorkflowNode): BranchNodeData {
   });
 
   const out: BranchNodeData = { cases };
+  if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
+  return out;
+}
+
+/** Validate + return a type='gate' node's config (slice 9a). No required fields — a bare gate just pauses the
+ *  run for a human. `message` (if set) must be a string (shown to the approver); `onError` ∈ {halt,continue}
+ *  applies when the gate is REJECTED (a rejected gate is a failed node). Throws ValidationError on a bad shape. */
+export function readGateNodeData(node: WorkflowNode): GateNodeData {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const out: GateNodeData = {};
+  if (data.message !== undefined) {
+    if (typeof data.message !== 'string') throw new ValidationError('node.data.message', `gate node "${node.id}" message must be a string`);
+    out.message = data.message;
+  }
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }

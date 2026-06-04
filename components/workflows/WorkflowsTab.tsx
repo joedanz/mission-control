@@ -16,7 +16,7 @@ type ListState =
   | { kind: 'data'; workflows: WorkflowListItem[] };
 
 const RUN_TONE: Record<WorkflowRunSummary['status'], string> = {
-  queued: 'info', running: 'info', completed: 'ok', failed: 'bad', cancelled: 'warn',
+  queued: 'info', running: 'info', paused: 'warn', completed: 'ok', failed: 'bad', cancelled: 'warn',
 };
 
 function RunBadge({ run }: { run: WorkflowRunSummary | null }) {
@@ -96,6 +96,41 @@ export function WorkflowsTab({ slug }: { slug: string }) {
     }
   }, [slug, selected, loadList]);
 
+  // Gate approval (slice 9a): when the latest run is paused, list its awaiting gates (type 'gate' + step
+  // 'running') and let the operator approve/reject. Like Run, it POSTs to the same route (the web tier records
+  // the decision + requeues — the daemon resumes); the poll then reflects the run continuing.
+  const pausedRunId = detail?.latestRun?.status === 'paused' ? detail.latestRun.id : null;
+  const awaitingGates = pausedRunId && detail
+    ? detail.graph.nodes.filter((n) => n.type === 'gate' && detail.stepStatus[n.id] === 'running')
+    : [];
+  const [deciding, setDeciding] = useState(false);
+  const [reason, setReason] = useState('');
+
+  const onDecide = useCallback(async (nodeId: string, decision: 'approve' | 'reject') => {
+    if (!pausedRunId) return;
+    setDeciding(true);
+    setRunMsg(null);
+    try {
+      const res = await fetch(`/api/projects/${slug}/workflows`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'approve', runId: pausedRunId, nodeId, decision, reason: reason || undefined }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setRunMsg(`gate ${decision === 'approve' ? 'approved' : 'rejected'} — resuming`);
+        setReason('');
+        void loadList();
+      } else {
+        setRunMsg(json.message ?? json.error ?? `failed (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setRunMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeciding(false);
+    }
+  }, [slug, pausedRunId, reason, loadList]);
+
   if (state.kind === 'loading') {
     return (
       <div className="wf-tab skeleton" aria-label="Loading workflows">
@@ -167,6 +202,29 @@ export function WorkflowsTab({ slug }: { slug: string }) {
             {runMsg && <span className="wf-run-msg detail-muted">{runMsg}</span>}
           </div>
         </header>
+
+        {awaitingGates.length > 0 && (
+          <div className="wf-approval" role="region" aria-label="Awaiting approval">
+            <div className="wf-approval__title">Awaiting approval</div>
+            <input
+              type="text"
+              className="wf-approval__reason"
+              placeholder="optional reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            {awaitingGates.map((g) => {
+              const message = typeof g.data?.message === 'string' ? g.data.message : g.id;
+              return (
+                <div key={g.id} className="wf-approval__gate">
+                  <span className="wf-approval__msg">{message}</span>
+                  <button type="button" className="btn-sm" disabled={deciding} onClick={() => onDecide(g.id, 'approve')}>Approve</button>
+                  <button type="button" className="btn-sm btn-sm--bad" disabled={deciding} onClick={() => onDecide(g.id, 'reject')}>Reject</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {!loaded && <div className="wf-canvas wf-canvas--placeholder">Loading graph…</div>}
         {loaded && error && <p className="detail-muted">Failed to load graph: {error}</p>}

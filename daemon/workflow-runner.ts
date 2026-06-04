@@ -18,19 +18,21 @@ import {
   getWorkflowRun,
   createWorkflowRun,
   setWorkflowRunStatus,
+  claimPausedWorkflowRun,
   touchWorkflowRun,
   upsertStepRun,
   setStepRunStatus,
   listStepRuns,
+  getStepRun,
 } from '../lib/workflow-store';
 import { prepareWorkflowRun } from '../lib/workflow-enqueue';
-import { decidableNodes, nodeById, readAgentNodeData, readIntegrationNodeData, readBranchNodeData } from '../lib/workflows';
+import { decidableNodes, nodeById, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readGateNodeData } from '../lib/workflows';
 import { chooseBranch } from '../lib/workflow-branch';
 import { normalizeStepOutput, interpolate, interpolateValue, isObject, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
 import { getConnection } from '../lib/composio-store';
 import { executeAction } from '../lib/composio-api';
-import { NotFoundError, ValidationError } from '../lib/validation';
+import { ConflictError, NotFoundError, ValidationError } from '../lib/validation';
 import type { Project, WorkflowGraph, WorkflowNode, WorkflowOnError, WorkflowRun, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
 
 const DEFAULT_TIMEOUT_SEC = 900;
@@ -137,6 +139,7 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   const selectedEdges = new Set<string>();
   const terminal = new Set<string>();
   const started = new Set<string>();
+  const awaiting = new Set<string>(); // gate nodes pending a human decision (slice 9a) — non-terminal, block successors
   const activate = (node: WorkflowNode, chosen?: string) => {
     for (const id of activeOutEdges(snapshot, node, chosen)) selectedEdges.add(id);
   };
@@ -163,8 +166,9 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
     if (node.type === 'branch') return runBranchNode(run.id, node, log, views); // deterministic; no run, no spawn
     if (node.type === 'agent') return runAgentNode(run.id, slug, node, home, opts, log, views); // spawns a real run
     if (node.type === 'integration') return runIntegrationNode(run.id, node, home, log, views); // Composio action
-    // trigger + agent + integration + branch are all the walker executes; anything else is an honest not-yet error.
-    throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration + branch)`);
+    if (node.type === 'gate') return runGateNode(run.id, node, log); // human approval — pauses the run until decided
+    // trigger + agent + integration + branch + gate are all the walker executes; anything else is an honest not-yet error.
+    throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration + branch + gate)`);
   };
 
   let finalStatus: WorkflowRunStatus = 'completed';
@@ -210,6 +214,9 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
       // Wait for the next node to finish; fold its outcome into the substrate, then re-evaluate the ready set.
       const res = await Promise.race(inflight.values());
       inflight.delete(res.nodeId);
+      // A gate awaiting approval (slice 9a) is NON-terminal: it's been launched (so it won't relaunch), but it's
+      // not added to `terminal`, so decidableNodes keeps its successors blocked and the walk quiesces → 'paused'.
+      if (res.awaiting) { awaiting.add(res.nodeId); continue; }
       terminal.add(res.nodeId);
       const node = nodeById(snapshot, res.nodeId);
       if (res.ok) {
@@ -229,11 +236,28 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
     throw err; // surface ValidationError/etc. to the CLI envelope
   }
 
-  if (finalStatus === 'completed' && anyFailed) finalStatus = 'failed'; // a continued failure still fails the run
+  // finalStatus is still 'completed' here unless cancellation flipped it. A gate awaiting approval pauses the run
+  // (resumable via mc workflow approve) — UNLESS a genuine halt-failure also occurred, which fails outright. A
+  // continued failure (no awaiting gate) still fails the run, as before.
+  if (finalStatus === 'completed') {
+    if (awaiting.size > 0 && !halted) finalStatus = 'paused';
+    else if (anyFailed) finalStatus = 'failed';
+  }
   await setWorkflowRunStatus(run.id, finalStatus);
   const steps = await listStepRuns(run.id);
   log(`workflow ${slug} run ${run.id.slice(0, 8)} → ${finalStatus}`);
   return { workflowRunId: run.id, status: finalStatus, steps };
+}
+
+/** Synchronously RESUME a paused run (slice 9a — the CLI `mc workflow approve` default): race-safe flip
+ *  paused→running (so a sync approve and the daemon never both resume the same row) then walk to its next
+ *  terminal/paused state. The decision must already be recorded on the gate step (decideGate). Throws
+ *  ConflictError if the run is no longer paused (already resumed/cancelled). The web/async path instead
+ *  requeues (paused→queued) and lets the daemon resume — neither path spawns from the web tier. */
+export async function resumeWorkflowRun(runId: string, opts: RunWorkflowOpts = {}): Promise<RunWorkflowResult> {
+  const claimed = await claimPausedWorkflowRun(runId);
+  if (!claimed) throw new ConflictError('workflowRun', `run ${runId} is not paused (already resumed or cancelled)`);
+  return walkWorkflowRun(claimed, opts);
 }
 
 /** Record a node's step as failed (a pre-spawn exit, before/without a runs row). */
@@ -243,7 +267,9 @@ async function failStep(wfRunId: string, nodeId: string, error: string): Promise
 
 // The walker's per-node outcome — `ok` + the captured output (stored on the step, seeds downstream refs) +
 // the node's onError policy (so the caller halts or continues). Shared by agent + integration nodes.
-type NodeResult = { ok: boolean; output?: unknown; onError: WorkflowOnError };
+// `awaiting` (slice 9a): a gate node that needs a human decision — the scheduler folds it as NON-terminal
+// (it neither completes nor fails), so it blocks its successors and the walk quiesces into a 'paused' run.
+type NodeResult = { ok: boolean; output?: unknown; onError: WorkflowOnError; awaiting?: boolean };
 
 /** Spawn one agent node as a real run. Interpolates {{nodeId.field}} data-passing refs from `views` first
  *  (an unresolved ref hard-fails the node — the source is missing/failed). Returns `ok` + the captured output
@@ -424,4 +450,43 @@ async function runBranchNode(
   await upsertStepRun(wfRunId, node.id, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
   log(`node ${node.id}: branch → ${chosen}`);
   return { ok: true, chosen, output, onError };
+}
+
+/** Run one gate node (slice 9a): a HUMAN approval gate, NO LLM. DECISION-DRIVEN & idempotent — it reads its
+ *  OWN persisted step (the unique (run,node) row) to learn whether a human has decided yet, so the resume
+ *  re-walk re-evaluates it without re-prompting:
+ *   • no decision yet → mark the step 'running'/awaiting and return `awaiting` (the scheduler quiesces the run
+ *     to 'paused', leaving the step non-terminal so successors stay blocked until approval).
+ *   • approved → complete the step (ok) — its successors become decidable on this same walk.
+ *   • rejected → fail the step (its onError then halts/continues, exactly like any failed node).
+ *  The decision is written onto the step by decideGate (mc workflow approve / the canvas button). */
+async function runGateNode(wfRunId: string, node: WorkflowNode, log: Log): Promise<NodeResult> {
+  const data = readGateNodeData(node); // validates message + onError (also gated at create)
+  const onError = data.onError ?? 'halt';
+  const step = await getStepRun(wfRunId, node.id);
+  // The human decision decideGate recorded on the step output, or null while still awaiting.
+  const out = step?.output;
+  const raw = isObject(out) ? out.decision : undefined;
+  const decision = raw === 'approve' || raw === 'reject' ? raw : null;
+
+  if (step && decision === 'approve') {
+    const output = { kind: 'gate', runStatus: 'completed', decision };
+    await setStepRunStatus(step.id, 'completed', { output });
+    log(`node ${node.id}: gate approved`);
+    return { ok: true, output, onError };
+  }
+  if (step && decision === 'reject') {
+    const error = 'gate rejected';
+    const output = { kind: 'gate', runStatus: 'failed', decision, error };
+    await setStepRunStatus(step.id, 'failed', { output, error });
+    log(`node ${node.id}: gate rejected`);
+    return { ok: false, output, onError };
+  }
+  // No decision: pause here. Mark the step 'running'/awaiting (the canvas shows it; the reaper sees a live run
+  // while the walker heartbeats). It stays non-terminal, so its successors never become decidable and the walk
+  // quiesces — walkWorkflowRun then settles the run to 'paused'.
+  const output = { kind: 'gate', runStatus: 'awaiting', awaiting: true, message: data.message };
+  await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date(), output });
+  log(`node ${node.id}: gate awaiting approval`);
+  return { ok: true, awaiting: true, output, onError };
 }

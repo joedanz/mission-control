@@ -408,7 +408,11 @@ export const WORKFLOW_STATUSES = ['draft', 'active', 'paused'] as const;
 // 'queued' = enqueued by the web Run button / `mc workflow run --async`, awaiting the workflow-daemon to
 // claim it (queued→running, race-safe). The synchronous CLI path creates its run already 'running' (it owns
 // the process), so the daemon — which only lists/claims 'queued' — never races a manual `mc workflow run`.
-export const WORKFLOW_RUN_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
+// 'paused' (slice 9a) is a NON-terminal in-flight state: the walker quiesces here when a gate node awaits a
+// human approval. Excluded from the reaper (only 'running' is reaped) so it waits indefinitely; counted by the
+// single-flight guard (still in-progress). Resumes via decideGate → 'paused'→'queued' requeue (the daemon) or
+// a sync re-walk (the CLI). Order before the terminal trio keeps the human-readable progression intact.
+export const WORKFLOW_RUN_STATUSES = ['queued', 'running', 'paused', 'completed', 'failed', 'cancelled'] as const;
 export const WORKFLOW_TRIGGERS = ['manual', 'cron', 'event', 'webhook'] as const;
 export const WORKFLOW_STEP_STATUSES = ['pending', 'running', 'completed', 'failed', 'skipped'] as const;
 export const WORKFLOW_NODE_TYPES = ['trigger', 'agent', 'integration', 'branch', 'gate'] as const;
@@ -501,6 +505,14 @@ export type WorkflowEventTrigger = {
 };
 // A trigger node carries AT MOST ONE of schedule | event (manual = neither). No migration — node data is jsonb.
 export type TriggerNodeData = { schedule?: WorkflowSchedule; event?: WorkflowEventTrigger };
+
+// Config for a type='gate' node (node.data, slice 9a) — a HUMAN approval gate, NO LLM. The walker pauses the
+// run here (the gate's step sits 'running'/awaiting, never terminal, so its successors stay un-decidable) until
+// an operator runs `mc workflow approve <runId> <nodeId> [--reject]` (or clicks the canvas button). `message` is
+// shown to the approver. A rejected gate FAILS the step, so onError applies — 'halt' (default) stops the run,
+// 'continue' walks past it (a downstream {{ref}} to the gate then hard-fails). No required fields — a bare gate
+// just pauses. No migration — node data is jsonb.
+export type GateNodeData = { message?: string; onError?: WorkflowOnError };
 
 export const workflows = pgTable(
   'workflows',

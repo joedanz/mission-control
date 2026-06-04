@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, triggerSchedule, triggerEvent, assertWorkflowStatus,
+  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, readGateNodeData, triggerSchedule, triggerEvent, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -295,6 +295,27 @@ describe('workflows — validateGraph branch nodes', () => {
   it('rejects a malformed branch (no cases) during validation', () => {
     const bad = G([trigger('t'), branch('b', { cases: [] })], [edge('e1', 't', 'b')]);
     expect(() => validateGraph(bad)).toThrow(/case/i);
+  });
+});
+
+describe('workflows — readGateNodeData (slice 9a gate)', () => {
+  const gate = (id: string, data: Record<string, unknown> = {}): WorkflowNode => ({ id, type: 'gate', position: { x: 0, y: 0 }, data });
+
+  it('accepts a bare gate (no fields) and a gate with message + onError', () => {
+    expect(readGateNodeData(gate('g'))).toEqual({});
+    expect(readGateNodeData(gate('g', { message: 'Approve the deploy?', onError: 'continue' }))).toEqual({ message: 'Approve the deploy?', onError: 'continue' });
+  });
+
+  it('rejects a non-string message and a bad onError', () => {
+    expect(() => readGateNodeData(gate('g', { message: 123 }))).toThrow(/message/i);
+    expect(() => readGateNodeData(gate('g', { onError: 'explode' }))).toThrow(ValidationError);
+  });
+
+  it('validateGraph accepts a trigger → gate → agent graph and rejects a malformed gate', () => {
+    const ok = G([trigger('t'), { id: 'g', type: 'gate', position: { x: 0, y: 0 }, data: { message: 'ok?' } }, agent('a')], [edge('e1', 't', 'g'), edge('e2', 'g', 'a')]);
+    expect(() => validateGraph(ok)).not.toThrow();
+    const bad = G([trigger('t'), { id: 'g', type: 'gate', position: { x: 0, y: 0 }, data: { onError: 'nope' } }], [edge('e1', 't', 'g')]);
+    expect(() => validateGraph(bad)).toThrow(ValidationError);
   });
 });
 

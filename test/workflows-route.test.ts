@@ -19,12 +19,15 @@ vi.mock('@/lib/queries', () => queries);
 const store = {
   listWorkflows: vi.fn(),
   getWorkflowBySlug: vi.fn(),
+  getWorkflowById: vi.fn(),
+  getWorkflowRun: vi.fn(),
+  requeueWorkflowRun: vi.fn(),
   listWorkflowRuns: vi.fn(),
   listStepRuns: vi.fn(),
 };
 vi.mock('@/lib/workflow-store', () => store);
 
-const enqueue = { enqueueWorkflowRun: vi.fn() };
+const enqueue = { enqueueWorkflowRun: vi.fn(), decideGate: vi.fn() };
 vi.mock('@/lib/workflow-enqueue', () => enqueue);
 
 // Import AFTER mocks are registered. ConflictError is the REAL class (validation has no DB deps) so the
@@ -155,6 +158,54 @@ describe('POST run (enqueue)', () => {
     const res = await post({ workflow: 'triage', action: 'frobnicate' });
     expect(res.status).toBe(422);
     expect(enqueue.enqueueWorkflowRun).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST approve (gate decision)', () => {
+  beforeEach(() => {
+    store.getWorkflowRun.mockResolvedValue(runRow({ status: 'paused' }));
+    store.getWorkflowById.mockResolvedValue(wfRow()); // owner workflow belongs to project p1
+    enqueue.decideGate.mockResolvedValue(runRow({ status: 'paused' }));
+    store.requeueWorkflowRun.mockResolvedValue(runRow({ status: 'queued' }));
+  });
+
+  it('records the decision and requeues the run for the daemon', async () => {
+    const res = await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'approve' });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data).toMatchObject({ workflowRunId: 'r1', status: 'queued', decision: 'approve' });
+    expect(enqueue.decideGate).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', status: 'paused' }), 'g', 'approve', undefined);
+    expect(store.requeueWorkflowRun).toHaveBeenCalledWith('r1');
+  });
+
+  it('passes a reject decision + reason through to decideGate', async () => {
+    await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'reject', reason: 'too risky' });
+    expect(enqueue.decideGate).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }), 'g', 'reject', 'too risky');
+  });
+
+  it('422 on a missing runId/nodeId or a bad decision', async () => {
+    expect((await post({ action: 'approve', nodeId: 'g', decision: 'approve' })).status).toBe(422);
+    expect((await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'maybe' })).status).toBe(422);
+    expect(enqueue.decideGate).not.toHaveBeenCalled();
+  });
+
+  it("404s a run whose workflow belongs to another project (no leak)", async () => {
+    store.getWorkflowById.mockResolvedValue(wfRow({ projectId: 'other' }));
+    const res = await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'approve' });
+    expect(res.status).toBe(404);
+    expect(enqueue.decideGate).not.toHaveBeenCalled();
+  });
+
+  it('409 when the run is no longer paused (requeue lost the race)', async () => {
+    store.requeueWorkflowRun.mockResolvedValue(null);
+    const res = await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'approve' });
+    expect(res.status).toBe(409);
+  });
+
+  it('maps a ConflictError from decideGate to 409', async () => {
+    enqueue.decideGate.mockRejectedValue(new ConflictError('gate', 'not awaiting approval'));
+    const res = await post({ action: 'approve', runId: 'r1', nodeId: 'g', decision: 'approve' });
+    expect(res.status).toBe(409);
   });
 });
 

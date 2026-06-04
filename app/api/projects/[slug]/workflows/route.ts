@@ -6,8 +6,8 @@
 
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { getProjectBySlug } from '@/lib/queries';
-import { listWorkflows, getWorkflowBySlug, listWorkflowRuns, listStepRuns } from '@/lib/workflow-store';
-import { enqueueWorkflowRun } from '@/lib/workflow-enqueue';
+import { listWorkflows, getWorkflowBySlug, getWorkflowById, getWorkflowRun, requeueWorkflowRun, listWorkflowRuns, listStepRuns } from '@/lib/workflow-store';
+import { enqueueWorkflowRun, decideGate } from '@/lib/workflow-enqueue';
 import { toWorkflowListItem, toWorkflowDetail } from '@/lib/workflow-view';
 import { NotFoundError, ConflictError, ValidationError } from '@/lib/validation';
 
@@ -62,7 +62,7 @@ export async function GET(
   return Response.json({ ok: true, data: { workflows: items } });
 }
 
-type PostBody = { action?: string; workflow?: string };
+type PostBody = { action?: string; workflow?: string; runId?: string; nodeId?: string; decision?: string; reason?: string };
 
 /** Trigger a workflow run from the canvas Run button. Enqueues a 'queued' run for the workflow-daemon — a pure
  *  DB write, no spawn. The single-flight guard surfaces as 409 (a run is already queued or in progress). */
@@ -83,20 +83,38 @@ export async function POST(
   } catch {
     return Response.json({ ok: false, error: 'validation', message: 'invalid JSON body' }, { status: 422 });
   }
-  const { action, workflow: wfSlug } = body;
-  if (action !== 'run') {
-    return Response.json({ ok: false, error: 'validation', message: `unknown action: ${String(action)}` }, { status: 422 });
-  }
-  if (!wfSlug) {
-    return Response.json({ ok: false, error: 'validation', message: 'workflow required' }, { status: 422 });
-  }
-  // Foreign-project guard: the workflow must belong to THIS project (mirrors the GET detail check).
-  const wf = await getWorkflowBySlug(wfSlug);
-  if (!wf || wf.projectId !== project.id) {
-    return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
-  }
+  const { action } = body;
 
   try {
+    // Approve / reject a paused gate (slice 9a): record the decision (decideGate) then requeue the run
+    // (paused→queued) so the workflow-daemon resumes it off-process — the web tier never spawns.
+    if (action === 'approve') {
+      const { runId, nodeId, decision, reason } = body;
+      if (!runId || !nodeId) return Response.json({ ok: false, error: 'validation', message: 'runId and nodeId required' }, { status: 422 });
+      if (decision !== 'approve' && decision !== 'reject') return Response.json({ ok: false, error: 'validation', message: "decision must be 'approve' or 'reject'" }, { status: 422 });
+      // Foreign-project guard: the run's workflow must belong to THIS project.
+      const run = await getWorkflowRun(runId);
+      if (!run) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+      const ownerWf = await getWorkflowById(run.workflowId);
+      if (!ownerWf || ownerWf.projectId !== project.id) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+      await decideGate(run, nodeId, decision, reason);
+      const requeued = await requeueWorkflowRun(runId);
+      if (!requeued) return Response.json({ ok: false, error: 'conflict', message: `run ${runId} is no longer paused` }, { status: 409 });
+      return Response.json({ ok: true, data: { workflowRunId: requeued.id, status: requeued.status, decision } });
+    }
+
+    if (action !== 'run') {
+      return Response.json({ ok: false, error: 'validation', message: `unknown action: ${String(action)}` }, { status: 422 });
+    }
+    const { workflow: wfSlug } = body;
+    if (!wfSlug) {
+      return Response.json({ ok: false, error: 'validation', message: 'workflow required' }, { status: 422 });
+    }
+    // Foreign-project guard: the workflow must belong to THIS project (mirrors the GET detail check).
+    const wf = await getWorkflowBySlug(wfSlug);
+    if (!wf || wf.projectId !== project.id) {
+      return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+    }
     const run = await enqueueWorkflowRun(wfSlug, { trigger: 'manual' });
     return Response.json({ ok: true, data: { workflowRunId: run.id, status: run.status } });
   } catch (e) {
