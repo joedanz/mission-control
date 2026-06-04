@@ -1,10 +1,11 @@
-// ABOUTME: The workflow graph walker (slices 1+3+5). Drives a manual-trigger graph: an agent node interpolates
+// ABOUTME: The workflow graph walker (slices 1+3+5+6a). Drives a manual-trigger graph: an agent node interpolates
 // ABOUTME: {{nodeId.field}} data-passing refs from upstream step outputs, spawns a real run (optionally
 // ABOUTME: requesting structured output via responseSchema), and writes run state through the `mc` CLI
 // ABOUTME: (mc_agent scoping at the CLI boundary, like auto-claim + scheduler); an integration node runs a
-// ABOUTME: deterministic Composio action (no LLM, no run, no spawn). It records per-node step state. RUN-ONLY:
-// ABOUTME: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it) — it never creates a
-// ABOUTME: claimable task. A failed node halts the workflow unless its onError='continue'.
+// ABOUTME: deterministic Composio action (no LLM, no run, no spawn); a branch node picks a case and ROUTES the
+// ABOUTME: walk to its chosen out-edges (nodes with no active incoming edge are recorded `skipped`). It records
+// ABOUTME: per-node step state. RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come
+// ABOUTME: from it) — it never creates a claimable task. A failed node halts the workflow unless onError='continue'.
 // ABOUTME: Slice 4 split create from walk: runWorkflow (sync, born 'running') and enqueueWorkflowRun (born
 // ABOUTME: 'queued', no spawn — the web Run button + `--async`) both create a run; walkWorkflowRun executes an
 // ABOUTME: existing run and is shared by the sync path and the workflow-daemon (which claims queued runs).
@@ -22,13 +23,14 @@ import {
   listStepRuns,
 } from '../lib/workflow-store';
 import { prepareWorkflowRun } from '../lib/workflow-enqueue';
-import { topoOrder, nodeById, readAgentNodeData, readIntegrationNodeData } from '../lib/workflows';
-import { normalizeStepOutput, interpolate, interpolateValue, type RefView } from '../lib/workflow-refs';
+import { topoOrder, nodeById, readAgentNodeData, readIntegrationNodeData, readBranchNodeData } from '../lib/workflows';
+import { chooseBranch } from '../lib/workflow-branch';
+import { normalizeStepOutput, interpolate, interpolateValue, isObject, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
 import { getConnection } from '../lib/composio-store';
 import { executeAction } from '../lib/composio-api';
 import { NotFoundError, ValidationError } from '../lib/validation';
-import type { Project, WorkflowNode, WorkflowOnError, WorkflowRun, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
+import type { Project, WorkflowGraph, WorkflowNode, WorkflowOnError, WorkflowRun, WorkflowRunStatus, WorkflowStepRun, WorkflowTrigger } from '../lib/db/schema';
 
 const DEFAULT_TIMEOUT_SEC = 900;
 const DEFAULT_GRACE_SEC = 15;
@@ -68,6 +70,30 @@ function parseClaudeResult(stdout: string): Record<string, unknown> | null {
   return result;
 }
 
+// ── Branch routing (slice 6a) ─────────────────────────────────────────────────────────
+/** The handle an edge leaves its source on — sourceHandle (React Flow's native port id), falling back to a
+ *  human label. A branch routes to the edges whose handle equals its chosen case name. */
+const edgeHandle = (e: { sourceHandle?: string | null; label?: string }): string => e.sourceHandle ?? e.label ?? '';
+
+/** The out-edge ids an executed node ROUTES to: a normal node activates ALL its out-edges; a branch only the
+ *  edges on its chosen handle (none → that path is never reached). The walker adds these to `selectedEdges`. */
+function activeOutEdges(graph: WorkflowGraph, node: WorkflowNode, chosen?: string): string[] {
+  const out = graph.edges.filter((e) => e.source === node.id);
+  if (node.type !== 'branch') return out.map((e) => e.id);
+  return out.filter((e) => edgeHandle(e) === chosen).map((e) => e.id);
+}
+
+/** Whether any edge into `nodeId` has been routed (selected) by an upstream node — the gate for a node to run. */
+const hasActiveIncomer = (graph: WorkflowGraph, nodeId: string, selected: Set<string>): boolean =>
+  graph.edges.some((e) => e.target === nodeId && selected.has(e.id));
+
+/** The case a completed branch step routed to (stored as `output.chosen`), so a resume re-derives its route
+ *  without re-evaluating. undefined for a non-branch step (activeOutEdges ignores it there). */
+const branchChoice = (output: unknown): string | undefined => {
+  const chosen = isObject(output) ? output.chosen : undefined;
+  return typeof chosen === 'string' ? chosen : undefined;
+};
+
 /** Run a workflow SYNCHRONOUSLY (the slice-1 CLI default): the calling process owns the walk, so the run is
  *  born 'running' — the workflow-daemon only ever lists/claims 'queued' runs, so a manual `mc workflow run`
  *  and a live daemon never race the same row. Keep prompts short; durable async = enqueueWorkflowRun (lib) +
@@ -99,10 +125,20 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
 
   // Resume: nodes a prior attempt already completed are skipped (the (run, node) unique key makes re-running
   // safe). `views` doubles as the skip-set AND the {{nodeId.field}} data-passing substrate — seed it from
-  // those completed steps' outputs (normalized once each). Read once up front, not per node.
+  // those completed steps' outputs (normalized once each). `selectedEdges` is the branch-routing substrate:
+  // the edge ids an executed node routed to (a normal node routes ALL its out-edges; a branch only the edges
+  // on its chosen handle). A node runs only if an incoming edge is selected — so a not-taken path is skipped.
+  // Seed both from completed steps (resume re-derives a branch's route from its stored `chosen`). One read up front.
   const views = new Map<string, RefView>();
+  const selectedEdges = new Set<string>();
+  const activate = (node: WorkflowNode, chosen?: string) => {
+    for (const id of activeOutEdges(snapshot, node, chosen)) selectedEdges.add(id);
+  };
   for (const s of await listStepRuns(run.id)) {
-    if (s.status === 'completed') views.set(s.nodeId, normalizeStepOutput(s.output));
+    if (s.status !== 'completed') continue;
+    views.set(s.nodeId, normalizeStepOutput(s.output));
+    const n = nodeById(snapshot, s.nodeId);
+    if (n) activate(n, branchChoice(s.output));
   }
 
   let finalStatus: WorkflowRunStatus = 'completed';
@@ -116,16 +152,40 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
       }
       await touchWorkflowRun(run.id); // liveness heartbeat for the reaper
 
-      if (views.has(nodeId)) continue; // already completed (this run or a prior attempt)
+      if (views.has(nodeId)) continue; // already completed (this run or a prior attempt) — out-edges seeded
 
       const node = nodeById(snapshot, nodeId);
       if (!node) continue; // topoOrder only yields graph node ids; defensive
+
+      // Branch routing: a non-trigger node runs only when an upstream node routed an edge into it. No active
+      // incoming edge (a not-taken branch path, or an unreachable node) → record `skipped` and move on: a
+      // skipped node seeds no views and activates no out-edges, so the skip propagates to its descendants.
+      if (node.type !== 'trigger' && !hasActiveIncomer(snapshot, nodeId, selectedEdges)) {
+        await upsertStepRun(run.id, nodeId, { status: 'skipped', startedAt: new Date(), endedAt: new Date() });
+        continue;
+      }
 
       if (node.type === 'trigger') {
         const output = { trigger };
         await upsertStepRun(run.id, nodeId, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
         views.set(nodeId, normalizeStepOutput(output));
+        activate(node);
         continue;
+      }
+
+      if (node.type === 'branch') {
+        // A deterministic condition pick (no LLM, no run) — the trigger node's twin. `chosen` routes the edges.
+        const res = await runBranchNode(run.id, node, log, views);
+        if (res.ok) {
+          views.set(nodeId, normalizeStepOutput(res.output));
+          activate(node, res.chosen);
+          continue;
+        }
+        anyFailed = true;
+        // continue = don't halt the run; but `chosen` is undefined on failure so activate() routes to NO edges
+        // — a branch that couldn't decide sends every path to `skipped` (no arbitrary route on stale data).
+        if (res.onError === 'continue') { activate(node, res.chosen); continue; }
+        break;
       }
 
       if (node.type === 'agent' || node.type === 'integration') {
@@ -136,15 +196,18 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
           : await runIntegrationNode(run.id, node, home, log, views);
         if (res.ok) {
           views.set(nodeId, normalizeStepOutput(res.output));
+          activate(node);
           continue;
         }
         anyFailed = true;
-        if (res.onError === 'continue') continue; // keep walking; downstream refs to this node hard-fail
+        // continue = the flow proceeds past this node: activate its out-edges so successors are still reached
+        // (a successor that {{refs}} this failed node hard-fails on the missing value, per the slice-3 contract).
+        if (res.onError === 'continue') { activate(node); continue; }
         break; // onError='halt' (default) — stop; the post-loop reconciliation marks the run failed
       }
 
-      // trigger + agent + integration are all the walker executes; anything else is an honest not-yet error.
-      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration)`);
+      // trigger + agent + integration + branch are all the walker executes; anything else is an honest not-yet error.
+      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration + branch)`);
     }
   } catch (err) {
     await setWorkflowRunStatus(run.id, 'failed');
@@ -319,4 +382,31 @@ async function executeIntegration(action: string, connectedAccountId: string, us
     return parsed.data ?? {};
   }
   return executeAction(action, connectedAccountId, userId, args);
+}
+
+/** Run one branch node (slice 6a): a deterministic condition pick, NO LLM (no run row, no spawn — the trigger
+ *  node's twin). Resolves the ordered cases against {{nodeId.field}} refs and selects the first match (none →
+ *  'else'); the walker turns `chosen` into the active out-edges. A missing ref hard-fails the node (same
+ *  contract as agent/integration). Stores `{ kind:'branch', runStatus, chosen }` — `chosen` lets a resume
+ *  re-route without re-evaluating and lets the canvas show which path was taken. */
+async function runBranchNode(
+  wfRunId: string,
+  node: WorkflowNode,
+  log: Log,
+  views: Map<string, RefView>,
+): Promise<NodeResult & { chosen?: string }> {
+  const data = readBranchNodeData(node); // validates cases + onError (also gated at create)
+  const onError = data.onError ?? 'halt';
+  const { chosen, missing } = chooseBranch(data.cases, views);
+  if (missing.length) {
+    const error = `unresolved data references: ${missing.join(', ')}`;
+    const output = { kind: 'branch', runStatus: 'failed', error };
+    await upsertStepRun(wfRunId, node.id, { status: 'failed', startedAt: new Date(), endedAt: new Date(), output, error });
+    log(`node ${node.id}: ${error}`);
+    return { ok: false, onError };
+  }
+  const output = { kind: 'branch', runStatus: 'completed', chosen };
+  await upsertStepRun(wfRunId, node.id, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
+  log(`node ${node.id}: branch → ${chosen}`);
+  return { ok: true, chosen, output, onError };
 }

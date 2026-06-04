@@ -3,7 +3,7 @@
 // ABOUTME: spawn, no fs (mirrors lib/profiles.ts + daemon/render-profile.ts), so it's unit-testable alone.
 
 import { assertEnum, ValidationError } from './validation';
-import { extractRefs } from './workflow-refs';
+import { extractRefs, isObject } from './workflow-refs';
 import { getCatalogEntry, catalogSlugs } from './composio-catalog';
 import {
   WORKFLOW_STATUSES,
@@ -12,6 +12,7 @@ import {
   WORKFLOW_STEP_STATUSES,
   WORKFLOW_NODE_TYPES,
   WORKFLOW_ON_ERROR,
+  BRANCH_OPS,
   type WorkflowGraph,
   type WorkflowNode,
   type WorkflowStatus,
@@ -22,7 +23,10 @@ import {
   type WorkflowOnError,
   type AgentNodeData,
   type IntegrationNodeData,
+  type BranchNodeData,
+  type BranchCase,
 } from './db/schema';
+import { ELSE } from './workflow-branch';
 
 // ── Enum guards (narrow + agent-actionable error, via the shared assertEnum) ───────────
 export const assertWorkflowStatus = (v: string): WorkflowStatus => assertEnum(v, WORKFLOW_STATUSES, 'status');
@@ -164,8 +168,11 @@ export function validateGraph(graph: WorkflowGraph): void {
     } else if (n.type === 'integration') {
       refText = JSON.stringify(readIntegrationNodeData(n).arguments ?? {}); // validates toolkit + action + onError
       field = 'node.data.arguments';
+    } else if (n.type === 'branch') {
+      refText = JSON.stringify(readBranchNodeData(n).cases); // validates cases; refs live in when.left/right
+      field = 'node.data.cases';
     } else {
-      continue; // trigger (and future branch/gate) carry no refs
+      continue; // trigger (and future gate) carry no refs
     }
 
     // Data-passing: every {{ref}} must point at an existing ANCESTOR (an edge-backed upstream node), so the
@@ -210,6 +217,35 @@ export function readIntegrationNodeData(node: WorkflowNode): IntegrationNodeData
   }
   const out: IntegrationNodeData = { toolkit, action };
   if (data.arguments !== undefined) out.arguments = data.arguments as Record<string, unknown>;
+  if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
+  return out;
+}
+
+/** Validate + return a type='branch' node's config (slice 6a). At least one case; each case has a non-blank,
+ *  unique name (not the reserved 'else') and a condition with a known op + a left operand. The chosen case
+ *  name routes to outgoing edges by sourceHandle; left/right may carry {{nodeId.field}} refs (ancestor-checked
+ *  by validateGraph). Throws ValidationError (listing valid ops) on a bad shape. */
+export function readBranchNodeData(node: WorkflowNode): BranchNodeData {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const rawCases = Array.isArray(data.cases) ? data.cases : [];
+  if (!rawCases.length) throw new ValidationError('node.data.cases', `branch node "${node.id}" needs at least one case`);
+
+  const names = new Set<string>();
+  const cases: BranchCase[] = rawCases.map((raw, i) => {
+    const c = isObject(raw) ? raw : {};
+    const name = typeof c.name === 'string' ? c.name.trim() : '';
+    if (!name) throw new ValidationError('node.data.cases', `branch node "${node.id}" case #${i} is missing a name`);
+    if (name === ELSE) throw new ValidationError('node.data.cases', `branch node "${node.id}" cannot name a case "${ELSE}" (it is the implicit fallback)`);
+    if (names.has(name)) throw new ValidationError('node.data.cases', `branch node "${node.id}" has a duplicate case "${name}"`);
+    names.add(name);
+    const when = isObject(c.when) ? c.when : null;
+    if (!when) throw new ValidationError('node.data.cases', `branch node "${node.id}" case "${name}" is missing a condition`);
+    if (when.left === undefined) throw new ValidationError('node.data.cases', `branch node "${node.id}" case "${name}" condition is missing a left operand`);
+    const op = assertEnum(typeof when.op === 'string' ? when.op : '', BRANCH_OPS, 'node.data.cases.when.op');
+    return { name, when: { left: when.left, op, right: when.right } };
+  });
+
+  const out: BranchNodeData = { cases };
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }

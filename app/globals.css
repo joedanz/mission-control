@@ -1953,6 +1953,7 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .wf-node--trigger     { border-left-color: var(--info); }
 .wf-node--agent       { border-left-color: var(--accent); }
 .wf-node--integration { border-left-color: var(--ok); }
+.wf-node--branch      { border-left-color: var(--warn); }
 .wf-node--generic     { border-left-color: var(--ink-mute); }
 .wf-node__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xs); }
 .wf-node__kind { font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); }
