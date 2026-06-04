@@ -1,7 +1,7 @@
 // ABOUTME: DB CRUD for workflows + workflow_runs + workflow_step_runs. Pure Drizzle (no graph logic, no
 // ABOUTME: spawn) — the DB-testable seam under the CLI + daemon walker, mirroring lib/composio-store.ts.
 
-import { eq, and, asc, desc, count, inArray } from 'drizzle-orm';
+import { eq, and, asc, desc, count, inArray, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
   workflows, workflowRuns, workflowStepRuns,
@@ -56,6 +56,28 @@ export async function setWorkflowStatus(slug: string, status: WorkflowStatus): P
   const rows = await db
     .update(workflows)
     .set({ status, updatedAt: new Date() })
+    .where(eq(workflows.slug, slug))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/** Save an edited graph (slice 9b canvas authoring). Replaces `graph`, bumps `version`, touches
+ *  `updatedAt`, and optionally renames/re-describes. Returns the updated row, or null if no workflow
+ *  has that slug. The caller validates the graph (`validateGraph`) BEFORE persisting — this is pure CRUD. */
+export async function updateWorkflowGraph(
+  slug: string,
+  graph: WorkflowGraph,
+  opts: { name?: string; description?: string | null } = {},
+): Promise<Workflow | null> {
+  const rows = await db
+    .update(workflows)
+    .set({
+      graph,
+      version: sql`${workflows.version} + 1`,
+      updatedAt: new Date(),
+      ...(opts.name !== undefined && { name: opts.name }),
+      ...(opts.description !== undefined && { description: opts.description }),
+    })
     .where(eq(workflows.slug, slug))
     .returning();
   return rows[0] ?? null;

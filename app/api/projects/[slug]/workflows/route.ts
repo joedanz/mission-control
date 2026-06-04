@@ -7,9 +7,10 @@
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { getProjectBySlug } from '@/lib/queries';
 import { listWorkflows, getWorkflowBySlug, getWorkflowById, getWorkflowRun, requeueWorkflowRun, listWorkflowRuns, listStepRuns } from '@/lib/workflow-store';
-import { enqueueWorkflowRun, decideGate } from '@/lib/workflow-enqueue';
+import { enqueueWorkflowRun, decideGate, saveWorkflowGraph } from '@/lib/workflow-enqueue';
 import { toWorkflowListItem, toWorkflowDetail } from '@/lib/workflow-view';
 import { NotFoundError, ConflictError, ValidationError } from '@/lib/validation';
+import type { WorkflowGraph } from '@/lib/db/schema';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,7 +63,7 @@ export async function GET(
   return Response.json({ ok: true, data: { workflows: items } });
 }
 
-type PostBody = { action?: string; workflow?: string; runId?: string; nodeId?: string; decision?: string; reason?: string };
+type PostBody = { action?: string; workflow?: string; runId?: string; nodeId?: string; decision?: string; reason?: string; graph?: WorkflowGraph };
 
 /** Trigger a workflow run from the canvas Run button. Enqueues a 'queued' run for the workflow-daemon — a pure
  *  DB write, no spawn. The single-flight guard surfaces as 409 (a run is already queued or in progress). */
@@ -101,6 +102,21 @@ export async function POST(
       const requeued = await requeueWorkflowRun(runId);
       if (!requeued) return Response.json({ ok: false, error: 'conflict', message: `run ${runId} is no longer paused` }, { status: 409 });
       return Response.json({ ok: true, data: { workflowRunId: requeued.id, status: requeued.status, decision } });
+    }
+
+    // Save an edited graph (slice 9b canvas authoring): the foreign-project guard here, then the shared
+    // saveWorkflowGraph (same lib-tier validate-then-persist the CLI uses) — a pure DB write, no spawn.
+    // ValidationError (a non-empty graph that doesn't validate) → 422, caught below; invalid never persists.
+    if (action === 'save') {
+      const { workflow: wfSlug, graph } = body;
+      if (!wfSlug) return Response.json({ ok: false, error: 'validation', message: 'workflow required' }, { status: 422 });
+      if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+        return Response.json({ ok: false, error: 'validation', message: 'graph must have nodes and edges arrays' }, { status: 422 });
+      }
+      const wf = await getWorkflowBySlug(wfSlug);
+      if (!wf || wf.projectId !== project.id) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+      const saved = await saveWorkflowGraph(wfSlug, { graph });
+      return Response.json({ ok: true, data: { workflow: { slug: saved.slug, version: saved.version, status: saved.status } } });
     }
 
     if (action !== 'run') {

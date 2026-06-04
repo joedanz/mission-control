@@ -362,6 +362,7 @@ const SPEC = [
   { name: 'workflow list', readonly: true, summary: 'List workflows', options: ['--project'] },
   { name: 'workflow get', readonly: true, summary: 'Get one workflow by slug', args: ['<slug>'] },
   { name: 'workflow create', readonly: false, summary: 'Create a workflow from a node graph', required: ['--project', '--name'], options: ['--slug', '--graph', '--description'] },
+  { name: 'workflow update', readonly: false, summary: 'Update a workflow graph (and/or name/description) — validated through the same SSOT', args: ['<slug>'], options: ['--graph', '--name', '--description'] },
   { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--max-parallel', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
@@ -1068,6 +1069,27 @@ withFlags(workflow.command('create'))
         graph,
       });
       return { data: wf, human: () => console.log(`created workflow ${wf.slug} (${wf.id})`) };
+    }),
+  );
+
+withFlags(workflow.command('update'))
+  .description('Update a workflow graph (and/or name/description) — the CLI twin of canvas authoring')
+  .argument('<slug>')
+  .option('--graph <json|@file>', 'replacement React Flow graph {nodes,edges} (inline or @path)')
+  .option('--name <name>', 'rename the workflow')
+  .option('--description <text>', 'set the description')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow update', opts, async () => {
+      ensureDbCredentials();
+      // The shared lib-tier save (same validate-then-persist as the canvas save route): omit --graph to keep
+      // the current graph (a rename-only update); a provided graph is validated through the same SSOT.
+      const { saveWorkflowGraph } = await import('../lib/workflow-enqueue');
+      const updated = await saveWorkflowGraph(slug, {
+        ...(opts.graph !== undefined && { graph: parseGraphArg(String(opts.graph)) }),
+        ...(opts.name !== undefined && { name: String(opts.name) }),
+        ...(opts.description !== undefined && { description: String(opts.description) }),
+      });
+      return { data: updated, human: () => console.log(`updated workflow ${updated.slug} → v${updated.version}`) };
     }),
   );
 

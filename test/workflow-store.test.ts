@@ -7,7 +7,7 @@ import { db } from '../lib/db/index';
 import { projects, type WorkflowGraph } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
 import {
-  createWorkflow, getWorkflowBySlug, getWorkflowById, listWorkflows, setWorkflowStatus,
+  createWorkflow, getWorkflowBySlug, getWorkflowById, listWorkflows, setWorkflowStatus, updateWorkflowGraph,
   createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowRunStatus,
   requestWorkflowRunCancel, touchWorkflowRun, countPendingWorkflowRuns,
   claimWorkflowRun, claimPausedWorkflowRun, requeueWorkflowRun, listQueuedWorkflowRuns, latestCronRunAt,
@@ -60,6 +60,25 @@ describe('workflow store — workflows', () => {
     const slug = tag();
     await createWorkflow({ projectId: p.id, slug, name: 'A', graph: graph() });
     expect((await setWorkflowStatus(slug, 'paused'))?.status).toBe('paused');
+  });
+
+  it('updateWorkflowGraph replaces the graph + bumps version (slice 9b authoring)', async () => {
+    const p = await freshProject();
+    const slug = tag();
+    await createWorkflow({ projectId: p.id, slug, name: 'A', graph: graph() });
+    const next: WorkflowGraph = {
+      nodes: [{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } }],
+      edges: [],
+    };
+    const updated = await updateWorkflowGraph(slug, next, { name: 'Renamed', description: 'desc' });
+    expect(updated?.version).toBe(2);
+    expect(updated?.graph.nodes.length).toBe(1);
+    expect(updated?.name).toBe('Renamed');
+    expect(updated?.description).toBe('desc');
+  });
+
+  it('updateWorkflowGraph returns null for an unknown slug', async () => {
+    expect(await updateWorkflowGraph('nope-' + tag(), { nodes: [], edges: [] })).toBeNull();
   });
 
   it('listWorkflows filters by status (the daemon cron scan reads only active)', async () => {
