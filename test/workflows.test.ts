@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, assertWorkflowStatus,
+  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -53,6 +53,39 @@ describe('workflows — DAG / topo order', () => {
   it('topoOrder throws on a cycle', () => {
     const cyclic = G([agent('a'), agent('b')], [edge('e1', 'a', 'b'), edge('e2', 'b', 'a')]);
     expect(() => topoOrder(cyclic)).toThrow(ValidationError);
+  });
+});
+
+describe('workflows — decidableNodes (concurrent scheduling)', () => {
+  // t → {a, b, c} → m: a fan-out (3 parallel branches) that re-joins at a merge node m.
+  const diamond = () => G(
+    [trigger('t'), agent('a'), agent('b'), agent('c'), agent('m')],
+    [edge('e1', 't', 'a'), edge('e2', 't', 'b'), edge('e3', 't', 'c'), edge('e4', 'a', 'm'), edge('e5', 'b', 'm'), edge('e6', 'c', 'm')],
+  );
+
+  it('starts with only the trigger (no predecessors)', () => {
+    expect(decidableNodes(diamond(), new Set(), new Set())).toEqual(['t']);
+  });
+
+  it('fans out to ALL branches once the trigger is terminal', () => {
+    expect(decidableNodes(diamond(), new Set(['t']), new Set(['t']))).toEqual(['a', 'b', 'c']);
+  });
+
+  it('does NOT decide the merge until every branch is terminal (wait-all)', () => {
+    const started = new Set(['t', 'a', 'b', 'c']);
+    expect(decidableNodes(diamond(), new Set(['t', 'a', 'b']), started)).toEqual([]); // c still in-flight
+    expect(decidableNodes(diamond(), new Set(['t', 'a', 'b', 'c']), started)).toEqual(['m']); // all branches done
+  });
+
+  it('treats a skipped branch as resolved (a not-taken path never deadlocks the join)', () => {
+    // c was skipped (terminal) — m still becomes decidable once a, b, c are all terminal.
+    const started = new Set(['t', 'a', 'b', 'c']);
+    expect(decidableNodes(diamond(), new Set(['t', 'a', 'b', 'c']), started)).toEqual(['m']);
+  });
+
+  it('excludes already-started nodes (never launches twice)', () => {
+    const started = new Set(['t', 'a', 'b', 'c', 'm']);
+    expect(decidableNodes(diamond(), new Set(['t', 'a', 'b', 'c']), started)).toEqual([]);
   });
 });
 

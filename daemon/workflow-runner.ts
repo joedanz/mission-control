@@ -1,11 +1,12 @@
-// ABOUTME: The workflow graph walker (slices 1+3+5+6a). Drives a manual-trigger graph: an agent node interpolates
-// ABOUTME: {{nodeId.field}} data-passing refs from upstream step outputs, spawns a real run (optionally
-// ABOUTME: requesting structured output via responseSchema), and writes run state through the `mc` CLI
-// ABOUTME: (mc_agent scoping at the CLI boundary, like auto-claim + scheduler); an integration node runs a
-// ABOUTME: deterministic Composio action (no LLM, no run, no spawn); a branch node picks a case and ROUTES the
-// ABOUTME: walk to its chosen out-edges (nodes with no active incoming edge are recorded `skipped`). It records
-// ABOUTME: per-node step state. RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come
-// ABOUTME: from it) — it never creates a claimable task. A failed node halts the workflow unless onError='continue'.
+// ABOUTME: The workflow graph walker (slices 1+3+5+6a+6b). A ready-set scheduler runs independent nodes
+// ABOUTME: CONCURRENTLY (bounded by maxParallel): a node is decidable once all its predecessors are terminal
+// ABOUTME: (wait-all join), so a fan-out's branches overlap while a merge waits for all of them. An agent node
+// ABOUTME: interpolates {{nodeId.field}} refs + spawns a real run (optionally requesting structured output via
+// ABOUTME: responseSchema), writing run state through the `mc` CLI (mc_agent scoping, like auto-claim/scheduler);
+// ABOUTME: an integration node runs a deterministic Composio action (no LLM, no run, no spawn); a branch node
+// ABOUTME: picks a case and ROUTES the walk to its chosen out-edges (nodes with no active incoming edge → `skipped`).
+// ABOUTME: RUN-ONLY: an agent node links a runs row (cost/heartbeat/fleet feed/cancel come from it) — it never
+// ABOUTME: creates a claimable task. A failed node halts the workflow (stop launching new nodes) unless onError='continue'.
 // ABOUTME: Slice 4 split create from walk: runWorkflow (sync, born 'running') and enqueueWorkflowRun (born
 // ABOUTME: 'queued', no spawn — the web Run button + `--async`) both create a run; walkWorkflowRun executes an
 // ABOUTME: existing run and is shared by the sync path and the workflow-daemon (which claims queued runs).
@@ -23,7 +24,7 @@ import {
   listStepRuns,
 } from '../lib/workflow-store';
 import { prepareWorkflowRun } from '../lib/workflow-enqueue';
-import { topoOrder, nodeById, readAgentNodeData, readIntegrationNodeData, readBranchNodeData } from '../lib/workflows';
+import { decidableNodes, nodeById, readAgentNodeData, readIntegrationNodeData, readBranchNodeData } from '../lib/workflows';
 import { chooseBranch } from '../lib/workflow-branch';
 import { normalizeStepOutput, interpolate, interpolateValue, isObject, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
@@ -36,6 +37,7 @@ const DEFAULT_TIMEOUT_SEC = 900;
 const DEFAULT_GRACE_SEC = 15;
 const DEFAULT_PERMISSION_MODE = 'acceptEdits'; // agent nodes need write access; null-profile path uses this
 const AGENT_LABEL = 'workflow-runner';
+const DEFAULT_MAX_PARALLEL = 4; // cap on concurrently in-flight nodes (agent spawns are the expensive ones)
 
 export type RunWorkflowOpts = {
   trigger?: WorkflowTrigger;
@@ -43,6 +45,7 @@ export type RunWorkflowOpts = {
   graceSec?: number;
   basePermissionMode?: string;
   allowConcurrent?: boolean; // bypass the single-flight guard
+  maxParallel?: number; // max concurrently in-flight nodes (default DEFAULT_MAX_PARALLEL)
   log?: Log;
 };
 
@@ -123,91 +126,100 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   const snapshot = run.graphSnapshot; // pinned at create — a mid-run edit to workflows.graph can't corrupt it
   const trigger = run.trigger as WorkflowTrigger;
 
-  // Resume: nodes a prior attempt already completed are skipped (the (run, node) unique key makes re-running
-  // safe). `views` doubles as the skip-set AND the {{nodeId.field}} data-passing substrate — seed it from
-  // those completed steps' outputs (normalized once each). `selectedEdges` is the branch-routing substrate:
-  // the edge ids an executed node routed to (a normal node routes ALL its out-edges; a branch only the edges
-  // on its chosen handle). A node runs only if an incoming edge is selected — so a not-taken path is skipped.
-  // Seed both from completed steps (resume re-derives a branch's route from its stored `chosen`). One read up front.
+  // Run substrate. `views` = the {{nodeId.field}} data-passing map; `selectedEdges` = the branch-routing set
+  // (the edges an executed node routed to — a normal node routes ALL its out-edges, a branch only its chosen
+  // handle); `terminal` = nodes that reached a final state (completed | failed | skipped); `started` guards
+  // against launching a node twice. A node is DECIDABLE only when all its predecessors are terminal (wait-all
+  // join). Seed all four from completed steps so a resume skips done nodes, refs resolve, and a branch's route
+  // re-derives from its stored `chosen`. (Only completed steps seed — a prior failed/skipped/running step is
+  // re-decided on resume, matching the pre-6b behavior.)
   const views = new Map<string, RefView>();
   const selectedEdges = new Set<string>();
+  const terminal = new Set<string>();
+  const started = new Set<string>();
   const activate = (node: WorkflowNode, chosen?: string) => {
     for (const id of activeOutEdges(snapshot, node, chosen)) selectedEdges.add(id);
   };
   for (const s of await listStepRuns(run.id)) {
     if (s.status !== 'completed') continue;
     views.set(s.nodeId, normalizeStepOutput(s.output));
+    terminal.add(s.nodeId);
+    started.add(s.nodeId);
     const n = nodeById(snapshot, s.nodeId);
     if (n) activate(n, branchChoice(s.output));
   }
 
+  // Execute ONE node to its terminal result. The per-node bodies are unchanged from the sequential walker —
+  // only the orchestration around them became concurrent. A branch returns `chosen` (which routes its edges).
+  const executeNode = async (node: WorkflowNode): Promise<NodeResult & { chosen?: string }> => {
+    if (node.type === 'trigger') {
+      const output = { trigger };
+      await upsertStepRun(run.id, node.id, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
+      return { ok: true, output, onError: 'halt' };
+    }
+    if (node.type === 'branch') return runBranchNode(run.id, node, log, views); // deterministic; no run, no spawn
+    if (node.type === 'agent') return runAgentNode(run.id, slug, node, home, opts, log, views); // spawns a real run
+    if (node.type === 'integration') return runIntegrationNode(run.id, node, home, log, views); // Composio action
+    // trigger + agent + integration + branch are all the walker executes; anything else is an honest not-yet error.
+    throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration + branch)`);
+  };
+
   let finalStatus: WorkflowRunStatus = 'completed';
   let anyFailed = false; // a node failed but onError='continue' kept the walk going → run ends 'failed'
+  let halted = false;    // an onError='halt' failure: stop launching NEW nodes, let in-flight ones drain
+  const maxParallel = Math.max(1, opts.maxParallel ?? DEFAULT_MAX_PARALLEL);
+  const inflight = new Map<string, Promise<{ nodeId: string } & NodeResult & { chosen?: string }>>();
+
   try {
-    for (const nodeId of topoOrder(snapshot)) {
-      // Cancellation is checked between nodes; the active agent node is cancelled via its own runs row.
-      if ((await getWorkflowRun(run.id))?.cancelRequested) {
-        finalStatus = 'cancelled';
-        break;
-      }
+    // Ready-set scheduler: each tick launch every decidable+reached node (skipping the unreached instantly),
+    // up to maxParallel in flight, then await the next completion and fold its result back in. Independent
+    // nodes (a fan-out's branches) run concurrently; a merge waits because it isn't decidable until all its
+    // branches are terminal. A sequential chain still serializes — a node's sole predecessor must finish first.
+    while (true) {
+      // Cancellation is checked each tick; in-flight agent nodes are independently cancelled via their runs row.
+      if ((await getWorkflowRun(run.id))?.cancelRequested) { finalStatus = 'cancelled'; break; }
       await touchWorkflowRun(run.id); // liveness heartbeat for the reaper
 
-      if (views.has(nodeId)) continue; // already completed (this run or a prior attempt) — out-edges seeded
+      if (!halted) {
+        // Greedy + declaration-order: decidableNodes yields in graph order, so when slots are scarce the
+        // earlier-declared decidable nodes win them. Order-fair, not throughput-fair — fine for small graphs
+        // (a freed slot always drains the backlog next tick; a DAG can't starve a node forever).
+        for (const nodeId of decidableNodes(snapshot, terminal, started)) {
+          if (inflight.size >= maxParallel) break; // slot-bound; a freed slot picks these up next tick
+          const node = nodeById(snapshot, nodeId);
+          started.add(nodeId);
+          if (!node) { terminal.add(nodeId); continue; } // defensive: id not in graph
 
-      const node = nodeById(snapshot, nodeId);
-      if (!node) continue; // topoOrder only yields graph node ids; defensive
+          // Branch routing (6a): a non-trigger node runs only if an upstream node routed an edge into it. No
+          // active incoming edge (a not-taken branch path, or an all-skipped join) → record `skipped` instantly
+          // (no slot, no promise); it seeds no views and routes no edges, so the skip propagates downstream.
+          if (node.type !== 'trigger' && !hasActiveIncomer(snapshot, nodeId, selectedEdges)) {
+            await upsertStepRun(run.id, nodeId, { status: 'skipped', startedAt: new Date(), endedAt: new Date() });
+            terminal.add(nodeId);
+            continue;
+          }
+          inflight.set(nodeId, executeNode(node).then((r) => ({ nodeId, ...r })));
+        }
+      }
 
-      // Branch routing: a non-trigger node runs only when an upstream node routed an edge into it. No active
-      // incoming edge (a not-taken branch path, or an unreachable node) → record `skipped` and move on: a
-      // skipped node seeds no views and activates no out-edges, so the skip propagates to its descendants.
-      if (node.type !== 'trigger' && !hasActiveIncomer(snapshot, nodeId, selectedEdges)) {
-        await upsertStepRun(run.id, nodeId, { status: 'skipped', startedAt: new Date(), endedAt: new Date() });
+      if (inflight.size === 0) break; // nothing running and nothing left to launch (or halted + drained) → done
+
+      // Wait for the next node to finish; fold its outcome into the substrate, then re-evaluate the ready set.
+      const res = await Promise.race(inflight.values());
+      inflight.delete(res.nodeId);
+      terminal.add(res.nodeId);
+      const node = nodeById(snapshot, res.nodeId);
+      if (res.ok) {
+        views.set(res.nodeId, normalizeStepOutput(res.output));
+        if (node) activate(node, res.chosen);
         continue;
       }
-
-      if (node.type === 'trigger') {
-        const output = { trigger };
-        await upsertStepRun(run.id, nodeId, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
-        views.set(nodeId, normalizeStepOutput(output));
-        activate(node);
-        continue;
-      }
-
-      if (node.type === 'branch') {
-        // A deterministic condition pick (no LLM, no run) — the trigger node's twin. `chosen` routes the edges.
-        const res = await runBranchNode(run.id, node, log, views);
-        if (res.ok) {
-          views.set(nodeId, normalizeStepOutput(res.output));
-          activate(node, res.chosen);
-          continue;
-        }
-        anyFailed = true;
-        // continue = don't halt the run; but `chosen` is undefined on failure so activate() routes to NO edges
-        // — a branch that couldn't decide sends every path to `skipped` (no arbitrary route on stale data).
-        if (res.onError === 'continue') { activate(node, res.chosen); continue; }
-        break;
-      }
-
-      if (node.type === 'agent' || node.type === 'integration') {
-        // Agent = a spawned run (LLM); integration = a deterministic Composio action (no run, no spawn). Both
-        // capture an output for downstream refs and carry the same halt|continue failure policy.
-        const res = node.type === 'agent'
-          ? await runAgentNode(run.id, slug, node, home, opts, log, views)
-          : await runIntegrationNode(run.id, node, home, log, views);
-        if (res.ok) {
-          views.set(nodeId, normalizeStepOutput(res.output));
-          activate(node);
-          continue;
-        }
-        anyFailed = true;
-        // continue = the flow proceeds past this node: activate its out-edges so successors are still reached
-        // (a successor that {{refs}} this failed node hard-fails on the missing value, per the slice-3 contract).
-        if (res.onError === 'continue') { activate(node); continue; }
-        break; // onError='halt' (default) — stop; the post-loop reconciliation marks the run failed
-      }
-
-      // trigger + agent + integration + branch are all the walker executes; anything else is an honest not-yet error.
-      throw new ValidationError('node.type', `node type "${node.type}" is not supported yet (the walker handles trigger + agent + integration + branch)`);
+      anyFailed = true;
+      // continue = the flow proceeds past this node: activate its out-edges so successors are still reached (a
+      // successor {{ref}} to this failed node hard-fails on the missing value). For a failed BRANCH, `chosen`
+      // is undefined so activate() routes to NO edges — its paths all skip. halt = stop launching anything new.
+      if (res.onError === 'continue') { if (node) activate(node, res.chosen); }
+      else halted = true;
     }
   } catch (err) {
     await setWorkflowRunStatus(run.id, 'failed');

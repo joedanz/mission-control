@@ -130,6 +130,17 @@ export function topoOrder(graph: WorkflowGraph): string[] {
   return order;
 }
 
+/** The nodes ready to DECIDE right now (slice 6b — concurrent scheduling): not yet `started`, with EVERY
+ *  predecessor already `terminal` (completed | failed | skipped). This is the wait-all join — a merge node
+ *  is decidable only once all its incoming branches have resolved (a skipped branch counts as resolved, so a
+ *  not-taken branch never deadlocks the join). Pure + order-stable (graph declaration order) so the scheduler
+ *  launches deterministically; reachedness (run vs skip) is decided separately, after a node is decidable. */
+export function decidableNodes(graph: WorkflowGraph, terminal: Set<string>, started: Set<string>): string[] {
+  return graph.nodes
+    .filter((n) => !started.has(n.id) && incomers(graph, n.id).every((p) => terminal.has(p.id)))
+    .map((n) => n.id);
+}
+
 // ── Validation (the gate run by the CLI before a run, and the canvas later) ───────────
 /** Throw ValidationError on the first structural problem; return void when the graph is runnable.
  *  Checks: non-empty, unique ids, known node types, edges reference existing nodes, acyclic (DAG),

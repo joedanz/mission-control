@@ -362,7 +362,7 @@ const SPEC = [
   { name: 'workflow list', readonly: true, summary: 'List workflows', options: ['--project'] },
   { name: 'workflow get', readonly: true, summary: 'Get one workflow by slug', args: ['<slug>'] },
   { name: 'workflow create', readonly: false, summary: 'Create a workflow from a node graph', required: ['--project', '--name'], options: ['--slug', '--graph', '--description'] },
-  { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--allow-concurrent', '--async'] },
+  { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--max-parallel', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
@@ -1072,6 +1072,7 @@ withFlags(workflow.command('run'))
   .description('Run a workflow now — synchronous by default (short prompts); --async enqueues for the workflow-daemon')
   .argument('<slug>')
   .option('--timeout <sec>', 'per-agent-node timeout (sync only)', (v) => parseInt(v, 10))
+  .option('--max-parallel <n>', 'max nodes run concurrently (sync only; default 4)', (v) => parseInt(v, 10))
   .option('--allow-concurrent', 'bypass the single-flight guard')
   .option('--async', 'enqueue a queued run for the workflow-daemon and return immediately (no inline walk)')
   .action((slug: string, opts: LeafOpts) =>
@@ -1091,6 +1092,7 @@ withFlags(workflow.command('run'))
       const result = await runWorkflow(slug, {
         trigger: 'manual',
         timeoutSec: typeof opts.timeout === 'number' ? (opts.timeout as number) : undefined,
+        maxParallel: typeof opts.maxParallel === 'number' ? (opts.maxParallel as number) : undefined,
         allowConcurrent: !!opts.allowConcurrent,
         log: (m) => process.stderr.write(`[wf] ${m}\n`),
       });
