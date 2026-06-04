@@ -352,13 +352,13 @@ const SPEC = [
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
   { name: 'integration set', readonly: false, summary: 'Upsert an integration status (idempotent)', args: ['<slug>', '<type>', '<status>'] },
   { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
-  { name: 'composio catalog', readonly: true, summary: 'List supported Composio toolkits' },
-  { name: 'composio connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
-  { name: 'composio status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
-  { name: 'composio list', readonly: true, summary: "List a project's Composio connections", args: ['<slug>'] },
-  { name: 'composio disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
-  { name: 'composio mcp-config', readonly: true, summary: "Resolve a project's active connections into an mcpServers map", args: ['<slug>'] },
-  { name: 'composio refresh', readonly: false, summary: "Re-poll a project's Composio connections; emit events on status changes", args: ['<slug>'] },
+  { name: 'mcp catalog', readonly: true, summary: 'List supported Composio toolkits' },
+  { name: 'mcp connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
+  { name: 'mcp status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
+  { name: 'mcp list', readonly: true, summary: "List a project's MCP connections", args: ['<slug>'] },
+  { name: 'mcp disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
+  { name: 'mcp config', readonly: true, summary: "Resolve a project's active connections into an mcpServers map", args: ['<slug>'] },
+  { name: 'mcp refresh', readonly: false, summary: "Re-poll a project's MCP connections; emit events on status changes", args: ['<slug>'] },
   { name: 'workflow list', readonly: true, summary: 'List workflows', options: ['--project'] },
   { name: 'workflow get', readonly: true, summary: 'Get one workflow by slug', args: ['<slug>'] },
   { name: 'workflow create', readonly: false, summary: 'Create a workflow from a node graph', required: ['--project', '--name'], options: ['--slug', '--graph', '--description'] },
@@ -882,13 +882,13 @@ withFlags(integration.command('list'))
     }),
   );
 
-// ── composio ──
-const composio = program.command('composio').description('Manage Composio toolkit connections');
+// ── mcp ──
+const mcp = program.command('mcp').description('Manage MCP server connections (Composio toolkits + remote)');
 
-withFlags(composio.command('catalog'))
+withFlags(mcp.command('catalog'))
   .description('List supported Composio toolkits')
   .action((opts: LeafOpts) =>
-    emit('composio catalog', opts, async () => {
+    emit('mcp catalog', opts, async () => {
       const { COMPOSIO_CATALOG } = await import('../lib/composio-catalog');
       const items = Object.entries(COMPOSIO_CATALOG).map(([slug, entry]) => ({
         slug,
@@ -902,12 +902,12 @@ withFlags(composio.command('catalog'))
     }),
   );
 
-withFlags(composio.command('connect'))
+withFlags(mcp.command('connect'))
   .description('Start a Composio connection (prints authorize link)')
   .argument('<slug>')
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
-    emit('composio connect', opts, async () => {
+    emit('mcp connect', opts, async () => {
       ensureDbCredentials();
       const { connectStart } = await import('../lib/composio-connections');
       const { linkUrl, connection } = await connectStart(slug, toolkit);
@@ -915,18 +915,18 @@ withFlags(composio.command('connect'))
         data: { linkUrl, connection },
         human: () => {
           console.log(`Open to authorize:\n${linkUrl}`);
-          console.log(`Then: mc composio status ${slug} ${toolkit}`);
+          console.log(`Then: mc mcp status ${slug} ${toolkit}`);
         },
       };
     }),
   );
 
-withFlags(composio.command('status'))
+withFlags(mcp.command('status'))
   .description('Poll a Composio connection status')
   .argument('<slug>')
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
-    emit('composio status', opts, async () => {
+    emit('mcp status', opts, async () => {
       ensureDbCredentials();
       const { connectPoll } = await import('../lib/composio-connections');
       const connection = await connectPoll(slug, toolkit);
@@ -934,11 +934,11 @@ withFlags(composio.command('status'))
     }),
   );
 
-withFlags(composio.command('list'))
-  .description("List a project's Composio connections")
+withFlags(mcp.command('list'))
+  .description("List a project's MCP connections")
   .argument('<slug>')
   .action((slug: string, opts: LeafOpts) =>
-    emit('composio list', opts, async () => {
+    emit('mcp list', opts, async () => {
       ensureDbCredentials();
       const { listConnections } = await import('../lib/composio-connections');
       const items = await listConnections(slug);
@@ -952,12 +952,12 @@ withFlags(composio.command('list'))
     }),
   );
 
-withFlags(composio.command('disconnect'))
+withFlags(mcp.command('disconnect'))
   .description('Disconnect a Composio toolkit')
   .argument('<slug>')
   .argument('<toolkit>')
   .action((slug: string, toolkit: string, opts: LeafOpts) =>
-    emit('composio disconnect', opts, async () => {
+    emit('mcp disconnect', opts, async () => {
       ensureDbCredentials();
       const { disconnect } = await import('../lib/composio-connections');
       const connection = await disconnect(slug, toolkit);
@@ -965,11 +965,11 @@ withFlags(composio.command('disconnect'))
     }),
   );
 
-withFlags(composio.command('mcp-config'))
+withFlags(mcp.command('config'))
   .description("Resolve a project's active connections into an mcpServers map")
   .argument('<slug>')
   .action((slug: string, opts: LeafOpts) =>
-    emit('composio mcp-config', opts, async () => {
+    emit('mcp config', opts, async () => {
       ensureDbCredentials();
       const { resolveProjectMcpServers } = await import('../lib/composio-connections');
       const mcpServers = await resolveProjectMcpServers(slug);
@@ -983,11 +983,11 @@ withFlags(composio.command('mcp-config'))
     }),
   );
 
-withFlags(composio.command('refresh'))
-  .description("Re-poll a project's Composio connections; emit events on status changes")
+withFlags(mcp.command('refresh'))
+  .description("Re-poll a project's MCP connections; emit events on status changes")
   .argument('<slug>')
   .action((slug: string, opts: LeafOpts) =>
-    emit('composio refresh', opts, async () => {
+    emit('mcp refresh', opts, async () => {
       ensureDbCredentials();
       const { refreshConnections } = await import('../lib/composio-connections');
       const refreshed = await refreshConnections(slug);
