@@ -7,7 +7,7 @@ import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProjec
 import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent, ComposioApiError } from './composio-api';
 import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
 import { createEvent } from './mutations';
-import type { ComposioConnection, ConnectionStatus, McpServerConfig } from './db/schema';
+import type { McpConnection, ConnectionStatus, McpServerConfig } from './db/schema';
 import { NotFoundError, ValidationError } from './validation';
 
 /** Ensure the shared auth-config + MCP server exist for a toolkit; cache + return their ids. Idempotent
@@ -29,7 +29,7 @@ export async function ensureToolkit(slug: string): Promise<{ authConfigId: strin
 
 /** Begin connecting a project to a toolkit: ensure resources, start the hosted OAuth link, store the
  *  in-flight connection. Returns the link the operator opens to authorize. */
-export async function connectStart(projectSlug: string, toolkitSlug: string): Promise<{ linkUrl: string; connection: ComposioConnection }> {
+export async function connectStart(projectSlug: string, toolkitSlug: string): Promise<{ linkUrl: string; connection: McpConnection }> {
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const { authConfigId } = await ensureToolkit(toolkitSlug);
@@ -54,7 +54,7 @@ export async function connectStart(projectSlug: string, toolkitSlug: string): Pr
 }
 
 /** Poll Composio for the current status of a project's toolkit connection; persist + return it. */
-export async function connectPoll(projectSlug: string, toolkitSlug: string): Promise<ComposioConnection> {
+export async function connectPoll(projectSlug: string, toolkitSlug: string): Promise<McpConnection> {
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const conn = await getConnection(projectId, toolkitSlug);
@@ -64,14 +64,14 @@ export async function connectPoll(projectSlug: string, toolkitSlug: string): Pro
   return updated ?? conn;
 }
 
-export async function listConnections(projectSlug: string): Promise<ComposioConnection[]> {
+export async function listConnections(projectSlug: string): Promise<McpConnection[]> {
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   return listConnectionsByProject(projectId);
 }
 
 /** Revoke at Composio + mark the connection disconnected. */
-export async function disconnect(projectSlug: string, toolkitSlug: string): Promise<ComposioConnection> {
+export async function disconnect(projectSlug: string, toolkitSlug: string): Promise<McpConnection> {
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const conn = await getConnection(projectId, toolkitSlug);
