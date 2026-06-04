@@ -29,6 +29,7 @@ import {
   type BranchCase,
   type TriggerNodeData,
   type WorkflowSchedule,
+  type WorkflowEventTrigger,
 } from './db/schema';
 import { ELSE } from './workflow-branch';
 
@@ -268,13 +269,19 @@ export function readBranchNodeData(node: WorkflowNode): BranchNodeData {
   return out;
 }
 
-/** Validate + return a type='trigger' node's config (slice 7). A trigger with no `schedule` is a manual
- *  trigger (fires only via `mc workflow run` / the canvas). A `schedule` must carry EXACTLY ONE of cron /
- *  intervalSec (cron parseable by croner; intervalSec an integer ≥ SCHEDULE_MIN_INTERVAL_SEC — each fire is a
- *  paid run), plus an optional valid IANA timezone for the cron. Reuses the profile scheduler's validators so
- *  a bad schedule is rejected at authoring (mc workflow create) rather than throwing inside the daemon tick. */
+/** Validate + return a type='trigger' node's config (slices 7–8). A trigger with neither `schedule` nor
+ *  `event` is a manual trigger (fires only via `mc workflow run` / the canvas). A `schedule` (slice 7) must
+ *  carry EXACTLY ONE of cron / intervalSec (cron parseable by croner; intervalSec an integer ≥
+ *  SCHEDULE_MIN_INTERVAL_SEC — each fire is a paid run), plus an optional valid IANA timezone. An `event`
+ *  (slice 8) makes the workflow fire from the HMAC-verified webhook route, with an optional event-type
+ *  allowlist. A trigger carries AT MOST ONE of schedule | event. Reuses the profile scheduler's validators so
+ *  a bad config is rejected at authoring (mc workflow create) rather than throwing inside the daemon/route. */
 export function readTriggerNodeData(node: WorkflowNode): TriggerNodeData {
   const data = (node.data ?? {}) as Record<string, unknown>;
+  if (data.schedule != null && data.event != null) {
+    throw new ValidationError('node.data', `trigger node "${node.id}" carries both a schedule and an event — a trigger fires exactly one way`);
+  }
+  if (data.event != null) return { event: readEventTrigger(node, data.event) };
   if (data.schedule == null) return {};
   if (!isObject(data.schedule)) throw new ValidationError('node.data.schedule', `trigger node "${node.id}" has a malformed schedule`);
   const s = data.schedule;
@@ -303,8 +310,35 @@ export function readTriggerNodeData(node: WorkflowNode): TriggerNodeData {
   return { schedule };
 }
 
+/** Validate + return a trigger node's optional `event` config (slice 8). `source` (if set) is a non-blank
+ *  operator label; `types` (if set) is an array of non-blank event-type strings (the webhook route's
+ *  allowlist). Absent fields are simply omitted — an empty event ({}) is a valid "fire on any authenticated
+ *  POST" trigger. */
+function readEventTrigger(node: WorkflowNode, raw: unknown): WorkflowEventTrigger {
+  if (!isObject(raw)) throw new ValidationError('node.data.event', `trigger node "${node.id}" has a malformed event config`);
+  const event: WorkflowEventTrigger = {};
+  if (raw.source != null && raw.source !== '') {
+    if (typeof raw.source !== 'string') throw new ValidationError('node.data.event.source', `trigger node "${node.id}" event source must be a string`);
+    event.source = raw.source;
+  }
+  if (raw.types != null) {
+    if (!Array.isArray(raw.types) || raw.types.some((t) => typeof t !== 'string' || t.trim() === '')) {
+      throw new ValidationError('node.data.event.types', `trigger node "${node.id}" event types must be an array of non-blank strings`);
+    }
+    event.types = raw.types as string[];
+  }
+  return event;
+}
+
 /** The entry trigger's schedule, or null for a manual (un-scheduled) trigger. The workflow-daemon reads this to
  *  decide which active workflows fire on a cadence. Assumes a validated graph (exactly one trigger node). */
 export function triggerSchedule(graph: WorkflowGraph): WorkflowSchedule | null {
   return readTriggerNodeData(entryNode(graph)).schedule ?? null;
+}
+
+/** The entry trigger's event config, or null for a non-event (manual/cron) trigger. The webhook route reads
+ *  this to decide whether a workflow accepts external events and to apply the optional event-type filter.
+ *  Assumes a validated graph (exactly one trigger node). */
+export function triggerEvent(graph: WorkflowGraph): WorkflowEventTrigger | null {
+  return readTriggerNodeData(entryNode(graph)).event ?? null;
 }

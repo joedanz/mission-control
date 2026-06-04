@@ -10,7 +10,9 @@ import { validateGraph } from './workflows';
 import { NotFoundError, ConflictError } from './validation';
 import type { Workflow, WorkflowRun, WorkflowTrigger } from './db/schema';
 
-export type EnqueueOpts = { trigger?: WorkflowTrigger; allowConcurrent?: boolean };
+// `context` (slice 8) is the trigger payload (e.g. a webhook body) persisted onto workflow_runs.context; the
+// walker exposes it to the graph as {{trigger.output.*}}. Manual/cron callers omit it (context stays null).
+export type EnqueueOpts = { trigger?: WorkflowTrigger; allowConcurrent?: boolean; context?: unknown };
 
 /** Look up + validate a workflow and enforce the single-flight guard (refuse a second run while one is queued
  *  OR running — so a not-yet-claimed queued run still blocks a duplicate). Shared by the synchronous runner
@@ -30,5 +32,5 @@ export async function prepareWorkflowRun(slug: string, opts: EnqueueOpts = {}): 
  *  so the web route imports + calls it directly (the daemon owns execution). */
 export async function enqueueWorkflowRun(slug: string, opts: EnqueueOpts = {}): Promise<WorkflowRun> {
   const wf = await prepareWorkflowRun(slug, opts);
-  return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued' });
+  return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued', context: opts.context });
 }

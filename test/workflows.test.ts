@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, triggerSchedule, assertWorkflowStatus,
+  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, triggerSchedule, triggerEvent, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -335,6 +335,41 @@ describe('workflows — readTriggerNodeData (slice 7 schedule)', () => {
   it('validateGraph rejects a workflow whose trigger schedule is malformed', () => {
     const bad = G([{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { schedule: { intervalSec: 5 } } }, agent('a')], [edge('e1', 't', 'a')]);
     expect(() => validateGraph(bad)).toThrow(/intervalSec/i);
+  });
+});
+
+describe('workflows — readTriggerNodeData (slice 8 event)', () => {
+  const triggerWith = (data: Record<string, unknown>): WorkflowNode => ({ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data });
+
+  it('accepts an event trigger with a source + types allowlist', () => {
+    const d = readTriggerNodeData(triggerWith({ event: { source: 'github', types: ['issues', 'pull_request'] } }));
+    expect(d.event).toEqual({ source: 'github', types: ['issues', 'pull_request'] });
+  });
+
+  it('accepts an empty event config (fire on any authenticated POST)', () => {
+    expect(readTriggerNodeData(triggerWith({ event: {} })).event).toEqual({});
+  });
+
+  it('rejects a trigger carrying both a schedule and an event', () => {
+    expect(() => readTriggerNodeData(triggerWith({ schedule: { intervalSec: 600 }, event: {} }))).toThrow(/exactly one way/i);
+  });
+
+  it('rejects a malformed event config and non-string types', () => {
+    expect(() => readTriggerNodeData(triggerWith({ event: 'github' }))).toThrow(/malformed event/i);
+    expect(() => readTriggerNodeData(triggerWith({ event: { types: 'issues' } }))).toThrow(/types/i);
+    expect(() => readTriggerNodeData(triggerWith({ event: { types: ['issues', ''] } }))).toThrow(/types/i);
+    expect(() => readTriggerNodeData(triggerWith({ event: { source: 7 } }))).toThrow(/source/i);
+  });
+
+  it('triggerEvent reads the entry node event config, or null for a non-event trigger', () => {
+    const ev = G([{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { event: { types: ['issues'] } } }, agent('a')], [edge('e1', 't', 'a')]);
+    expect(triggerEvent(ev)).toEqual({ types: ['issues'] });
+    expect(triggerEvent(linear())).toBeNull();
+  });
+
+  it('validateGraph rejects a workflow whose trigger event is malformed', () => {
+    const bad = G([{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { event: { types: [42] } } }, agent('a')], [edge('e1', 't', 'a')]);
+    expect(() => validateGraph(bad)).toThrow(/types/i);
   });
 });
 
