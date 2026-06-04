@@ -13,7 +13,7 @@ import { projects, runs, events, workflowRuns, type WorkflowGraph } from '../lib
 import { createProject } from '../lib/mutations';
 import { reapStaleWorkflowRuns } from '../lib/mutations';
 import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
-import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowStatus } from '../lib/workflow-store';
+import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, listStepRuns, setWorkflowStatus } from '../lib/workflow-store';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
@@ -142,6 +142,36 @@ describe('workflow daemon — drains queued runs', () => {
     expect(runs.length).toBe(1); // the in-flight run blocked a duplicate cron fire
     expect(runs[0].id).toBe(inflight.id);
   });
+
+  it(
+    "an event run's webhook payload reaches the graph via {{trigger.output.*}} (slice 8)",
+    async () => {
+      // A trigger → agent graph whose agent prompt refs the webhook payload. The enqueued event run carries the
+      // payload in context; the walker stores it on the trigger step's `data`, so {{trigger.output.action}}
+      // interpolates into the agent's prompt (asserted via the step's stored resolved prompt). $0 stub executor.
+      const eventGraph: WorkflowGraph = {
+        nodes: [
+          { id: 'trigger', type: 'trigger', position: { x: 0, y: 0 }, data: { event: { types: ['issues'] } } },
+          { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'triage issue: {{trigger.output.action}}' } },
+        ],
+        edges: [{ id: 'e1', source: 'trigger', target: 'a' }],
+      };
+      const slug = `vt-wfd-event-${Date.now()}`;
+      await createWorkflow({ projectId, slug, name: slug, graph: eventGraph });
+      await setWorkflowStatus(slug, 'active');
+      const run = await enqueueWorkflowRun(slug, { trigger: 'event', context: { action: 'opened' } });
+
+      runDaemonOnce('true');
+
+      expect((await getWorkflowRun(run.id))?.status).toBe('completed');
+      const steps = await listStepRuns(run.id);
+      const agentStep = steps.find((s) => s.nodeId === 'a');
+      expect(agentStep?.status).toBe('completed');
+      // The {{trigger.output.action}} ref resolved from run.context → the resolved prompt was spawned + stored.
+      expect((agentStep?.output as { prompt?: string })?.prompt).toContain('triage issue: opened');
+    },
+    60000,
+  );
 
   it('reaper fails a stale running workflow run and emits workflow.abandoned', async () => {
     const slug = `vt-wfd-stale-${Date.now()}`;

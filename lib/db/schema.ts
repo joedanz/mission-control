@@ -489,7 +489,18 @@ export type WorkflowSchedule = {
   intervalSec?: number; // fixed interval in seconds (floor SCHEDULE_MIN_INTERVAL_SEC — each fire is a paid run)
   timezone?: string; // IANA zone for cron evaluation, e.g. America/New_York
 };
-export type TriggerNodeData = { schedule?: WorkflowSchedule };
+// An `event` trigger (slice 8) fires from an EXTERNAL HTTP webhook (POST /api/workflows/<slug>/webhook,
+// HMAC-verified against WORKFLOW_WEBHOOK_SECRET) — the payload lands in workflow_runs.context and is exposed
+// to the graph as {{trigger.output.*}}. `source` is a free-form operator label (e.g. 'github'); `types` is an
+// optional event-type allowlist matched against the X-Event-Type header (X-GitHub-Event) — empty/absent fires
+// on any authenticated POST, so the firehose can be narrowed (e.g. ['issues']) to avoid paying for runs on
+// irrelevant events.
+export type WorkflowEventTrigger = {
+  source?: string;
+  types?: string[];
+};
+// A trigger node carries AT MOST ONE of schedule | event (manual = neither). No migration — node data is jsonb.
+export type TriggerNodeData = { schedule?: WorkflowSchedule; event?: WorkflowEventTrigger };
 
 export const workflows = pgTable(
   'workflows',

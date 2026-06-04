@@ -367,6 +367,7 @@ const SPEC = [
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
   { name: 'workflow activate', readonly: false, summary: 'Activate a workflow (status → active; cron-scheduled triggers then fire via the workflow-daemon)', args: ['<slug>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
+  { name: 'workflow webhook-url', readonly: true, summary: 'Print the external webhook URL + HMAC signing details for an event-triggered workflow', args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
   { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
@@ -1166,6 +1167,43 @@ withFlags(workflow.command('pause'))
       const wf = await setWorkflowStatus(slug, 'paused');
       if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
       return { data: wf, human: () => console.log(`${wf.slug}: ${wf.status}`) };
+    }),
+  );
+
+withFlags(workflow.command('webhook-url'))
+  .description('Print the external webhook URL + HMAC signing details for an event-triggered workflow')
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow webhook-url', opts, async () => {
+      ensureDbCredentials();
+      const { getWorkflowBySlug } = await import('../lib/workflow-store');
+      const { triggerEvent } = await import('../lib/workflows');
+      const wf = await getWorkflowBySlug(slug);
+      if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
+      const event = triggerEvent(wf.graph); // null if the trigger node has no event config
+      const path = `/api/workflows/${wf.slug}/webhook`;
+      const base = process.env.MC_PUBLIC_BASE_URL?.replace(/\/$/, '');
+      const url = base ? `${base}${path}` : null;
+      const data = {
+        slug: wf.slug,
+        status: wf.status,
+        isEventTrigger: event !== null,
+        eventTypes: event?.types ?? null,
+        path,
+        url,
+        signatureHeader: 'X-Hub-Signature-256',
+        secretEnv: 'WORKFLOW_WEBHOOK_SECRET',
+      };
+      return {
+        data,
+        human: () => {
+          console.log(url ?? `${path}  (set MC_PUBLIC_BASE_URL for the full URL)`);
+          console.log('  sign the RAW body: X-Hub-Signature-256: sha256=HMAC-SHA256(WORKFLOW_WEBHOOK_SECRET, body)');
+          if (!event) console.log(`  ⚠ "${wf.slug}" is not an event-triggered workflow (its trigger node has no event config)`);
+          else if (wf.status !== 'active') console.log(`  ⚠ "${wf.slug}" is ${wf.status} — activate it (mc workflow activate) to accept webhooks`);
+          else if (event.types?.length) console.log(`  fires only on event types: ${event.types.join(', ')} (matched against X-GitHub-Event)`);
+        },
+      };
     }),
   );
 

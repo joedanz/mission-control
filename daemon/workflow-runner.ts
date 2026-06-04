@@ -153,7 +153,10 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   // only the orchestration around them became concurrent. A branch returns `chosen` (which routes its edges).
   const executeNode = async (node: WorkflowNode): Promise<NodeResult & { chosen?: string }> => {
     if (node.type === 'trigger') {
-      const output = { trigger };
+      // Expose the trigger payload (e.g. a webhook body in run.context, slice 8) to the graph: stored under
+      // `data`, normalizeStepOutput projects it into the `output` ref-root, so {{trigger.output.issue.title}}
+      // resolves via the SAME path an integration step uses (no ref-resolver change). Manual/cron → undefined.
+      const output = { trigger, data: run.context ?? undefined };
       await upsertStepRun(run.id, node.id, { status: 'completed', startedAt: new Date(), endedAt: new Date(), output });
       return { ok: true, output, onError: 'halt' };
     }
