@@ -479,6 +479,18 @@ export type BranchCondition = { left: unknown; op: BranchOp; right?: unknown };
 export type BranchCase = { name: string; when: BranchCondition };
 export type BranchNodeData = { cases: BranchCase[]; onError?: WorkflowOnError };
 
+// Config for a type='trigger' node (node.data, slice 7). A manual trigger carries no `schedule` (it fires
+// only via `mc workflow run` / the canvas Run button). A `schedule` makes an ACTIVE workflow fire on a
+// cadence: the workflow-daemon enqueues a 'cron'-triggered run whenever the schedule is due (reusing the
+// scheduler's isDue). Exactly ONE of cron / intervalSec (validated); timezone (IANA) applies to a cron and
+// is resolved by croner (omitted → the daemon process's local time). No migration — node data is jsonb.
+export type WorkflowSchedule = {
+  cron?: string; // cron expression (croner)
+  intervalSec?: number; // fixed interval in seconds (floor SCHEDULE_MIN_INTERVAL_SEC — each fire is a paid run)
+  timezone?: string; // IANA zone for cron evaluation, e.g. America/New_York
+};
+export type TriggerNodeData = { schedule?: WorkflowSchedule };
+
 export const workflows = pgTable(
   'workflows',
   {

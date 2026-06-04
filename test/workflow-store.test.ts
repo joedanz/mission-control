@@ -10,7 +10,7 @@ import {
   createWorkflow, getWorkflowBySlug, getWorkflowById, listWorkflows, setWorkflowStatus,
   createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowRunStatus,
   requestWorkflowRunCancel, touchWorkflowRun, countPendingWorkflowRuns,
-  claimWorkflowRun, listQueuedWorkflowRuns,
+  claimWorkflowRun, listQueuedWorkflowRuns, latestCronRunAt,
   upsertStepRun, setStepRunStatus, listStepRuns,
 } from '../lib/workflow-store';
 
@@ -62,6 +62,16 @@ describe('workflow store — workflows', () => {
     expect((await setWorkflowStatus(slug, 'paused'))?.status).toBe('paused');
   });
 
+  it('listWorkflows filters by status (the daemon cron scan reads only active)', async () => {
+    const p = await freshProject();
+    const activeSlug = tag();
+    await createWorkflow({ projectId: p.id, slug: activeSlug, name: 'A', graph: graph() });
+    await createWorkflow({ projectId: p.id, slug: tag(), name: 'B', graph: graph() }); // stays draft
+    await setWorkflowStatus(activeSlug, 'active');
+    const active = await listWorkflows({ projectId: p.id, status: 'active' });
+    expect(active.map((w) => w.slug)).toEqual([activeSlug]);
+  });
+
   it('getWorkflowBySlug returns null when absent', async () => {
     expect(await getWorkflowBySlug('nope-' + tag())).toBeNull();
   });
@@ -96,6 +106,18 @@ describe('workflow store — runs', () => {
     const first = await claimWorkflowRun(run.id);
     expect(first?.status).toBe('running');
     expect(await claimWorkflowRun(run.id)).toBeNull(); // already claimed
+  });
+
+  it('latestCronRunAt returns the newest cron run (ignoring manual runs), or null when none', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    expect(await latestCronRunAt(wf.id)).toBeNull(); // never cron-fired
+    // A manual run does NOT count as a cron fire (it must not reset the schedule clock).
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    expect(await latestCronRunAt(wf.id)).toBeNull();
+    const cron = await createWorkflowRun({ workflowId: wf.id, trigger: 'cron', graphSnapshot: wf.graph });
+    const at = await latestCronRunAt(wf.id);
+    expect(at?.getTime()).toBe(cron.startedAt.getTime());
   });
 
   it('listQueuedWorkflowRuns returns queued runs only (the daemon poll)', async () => {

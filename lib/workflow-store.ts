@@ -42,9 +42,13 @@ export async function getWorkflowById(id: string): Promise<Workflow | null> {
   return rows[0] ?? null;
 }
 
-export async function listWorkflows(opts: { projectId?: string } = {}): Promise<Workflow[]> {
+export async function listWorkflows(opts: { projectId?: string; status?: WorkflowStatus } = {}): Promise<Workflow[]> {
+  const filters = [
+    ...(opts.projectId ? [eq(workflows.projectId, opts.projectId)] : []),
+    ...(opts.status ? [eq(workflows.status, opts.status)] : []),
+  ];
   const q = db.select().from(workflows).$dynamic();
-  if (opts.projectId) q.where(eq(workflows.projectId, opts.projectId));
+  if (filters.length) q.where(and(...filters));
   return q.orderBy(desc(workflows.createdAt));
 }
 
@@ -126,6 +130,22 @@ export async function countPendingWorkflowRuns(workflowId: string): Promise<numb
     .from(workflowRuns)
     .where(and(eq(workflowRuns.workflowId, workflowId), inArray(workflowRuns.status, ['queued', 'running'])));
   return rows[0]?.c ?? 0;
+}
+
+/** The startedAt of a workflow's most recent CRON-triggered run, or null if it has never cron-fired. startedAt
+ *  is stamped at ENQUEUE (defaultNow on create), not at claim — which is the right cron anchor (fires are spaced
+ *  from the scheduled instant, not from execution start). Anchors the cron due-math (isDue) in the workflow-
+ *  daemon: only trigger='cron' runs reset the schedule clock, so a manual / async test-run between fires doesn't
+ *  skip a scheduled one. Before the first fire the daemon falls back to the workflow's updatedAt (so a freshly-
+ *  activated cron waits for its next real instant). */
+export async function latestCronRunAt(workflowId: string): Promise<Date | null> {
+  const rows = await db
+    .select({ startedAt: workflowRuns.startedAt })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.trigger, 'cron')))
+    .orderBy(desc(workflowRuns.startedAt))
+    .limit(1);
+  return rows[0]?.startedAt ?? null;
 }
 
 // Terminal = the run is over; only then do we stamp endedAt. 'queued' and 'running' are both in-flight.

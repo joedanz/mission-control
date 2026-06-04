@@ -13,7 +13,7 @@ import { projects, runs, events, workflowRuns, type WorkflowGraph } from '../lib
 import { createProject } from '../lib/mutations';
 import { reapStaleWorkflowRuns } from '../lib/mutations';
 import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
-import { createWorkflow, createWorkflowRun, getWorkflowRun } from '../lib/workflow-store';
+import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowStatus } from '../lib/workflow-store';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
@@ -30,6 +30,16 @@ function runDaemonOnce(exec: string): void {
 const graph = (): WorkflowGraph => ({
   nodes: [
     { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+    { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'do the thing' } },
+  ],
+  edges: [{ id: 'e1', source: 't', target: 'a' }],
+});
+
+// Same shape, but the trigger carries an interval schedule (slice 7) — the workflow-daemon enqueues a cron run
+// when it's due. Interval mode keeps the test deterministic (cron's minute resolution is awkward to time).
+const scheduledGraph = (intervalSec = 60): WorkflowGraph => ({
+  nodes: [
+    { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { schedule: { intervalSec } } },
     { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'do the thing' } },
   ],
   edges: [{ id: 'e1', source: 't', target: 'a' }],
@@ -80,6 +90,58 @@ describe('workflow daemon — drains queued runs', () => {
     },
     60000,
   );
+
+  it(
+    'cron scan enqueues + walks a due active workflow to completed (and leaves a not-due one alone)',
+    async () => {
+      // DUE: active, interval 60, with a prior cron run backdated 2 min (anchor) → due now.
+      const dueSlug = `vt-wfd-cron-due-${Date.now()}`;
+      const dueWf = await createWorkflow({ projectId, slug: dueSlug, name: dueSlug, graph: scheduledGraph(60) });
+      await setWorkflowStatus(dueSlug, 'active');
+      const seed = await createWorkflowRun({ workflowId: dueWf.id, trigger: 'cron', graphSnapshot: dueWf.graph, status: 'completed' });
+      await db.update(workflowRuns).set({ startedAt: new Date(Date.now() - 120_000) }).where(eq(workflowRuns.id, seed.id));
+
+      // NOT DUE: active, interval 60, with a prior cron run at ~now → not due for another minute.
+      const freshSlug = `vt-wfd-cron-fresh-${Date.now()}`;
+      const freshWf = await createWorkflow({ projectId, slug: freshSlug, name: freshSlug, graph: scheduledGraph(60) });
+      await setWorkflowStatus(freshSlug, 'active');
+      await createWorkflowRun({ workflowId: freshWf.id, trigger: 'cron', graphSnapshot: freshWf.graph, status: 'completed' });
+
+      // DRAFT: scheduled but not active → never scanned.
+      const draftSlug = `vt-wfd-cron-draft-${Date.now()}`;
+      const draftWf = await createWorkflow({ projectId, slug: draftSlug, name: draftSlug, graph: scheduledGraph(60) });
+
+      runDaemonOnce('true');
+
+      // The due workflow fired: a NEW cron run (distinct from the backdated seed) walked to completed.
+      const dueRuns = await listWorkflowRuns({ workflowId: dueWf.id });
+      const fired = dueRuns.filter((r) => r.id !== seed.id);
+      expect(fired.length).toBe(1);
+      expect(fired[0].trigger).toBe('cron');
+      expect(fired[0].status).toBe('completed');
+
+      // The not-due workflow stayed at its single seeded run; the draft never fired.
+      expect((await listWorkflowRuns({ workflowId: freshWf.id })).length).toBe(1);
+      expect((await listWorkflowRuns({ workflowId: draftWf.id })).length).toBe(0);
+    },
+    60000,
+  );
+
+  it('cron single-flight: a due workflow with a run already in flight is not double-enqueued', async () => {
+    // Active, due (a running cron run backdated 2 min is the anchor AND a pending run), so the scan finds it due
+    // but enqueueWorkflowRun's single-flight guard refuses a second run → exactly one run remains.
+    const slug = `vt-wfd-cron-sf-${Date.now()}`;
+    const wf = await createWorkflow({ projectId, slug, name: slug, graph: scheduledGraph(60) });
+    await setWorkflowStatus(slug, 'active');
+    const inflight = await createWorkflowRun({ workflowId: wf.id, trigger: 'cron', graphSnapshot: wf.graph, status: 'running' });
+    await db.update(workflowRuns).set({ startedAt: new Date(Date.now() - 120_000), lastHeartbeatAt: new Date() }).where(eq(workflowRuns.id, inflight.id));
+
+    runDaemonOnce('true');
+
+    const runs = await listWorkflowRuns({ workflowId: wf.id });
+    expect(runs.length).toBe(1); // the in-flight run blocked a duplicate cron fire
+    expect(runs[0].id).toBe(inflight.id);
+  });
 
   it('reaper fails a stale running workflow run and emits workflow.abandoned', async () => {
     const slug = `vt-wfd-stale-${Date.now()}`;

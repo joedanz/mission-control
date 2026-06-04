@@ -365,6 +365,7 @@ const SPEC = [
   { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--max-parallel', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
+  { name: 'workflow activate', readonly: false, summary: 'Activate a workflow (status → active; cron-scheduled triggers then fire via the workflow-daemon)', args: ['<slug>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
@@ -1139,6 +1140,19 @@ withFlags(workflow.command('cancel'))
       const active = (await listStepRuns(runId)).find((s) => s.status === 'running' && s.runId);
       if (active?.runId) await setRunCancelRequested(active.runId);
       return { data: result, human: () => console.log(`workflow run ${runId} ${wasQueued ? 'cancelled (was queued)' : 'cancel requested'}`) };
+    }),
+  );
+
+withFlags(workflow.command('activate'))
+  .description('Activate a workflow (status → active; a cron-scheduled trigger then fires via the workflow-daemon)')
+  .argument('<slug>')
+  .action((slug: string, opts: LeafOpts) =>
+    emit('workflow activate', opts, async () => {
+      ensureDbCredentials();
+      const { setWorkflowStatus } = await import('../lib/workflow-store');
+      const wf = await setWorkflowStatus(slug, 'active');
+      if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
+      return { data: wf, human: () => console.log(`${wf.slug}: ${wf.status}`) };
     }),
   );
 
