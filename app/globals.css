@@ -1959,18 +1959,20 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 
 /* Custom nodes — match the ops-board look (mono, sharp, tone-glow on live status). */
 .wf-node {
-  min-width: 132px; max-width: 220px; padding: var(--space-sm); border: 1px solid var(--line);
-  border-left-width: 3px; border-radius: var(--radius-sm); background: var(--panel);
+  min-width: 136px; max-width: 224px; padding: var(--space-sm); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--panel);
   font-family: var(--font-mono); box-shadow: 0 1px 2px color-mix(in oklch, var(--ink) 8%, transparent);
 }
-.wf-node--trigger     { border-left-color: var(--info); }
-.wf-node--agent       { border-left-color: var(--accent); }
-.wf-node--integration { border-left-color: var(--ok); }
-.wf-node--branch      { border-left-color: var(--warn); }
-.wf-node--gate        { border-left-color: var(--accent); }
-.wf-node--generic     { border-left-color: var(--ink-mute); }
+/* Type is coded by a tone dot in the head (--wf-tone). The full 1px border is then free to carry status. */
+.wf-node--trigger     { --wf-tone: var(--info); }
+.wf-node--agent       { --wf-tone: var(--accent); }
+.wf-node--integration { --wf-tone: var(--ok); }
+.wf-node--branch      { --wf-tone: var(--warn); }
+.wf-node--gate        { --wf-tone: var(--accent); }
+.wf-node--generic     { --wf-tone: var(--ink-mute); }
 .wf-node__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xs); }
-.wf-node__kind { font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); }
+.wf-node__kind { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); }
+.wf-node__kind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--wf-tone, var(--ink-mute)); flex: none; }
 .wf-node__body { margin-top: 4px; font-size: var(--fs-12); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-node__body--mono { color: var(--ink-dim); }
 .wf-node__meta { margin-top: 2px; font-size: var(--fs-11); color: var(--ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2001,8 +2003,19 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .wf-badge--failed    { color: var(--bad-ink);  background: var(--bad-soft); }
 .wf-badge--skipped   { color: var(--ink-mute); background: color-mix(in oklch, var(--ink-mute) 14%, transparent); }
 
-/* React Flow handles — small, themed to the line color. */
-.wf-canvas .react-flow__handle { width: 7px; height: 7px; background: var(--ink-mute); border: 1px solid var(--panel); }
+/* React Flow handles — themed to the line color; larger + accent-lit in edit mode so wiring is easy. */
+.wf-canvas .react-flow__handle {
+  width: 8px; height: 8px; background: var(--ink-mute); border: 1.5px solid var(--panel);
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.wf-canvas--edit .react-flow__handle { width: 10px; height: 10px; }
+.wf-canvas--edit .react-flow__handle:hover { background: var(--accent); transform: scale(1.25); }
+
+/* The node selected for editing gets an accent ring so you can see what the inspector is bound to. */
+.wf-canvas--edit .react-flow__node.selected .wf-node {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 28%, transparent);
+}
 
 /* ── Canvas authoring (slice 9b): palette + editable pane + inspector ───────────────── */
 .wf-editor { display: flex; flex-direction: column; gap: var(--space-sm); }
@@ -2018,9 +2031,10 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 }
 .wf-palette__label { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.04em; }
 .wf-palette__chip {
-  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
   border: 1px solid var(--line);
-  border-left-width: 3px;
   border-radius: var(--radius-sm);
   background: var(--panel-2);
   font-family: var(--font-mono);
@@ -2028,12 +2042,16 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
   color: var(--ink);
   cursor: grab;
   user-select: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
+.wf-palette__chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; background: var(--wf-tone, var(--ink-mute)); flex: none; }
+.wf-palette__chip:hover { border-color: color-mix(in oklch, var(--wf-tone) 45%, var(--line)); background: var(--panel); }
 .wf-palette__chip:active { cursor: grabbing; }
 .wf-editor__actions { display: flex; align-items: center; gap: var(--space-xs); margin-left: auto; }
 
-.wf-editor__body { display: grid; grid-template-columns: 1fr 248px; gap: var(--space-sm); }
-.wf-canvas--edit { background: var(--panel); }
+/* A real builder workspace: canvas + inspector share a tall row (not the read-only 480px). */
+.wf-editor__body { display: grid; grid-template-columns: 1fr 300px; gap: var(--space-sm); height: min(70vh, 720px); min-height: 520px; }
+.wf-canvas--edit { background: var(--panel); height: 100%; }
 
 .wf-inspector {
   border: 1px solid var(--line);
@@ -2041,7 +2059,7 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
   background: var(--panel);
   padding: var(--space-sm);
   overflow-y: auto;
-  max-height: 480px;
+  height: 100%;
 }
 .wf-inspector__title { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--ink-dim); margin-bottom: var(--space-xs); }
 .wf-inspector__title code { color: var(--ink-mute); }
