@@ -4,15 +4,13 @@ import { redirect, notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { getProjectBySlug, getSearchIndex } from '@/lib/queries';
-import { statusTone, statusLabel, isTaskDone } from '@/lib/ui';
+import { statusTone, statusLabel } from '@/lib/ui';
 import { TopBar } from '@/components/chrome/TopBar';
 import { TabbedPanels } from '@/components/TabbedPanels';
-import { TaskItem } from '@/components/TaskItem';
-import { AddTask } from '@/components/AddTask';
 import { ProjectCardActions } from '@/components/ProjectCardActions';
 import { ActivityFeed } from '@/components/ActivityFeed';
-import { ProjectBoard } from '@/components/board/ProjectBoard';
 import { toBoardProject } from '@/lib/board';
+import { TasksPanel } from '@/components/TasksPanel';
 import { parseGitHubRepo } from '@/lib/github';
 import { CommitsTab } from '@/components/CommitsTab';
 import { PullsTab } from '@/components/PullsTab';
@@ -70,7 +68,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const tone = statusTone(project.status);
   const integrationTasks = project.tasks.filter((t) => t.integrationType);
-  const customTasks = project.tasks.filter((t) => !t.integrationType);
   const githubRepo = parseGitHubRepo(project.repoUrl);
 
   const overview = (
@@ -112,21 +109,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     </dl>
   );
 
-  const tasksPanel = (
-    <div className="detail-tasks">
-      {customTasks.length > 0 ? (
-        <ul className="tasklist">
-          {customTasks.map((t) => (
-            <TaskItem key={t.id} id={t.id} label={t.label} notes={t.notes} done={isTaskDone(t)} />
-          ))}
-        </ul>
-      ) : (
-        <p className="detail-muted">No tasks yet.</p>
-      )}
-      <AddTask projectId={project.id} />
-    </div>
-  );
-
   const integrationsPanel = <IntegrationsTab slug={project.slug} />;
 
   const boardInitial = { projects: [toBoardProject(project, false)], runs: [] };
@@ -134,8 +116,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     done: integrationTasks.filter((t) => t.integrationStatus === 'done').length,
     total: integrationTasks.length,
   };
-  const boardPanel = (
-    <ProjectBoard slug={project.slug} initial={boardInitial} integrations={boardIntegrations} />
+  const tasksPanel = (
+    <TasksPanel
+      slug={project.slug}
+      projectId={project.id}
+      initial={boardInitial}
+      integrations={boardIntegrations}
+    />
   );
 
   const activityPanel = (
@@ -175,10 +162,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           }
         >
           <TabbedPanels
+            aliases={{ board: 'tasks' }}
             tabs={[
               { key: 'overview', label: 'Overview', content: overview },
               { key: 'tasks', label: 'Tasks', content: tasksPanel },
-              { key: 'board', label: 'Board', content: boardPanel },
               { key: 'workflows', label: 'Workflows', content: <WorkflowsTab slug={project.slug} /> },
               { key: 'integrations', label: 'Integrations', content: integrationsPanel },
               { key: 'activity', label: 'Activity', content: activityPanel },
