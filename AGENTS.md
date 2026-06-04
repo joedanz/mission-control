@@ -49,7 +49,7 @@ mc integration set <slug> <type> <status>   # upsert; idempotent
 mc integration list <slug>
 mc mcp catalog                               # list supported Composio toolkits (slug, name, tool count); no DB needed; reads COMPOSIO_API_KEY from host env (never stored)
 mc mcp connect <slug> <toolkit>              # start a Composio connection; prints OAuth authorize URL; follow up with mc mcp status. At most one connection per (project, toolkit)
-mc mcp status <slug> <toolkit>              # poll Composio and persist connection status (initializing|active|error|expired|disconnected)
+mc mcp status <slug> <toolkit>               # poll Composio and persist connection status (initializing|active|error|expired|disconnected)
 mc mcp list <slug>                           # list a project's MCP connections and their statuses
 mc mcp disconnect <slug> <toolkit>           # revoke at Composio and mark disconnected locally
 mc mcp config <slug>                         # resolve active connections into an mcpServers JSON map (daemons call this at spawn to auto-feed the agent with remote-http MCP servers for Linear/Slack/…)
