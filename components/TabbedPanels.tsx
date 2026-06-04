@@ -5,16 +5,17 @@
 
 import { useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { resolveActiveTab } from '@/lib/tabs';
 
 export type Tab = { key: string; label: string; content: React.ReactNode };
 
-export function TabbedPanels({ tabs }: { tabs: Tab[] }) {
+export function TabbedPanels({ tabs, aliases }: { tabs: Tab[]; aliases?: Record<string, string> }) {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
   const fromUrl = sp.get('tab');
-  const [activeKey, setActiveKey] = useState(
-    tabs.some((t) => t.key === fromUrl) ? (fromUrl as string) : tabs[0].key,
+  const [activeKey, setActiveKey] = useState(() =>
+    resolveActiveTab(fromUrl, tabs.map((t) => t.key), aliases),
   );
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
