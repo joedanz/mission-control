@@ -93,6 +93,30 @@ SIGINT/SIGTERM, and runs profiles independently so one slow check-in never block
 `MC_BIN` likewise to pin the `mc` CLI.
 </Note>
 
+## The workflow daemon
+
+A third always-on daemon (`npm run workflow-daemon`) executes [workflows](/workflows) off-process. Where
+auto-claim reacts to the **task queue** and the scheduler reacts to the **profile clock**, the workflow
+daemon drains the **`queued` workflow-run** queue and scans for due cron/event triggers. Each tick:
+
+- **Cron scan.** Lists `active` workflows whose trigger carries a `schedule`, and for each that's **due**
+  enqueues a `cron` run. The due-anchor is the workflow's last cron run, or — before its first fire — its
+  `updated_at`, so a freshly-activated cron waits for the next real instant instead of firing instantly.
+  The single-flight guard suppresses a fire while a run is already queued or running.
+- **Drain.** Lists `queued` runs (FIFO), `claimWorkflowRun` flips each `queued → running` race-safe (a
+  loser skips), then walks it via the shared ready-set scheduler — running independent nodes in parallel
+  up to the run's `--max-parallel`. An agent node opens a real `runs` row and spawns the resolved
+  profile through the same daemon runner the auto-claim daemon uses; integration / branch / gate nodes
+  are deterministic (no spawn).
+- **Resume.** A `paused → queued` requeue (from `mc workflow approve --async` or the canvas Approve
+  button) is just another `queued` run the daemon claims — so resuming a gate needs **no** special path.
+
+The daemon takes a single global lock, drains in-flight walks on SIGINT/SIGTERM, and supports
+`--once` / `--poll` / `--timeout` / `--grace` like its siblings. A dead walker's `running` run is
+reconciled to `failed` by the [reaper](#the-reaper--the-timing-constants) (via
+`workflow_runs_status_heartbeat_idx`); a `queued` run survives a daemon restart and is claimed later; a
+`paused` run waits for a human indefinitely (the reaper skips it).
+
 ## Composio connection refresh
 
 Composio access tokens expire. When a project has active Composio connections, run
@@ -118,6 +142,7 @@ reaper locally on a timer (`npm run reap`) or let an external scheduler hit `/ap
 | `dev` · `build` · `start` | Next.js dev server (port 3030), production build, production server. |
 | `db:generate` · `db:migrate` · `db:push` · `db:studio` | Drizzle Kit — author, apply, push, and browse the schema. |
 | `daemon` · `scheduler` · `reap` | The auto-claim daemon, the scheduler daemon, and the reaper tick. |
+| `workflow-daemon` | Drains `queued` workflow runs and fires due cron/event triggers (see above). |
 | `cli` · `test` | Run `mc` from source, and Vitest. |
 
 On a Mac the reaper, scheduler, and per-project auto-claim daemon ship as launchd plists in

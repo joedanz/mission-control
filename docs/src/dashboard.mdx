@@ -90,11 +90,11 @@ its next refresh.
 
 ## Per-project tabs
 
-Every project page always shows the same core tabs (Overview, Tasks, Board, Integrations, Activity).
-Three more — Errors, Email, and Revenue — appear automatically once you set the matching project
-field, and each pulls live data from an external service every time you open it. The table below
-covers those three plus the always-present Integrations tab (which reads from the database, not a
-live service).
+Every project page always shows the same core tabs (Overview, Tasks, Board, Integrations, Workflows,
+Activity). Three more — Errors, Email, and Revenue — appear automatically once you set the matching
+project field, and each pulls live data from an external service every time you open it. The table
+below covers those three plus the always-present Integrations and Workflows tabs (which read from the
+database, not a live service).
 
 <Frame caption="Fig. 07 — Per-project tabs and where their data comes from.">
   ![Per-project tabs diagram](/figures/fig-07-tabs.svg)
@@ -106,6 +106,7 @@ live service).
 | **Email** | `domain` is set | MX, SPF, and DMARC DNS checks — pass/fail with the raw record value. Auto-detects the email provider (Zoho, Google Workspace, Microsoft 365, Proton, Fastmail, iCloud) and also shows any manually set `emailProvider` / `emailAddress`. | Live DNS lookup (no token needed) |
 | **Revenue** | `stripeSite` is set | MRR per currency, active subscription count (shown as N+ when truncated at 1,000), and a table of active subscriptions (customer, amount, billing interval, created date). One Stripe account is shared across all projects; subscriptions are filtered by `metadata.site`. | Live Stripe Search API |
 | **Integrations** | Always present | The full Composio toolkit catalog overlaid with this project's connection statuses — Active, Initializing, Error, Expired, or Off — plus Connect / Check status / Disconnect buttons. When you return to the tab after authorizing a new connection, any still-initializing toolkit is polled automatically. See [Integrations](/integrations) for the full story. | Database read (no live Composio call on GET) |
+| **Workflows** | Always present | This project's [workflows](/workflows) on a React Flow canvas — pick one from the rail and its graph renders with a live per-node status overlay during a run. **Run** enqueues an execution; **Edit** mode lets you author the graph (drag nodes from a palette, connect them, edit each in an inspector, Save); a paused run shows an **Awaiting approval** panel with Approve / Reject. | Database read + the workflow daemon executes |
 
 <Note>
 **Setting the project fields.** Use `mc project update` to enable each tab:
