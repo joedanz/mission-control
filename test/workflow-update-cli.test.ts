@@ -20,11 +20,11 @@ afterEach(async () => {
   projectIds.length = 0;
 });
 
-type Envelope = { ok: boolean; data?: { version?: number; graph?: WorkflowGraph }; error?: { code: string } };
+type Envelope = { ok: boolean; data?: { version?: number; graph?: WorkflowGraph; slug?: string; name?: string }; error?: { code: string } };
 
-function mcUpdate(args: string[]): { env: Envelope; status: number } {
+function mcWorkflow(sub: string, args: string[]): { env: Envelope; status: number } {
   try {
-    const out = execFileSync(tsxBin, ['cli/index.ts', 'workflow', 'update', ...args, '--json'], {
+    const out = execFileSync(tsxBin, ['cli/index.ts', 'workflow', sub, ...args, '--json'], {
       env: { ...process.env, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '' },
       encoding: 'utf8',
       timeout: 55000,
@@ -35,6 +35,8 @@ function mcUpdate(args: string[]): { env: Envelope; status: number } {
     return { env: JSON.parse((err.stdout ?? '{}').trim()), status: err.status ?? 1 };
   }
 }
+const mcUpdate = (args: string[]) => mcWorkflow('update', args);
+const mcCreate = (args: string[]) => mcWorkflow('create', args);
 
 const seed = (): WorkflowGraph => ({
   nodes: [
@@ -97,5 +99,23 @@ describe('mc workflow update', () => {
     const { env, status } = mcUpdate(['nope-' + tag(), '--name', 'X']);
     expect(status).toBe(3);
     expect(env.error?.code).toBe('NOT_FOUND');
+  });
+});
+
+// `mc workflow create` now routes through the shared createDraftWorkflow SSOT (slice 9c), so a duplicate slug
+// is a clean CONFLICT (not a raw DB error) — the same path the canvas "New workflow" button uses.
+describe('mc workflow create (shared SSOT)', () => {
+  it('creates an empty draft and CONFLICTs on a duplicate slug', async () => {
+    const p = await createProject({ name: tag(), category: 'internal', status: 'prelaunch' });
+    projectIds.push(p.id);
+    const slug = tag();
+    const first = mcCreate(['--project', p.slug, '--name', 'Triage', '--slug', slug]);
+    expect(first.status).toBe(0);
+    expect(first.env.data?.slug).toBe(slug);
+    expect((await getWorkflowBySlug(slug))?.graph.nodes.length).toBe(0); // empty draft
+
+    const dup = mcCreate(['--project', p.slug, '--name', 'Triage again', '--slug', slug]);
+    expect(dup.status).toBe(1); // CONFLICT exit code
+    expect(dup.env.error?.code).toBe('CONFLICT');
   });
 });

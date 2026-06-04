@@ -75,6 +75,12 @@ export function WorkflowsTab({ slug }: { slug: string }) {
   const [editing, setEditing] = useState(false);
   const canEdit = !!detail && !runActive && latestStatus !== 'paused';
 
+  // Create (slice 9c): the "+ New workflow" flow — a name, a POST that writes an empty draft, then drop
+  // straight into Edit mode on the blank canvas. No CLI required to bring a workflow into existence.
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [createErr, setCreateErr] = useState<string | null>(null);
+
   const onRun = useCallback(async () => {
     if (!selected) return;
     setTriggering(true);
@@ -136,6 +142,34 @@ export function WorkflowsTab({ slug }: { slug: string }) {
     }
   }, [slug, pausedRunId, reason, loadList]);
 
+  const onCreate = useCallback(async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setCreateErr(null);
+    try {
+      const res = await fetch(`/api/projects/${slug}/workflows`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'create', name }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        const newSlug = json.data.workflow.slug as string;
+        setCreating(false);
+        setNewName('');
+        await loadList(); // bring the new draft into the rail
+        setSelected(newSlug); // select it…
+        setEditing(true); // …and open the blank canvas for authoring
+      } else if (res.status === 409) {
+        setCreateErr('a workflow with that name already exists');
+      } else {
+        setCreateErr(json.message ?? json.error ?? `failed (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setCreateErr(e instanceof Error ? e.message : String(e));
+    }
+  }, [slug, newName, loadList]);
+
   if (state.kind === 'loading') {
     return (
       <div className="wf-tab skeleton" aria-label="Loading workflows">
@@ -156,20 +190,36 @@ export function WorkflowsTab({ slug }: { slug: string }) {
     );
   }
 
-  if (state.workflows.length === 0) {
-    return (
-      <div className="detail-workflows">
-        <p className="detail-muted">No workflows yet.</p>
-        <p className="detail-muted">
-          Create one with <code className="detail-path">mc workflow create --project {slug} --name &lt;name&gt;</code>.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="wf-tab">
       <aside className="wf-rail" role="tablist" aria-label="Workflows">
+        <div className="wf-rail__head">
+          <span className="wf-rail__heading">Workflows</span>
+          <button
+            type="button"
+            className="btn-sm btn-sm--primary"
+            onClick={() => { setCreating((v) => !v); setNewName(''); setCreateErr(null); }}
+          >
+            + New
+          </button>
+        </div>
+        {creating && (
+          <form className="wf-rail__new" onSubmit={(e) => { e.preventDefault(); void onCreate(); }}>
+            <input
+              type="text"
+              autoFocus
+              className="wf-rail__new-input"
+              placeholder="workflow name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <div className="wf-rail__new-actions">
+              <button type="submit" className="btn-sm btn-sm--primary" disabled={!newName.trim()}>Create</button>
+              <button type="button" className="btn-sm" onClick={() => { setCreating(false); setNewName(''); setCreateErr(null); }}>Cancel</button>
+            </div>
+            {createErr && <span className="wf-inspector__err">{createErr}</span>}
+          </form>
+        )}
         {state.workflows.map((wf) => (
           <button
             key={wf.slug}
@@ -194,7 +244,7 @@ export function WorkflowsTab({ slug }: { slug: string }) {
             <h3>{detail?.name ?? '—'}</h3>
             <RunBadge run={detail?.latestRun ?? null} />
           </div>
-          {!editing && (
+          {!editing && selected && (
             <div className="wf-main__run">
               <button
                 type="button"
@@ -242,10 +292,18 @@ export function WorkflowsTab({ slug }: { slug: string }) {
           </div>
         )}
 
-        {!loaded && <div className="wf-canvas wf-canvas--placeholder">Loading graph…</div>}
-        {loaded && error && <p className="detail-muted">Failed to load graph: {error}</p>}
-        {loaded && !error && detail && editing && (
+        {!selected && (
+          <div className="wf-canvas wf-canvas--placeholder">
+            {state.workflows.length === 0
+              ? 'No workflows yet — click “+ New” to author one on the canvas.'
+              : 'Select a workflow from the rail, or click “+ New”.'}
+          </div>
+        )}
+        {selected && !loaded && <div className="wf-canvas wf-canvas--placeholder">Loading graph…</div>}
+        {selected && loaded && error && <p className="detail-muted">Failed to load graph: {error}</p>}
+        {selected && loaded && !error && detail && editing && (
           <WorkflowEditor
+            key={detail.slug}
             projectSlug={slug}
             workflowSlug={detail.slug}
             graph={detail.graph}
@@ -253,7 +311,7 @@ export function WorkflowsTab({ slug }: { slug: string }) {
             onCancel={() => setEditing(false)}
           />
         )}
-        {loaded && !error && detail && !editing && (
+        {selected && loaded && !error && detail && !editing && (
           <WorkflowCanvas graph={detail.graph} stepStatus={detail.stepStatus} />
         )}
       </section>

@@ -216,16 +216,18 @@ trigger), a prompt on every agent node, and every `{{ref}}` pointing at a real a
 
 <CardGroup cols={2}>
   <Card title="On the canvas" icon="mouse-pointer-click">
-    The **Workflows** tab on a project page renders the graph and, in **Edit** mode, lets you drag node
-    types from a palette onto the canvas, drag between handles to connect, edit the selected node in an
-    inspector (common fields plus a raw-JSON escape hatch), delete with Backspace, and **Save**. The
-    connection check that decides whether an edge can be drawn is the same validator the runner uses,
-    so the canvas physically can't draw a cycle, a self-loop, or an edge into the trigger.
+    The **Workflows** tab on a project page is the primary way in. Click **+ New**, give it a name, and
+    you drop straight onto a blank canvas in **Edit** mode — no CLI needed to bring a workflow into
+    existence. From there, drag node types from the palette, drag between handles to connect, edit the
+    selected node in an inspector (common fields plus a raw-JSON escape hatch), delete with Backspace, and
+    **Save**. The connection check that decides whether an edge can be drawn is the same validator the
+    runner uses, so the canvas physically can't draw a cycle, a self-loop, or an edge into the trigger.
   </Card>
   <Card title="From the CLI" icon="terminal">
-    Author the graph as JSON and pipe it in. `mc workflow create` makes a new workflow; `mc workflow
-    update` replaces an existing graph (and bumps its version) — the command-line twin of the canvas
-    Save.
+    The same thing, scriptable. `mc workflow create` makes a new workflow (optionally seeded from a graph
+    JSON file); `mc workflow update` replaces an existing graph and bumps its version. Both route through
+    the **same** create/save logic the canvas uses, so a duplicate slug or an invalid graph is rejected
+    identically. Useful for seeding, CI, or an agent authoring a workflow programmatically.
 
     ```bash
     mc workflow create --project myapp --name "Triage" --graph @graph.json

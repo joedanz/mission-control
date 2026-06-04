@@ -13,6 +13,8 @@ import {
   claimWorkflowRun, claimPausedWorkflowRun, requeueWorkflowRun, listQueuedWorkflowRuns, latestCronRunAt,
   upsertStepRun, setStepRunStatus, listStepRuns, getStepRun,
 } from '../lib/workflow-store';
+import { createDraftWorkflow } from '../lib/workflow-enqueue';
+import { slugify, ValidationError, ConflictError } from '../lib/validation';
 
 const projectIds: string[] = [];
 const tag = () => `wf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -93,6 +95,32 @@ describe('workflow store — workflows', () => {
 
   it('getWorkflowBySlug returns null when absent', async () => {
     expect(await getWorkflowBySlug('nope-' + tag())).toBeNull();
+  });
+});
+
+describe('createDraftWorkflow (slice 9c — in-UI new workflow)', () => {
+  it('creates an empty draft (slugified name, empty graph, version 1)', async () => {
+    const p = await freshProject();
+    const name = `Issue Triage ${tag()}`;
+    const wf = await createDraftWorkflow(p.id, name);
+    expect(wf.name).toBe(name);
+    expect(wf.slug).toBe(slugify(name));
+    expect(wf.status).toBe('draft');
+    expect(wf.version).toBe(1);
+    expect(wf.graph).toEqual({ nodes: [], edges: [] });
+  });
+
+  it('rejects a blank / slug-less name with ValidationError', async () => {
+    const p = await freshProject();
+    await expect(createDraftWorkflow(p.id, '   ')).rejects.toThrow(ValidationError);
+    await expect(createDraftWorkflow(p.id, '!!!')).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects a duplicate slug with ConflictError', async () => {
+    const p = await freshProject();
+    const name = `Dup ${tag()}`;
+    await createDraftWorkflow(p.id, name);
+    await expect(createDraftWorkflow(p.id, name)).rejects.toThrow(ConflictError);
   });
 });
 
