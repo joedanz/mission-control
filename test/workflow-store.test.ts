@@ -10,8 +10,8 @@ import {
   createWorkflow, getWorkflowBySlug, getWorkflowById, listWorkflows, setWorkflowStatus,
   createWorkflowRun, getWorkflowRun, listWorkflowRuns, setWorkflowRunStatus,
   requestWorkflowRunCancel, touchWorkflowRun, countPendingWorkflowRuns,
-  claimWorkflowRun, listQueuedWorkflowRuns, latestCronRunAt,
-  upsertStepRun, setStepRunStatus, listStepRuns,
+  claimWorkflowRun, claimPausedWorkflowRun, requeueWorkflowRun, listQueuedWorkflowRuns, latestCronRunAt,
+  upsertStepRun, setStepRunStatus, listStepRuns, getStepRun,
 } from '../lib/workflow-store';
 
 const projectIds: string[] = [];
@@ -108,6 +108,27 @@ describe('workflow store — runs', () => {
     expect(await claimWorkflowRun(run.id)).toBeNull(); // already claimed
   });
 
+  it('countPendingWorkflowRuns also counts a paused run (slice 9a single-flight)', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' });
+    await setWorkflowRunStatus(run.id, 'paused');
+    expect(await countPendingWorkflowRuns(wf.id)).toBe(1); // a run awaiting approval still blocks a duplicate
+  });
+
+  it('requeueWorkflowRun flips paused→queued exactly once; claimPausedWorkflowRun flips paused→running', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' });
+    await setWorkflowRunStatus(run.id, 'paused');
+    expect((await requeueWorkflowRun(run.id))?.status).toBe('queued');
+    expect(await requeueWorkflowRun(run.id)).toBeNull(); // no longer paused → null
+    // A fresh paused run can instead be claimed straight to running (the sync resume path).
+    await setWorkflowRunStatus(run.id, 'paused');
+    expect((await claimPausedWorkflowRun(run.id))?.status).toBe('running');
+    expect(await claimPausedWorkflowRun(run.id)).toBeNull();
+  });
+
   it('latestCronRunAt returns the newest cron run (ignoring manual runs), or null when none', async () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
@@ -174,5 +195,15 @@ describe('workflow store — step runs', () => {
     expect(done?.status).toBe('completed');
     expect((done?.output as { result?: string })?.result).toBe('ok');
     expect(done?.endedAt).not.toBeNull();
+  });
+
+  it('getStepRun fetches a step by (workflow_run, node), or null (slice 9a — a gate reads its own decision)', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    expect(await getStepRun(run.id, 'g')).toBeNull(); // not created yet
+    await upsertStepRun(run.id, 'g', { status: 'running', output: { decision: 'approve' } });
+    const fetched = await getStepRun(run.id, 'g');
+    expect((fetched?.output as { decision?: string })?.decision).toBe('approve');
   });
 });

@@ -18,6 +18,7 @@ export type WfNodeData = {
   toolkit?: string;
   action?: string;
   cases?: BranchCase[];
+  message?: string;
   stepStatus?: WorkflowStepStatus;
 };
 
@@ -99,7 +100,21 @@ export const BranchNode = memo(function BranchNode({ data }: NodeProps) {
   );
 });
 
-// branch is routed above; gate isn't executed until a later slice but still renders via GenericNode.
+// A gate node (slice 9a) pauses the run for a human. While the run is paused its step status is 'running' —
+// shown here as "awaiting approval"; the WorkflowsTab renders the Approve/Reject buttons separately.
+export const GateNode = memo(function GateNode({ data }: NodeProps) {
+  const d = data as WfNodeData;
+  return (
+    <Shell data={d} kind="gate" accent="gate">
+      {TARGET}
+      {d.message && <div className="wf-node__body">{firstLine(d.message)}</div>}
+      {d.stepStatus === 'running' && <div className="wf-node__meta wf-node__body--mono">awaiting approval</div>}
+      {SOURCE}
+    </Shell>
+  );
+});
+
+// branch is routed above; any not-yet-rendered node type shares GenericNode.
 export const GenericNode = memo(function GenericNode({ data }: NodeProps) {
   const d = data as WfNodeData;
   return (
@@ -125,11 +140,11 @@ function condLabel(c: BranchCase): string {
 // Distribute N source handles down the node's right edge (avoids overlap when a branch has several cases).
 const handleTop = (i: number, n: number): number => (n <= 1 ? 50 : 20 + (60 * i) / (n - 1));
 
-// Every persisted node.type maps to a renderer; the not-yet-executed gate type shares GenericNode.
+// Every persisted node.type maps to a renderer.
 export const nodeTypes = {
   trigger: TriggerNode,
   agent: AgentNode,
   integration: IntegrationNode,
   branch: BranchNode,
-  gate: GenericNode,
+  gate: GateNode,
 } as const;

@@ -122,14 +122,40 @@ export async function listWorkflowRuns(opts: { workflowId?: string; status?: Wor
   return q.orderBy(desc(workflowRuns.startedAt)).limit(opts.limit ?? 50);
 }
 
-/** Pending = a run that is queued OR running. The single-flight guard refuses a new run when this is > 0,
- *  so a not-yet-claimed queued run still blocks a duplicate (the daemon hasn't picked it up yet). */
+/** Pending = a run that is queued, running, OR paused (slice 9a). The single-flight guard refuses a new run
+ *  when this is > 0, so a not-yet-claimed queued run still blocks a duplicate (the daemon hasn't picked it up
+ *  yet) AND a run paused at an approval gate blocks one too (it is still in-progress, awaiting a human). */
 export async function countPendingWorkflowRuns(workflowId: string): Promise<number> {
   const rows = await db
     .select({ c: count() })
     .from(workflowRuns)
-    .where(and(eq(workflowRuns.workflowId, workflowId), inArray(workflowRuns.status, ['queued', 'running'])));
+    .where(and(eq(workflowRuns.workflowId, workflowId), inArray(workflowRuns.status, ['queued', 'running', 'paused'])));
   return rows[0]?.c ?? 0;
+}
+
+/** Resume a paused run (slice 9a) by re-enqueuing it: race-safe paused→queued in ONE conditional statement,
+ *  returning the row only if THIS caller won (a loser — already requeued/resumed/cancelled — gets null). The
+ *  existing workflow-daemon then claims + walks it unchanged; the walker is resumable, so it skips the decided
+ *  gate and continues. The web/async approve path uses this; the CLI sync path flips straight to 'running'. */
+export async function requeueWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const rows = await db
+    .update(workflowRuns)
+    .set({ status: 'queued' })
+    .where(and(eq(workflowRuns.id, id), eq(workflowRuns.status, 'paused')))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/** Race-safe claim of a PAUSED run for a synchronous resume (the CLI `mc workflow approve` default): flip
+ *  paused→running + heartbeat in ONE statement, returning the row only if THIS caller won. Mirrors
+ *  claimWorkflowRun but from 'paused' — so a sync approve and the daemon never both resume the same row. */
+export async function claimPausedWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const rows = await db
+    .update(workflowRuns)
+    .set({ status: 'running', lastHeartbeatAt: new Date() })
+    .where(and(eq(workflowRuns.id, id), eq(workflowRuns.status, 'paused')))
+    .returning();
+  return rows[0] ?? null;
 }
 
 /** The startedAt of a workflow's most recent CRON-triggered run, or null if it has never cron-fired. startedAt
@@ -230,4 +256,15 @@ export async function setStepRunStatus(id: string, status: WorkflowStepStatus, p
 
 export async function listStepRuns(workflowRunId: string): Promise<WorkflowStepRun[]> {
   return db.select().from(workflowStepRuns).where(eq(workflowStepRuns.workflowRunId, workflowRunId)).orderBy(workflowStepRuns.createdAt);
+}
+
+/** One step row by its (workflow_run, node) unique key, or null (slice 9a — a gate reads its own row to learn
+ *  its approval decision; the approve path writes the decision onto it). */
+export async function getStepRun(workflowRunId: string, nodeId: string): Promise<WorkflowStepRun | null> {
+  const rows = await db
+    .select()
+    .from(workflowStepRuns)
+    .where(and(eq(workflowStepRuns.workflowRunId, workflowRunId), eq(workflowStepRuns.nodeId, nodeId)))
+    .limit(1);
+  return rows[0] ?? null;
 }

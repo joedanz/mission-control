@@ -5,9 +5,9 @@
 // ABOUTME: spawns — plan correction #2). The synchronous daemon runner reuses prepareWorkflowRun for the same
 // ABOUTME: validate + guard before it walks in-process.
 
-import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflowRun } from './workflow-store';
-import { validateGraph } from './workflows';
-import { NotFoundError, ConflictError } from './validation';
+import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflowRun, getStepRun, upsertStepRun } from './workflow-store';
+import { validateGraph, nodeById } from './workflows';
+import { NotFoundError, ConflictError, ValidationError } from './validation';
 import type { Workflow, WorkflowRun, WorkflowTrigger } from './db/schema';
 
 // `context` (slice 8) is the trigger payload (e.g. a webhook body) persisted onto workflow_runs.context; the
@@ -33,4 +33,26 @@ export async function prepareWorkflowRun(slug: string, opts: EnqueueOpts = {}): 
 export async function enqueueWorkflowRun(slug: string, opts: EnqueueOpts = {}): Promise<WorkflowRun> {
   const wf = await prepareWorkflowRun(slug, opts);
   return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued', context: opts.context });
+}
+
+export type GateDecision = 'approve' | 'reject';
+
+/** Record a human approval decision on a paused run's gate step (slice 9a) — lib-tier, NO spawn, so the web
+ *  route imports it directly. Takes the already-resolved + authorized `run` (the caller fetched it to check
+ *  project ownership). Writes `{ decision, reason }` onto the gate step's `output` (leaving the step 'running'
+ *  so the resume re-walk re-evaluates the gate, which now reads the decision: approve → complete, reject →
+ *  fail). The caller then resumes — synchronously (CLI: resumeWorkflowRun) or by requeue (web/async:
+ *  requeueWorkflowRun → the daemon). Throws if the run isn't paused or the node isn't an awaiting gate. */
+export async function decideGate(run: WorkflowRun, nodeId: string, decision: GateDecision, reason?: string): Promise<WorkflowRun> {
+  if (run.status !== 'paused') throw new ConflictError('workflowRun', `run ${run.id} is ${run.status}, not paused — nothing is awaiting approval`);
+
+  const node = nodeById(run.graphSnapshot, nodeId);
+  if (!node) throw new NotFoundError('node', nodeId, 'check the workflow graph for the gate node id');
+  if (node.type !== 'gate') throw new ValidationError('nodeId', `node "${nodeId}" is a ${node.type}, not a gate`);
+
+  const step = await getStepRun(run.id, nodeId);
+  if (!step || step.status !== 'running') throw new ConflictError('gate', `gate "${nodeId}" is not awaiting approval on run ${run.id}`);
+
+  await upsertStepRun(run.id, nodeId, { output: { kind: 'gate', decision, reason, decidedAt: new Date().toISOString() } });
+  return run;
 }

@@ -365,6 +365,7 @@ const SPEC = [
   { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--max-parallel', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
+  { name: 'workflow approve', readonly: false, summary: 'Approve (or --reject) a paused gate + resume the run (sync; --async requeues for the daemon)', args: ['<runId>', '<nodeId>'] },
   { name: 'workflow activate', readonly: false, summary: 'Activate a workflow (status → active; cron-scheduled triggers then fire via the workflow-daemon)', args: ['<slug>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
   { name: 'workflow webhook-url', readonly: true, summary: 'Print the external webhook URL + HMAC signing details for an event-triggered workflow', args: ['<slug>'] },
@@ -1132,15 +1133,46 @@ withFlags(workflow.command('cancel'))
       const { setRunCancelRequested } = await import('../lib/mutations');
       const run = await getWorkflowRun(runId);
       if (!run) throw new NotFoundError('workflow run', runId);
-      const wasQueued = run.status === 'queued';
-      await requestWorkflowRunCancel(runId); // sets cancelRequested — a running walk stops at the next node check
-      // A queued run never started: mark it terminal NOW so the daemon (which only lists 'queued') never claims
-      // it. (cancelRequested above also covers the rare race where the daemon claimed it in this same window.)
-      const result = wasQueued ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? run) : run;
+      // A queued (never-started) or paused (gate-awaiting, not actively walking) run won't observe
+      // cancelRequested, so mark it terminal NOW; only a 'running' walk polls the flag at the next node check.
+      const directCancel = run.status === 'queued' || run.status === 'paused';
+      await requestWorkflowRunCancel(runId); // sets cancelRequested (also covers a daemon-claim race in this window)
+      const result = directCancel ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? run) : run;
       // Propagate to the in-flight agent node's run so a long node aborts (kill-switch), not just the next gap.
       const active = (await listStepRuns(runId)).find((s) => s.status === 'running' && s.runId);
       if (active?.runId) await setRunCancelRequested(active.runId);
-      return { data: result, human: () => console.log(`workflow run ${runId} ${wasQueued ? 'cancelled (was queued)' : 'cancel requested'}`) };
+      return { data: result, human: () => console.log(`workflow run ${runId} ${directCancel ? `cancelled (was ${run.status})` : 'cancel requested'}`) };
+    }),
+  );
+
+withFlags(workflow.command('approve'))
+  .description('Approve (or --reject) a paused gate, then resume the workflow run')
+  .argument('<runId>')
+  .argument('<nodeId>')
+  .option('--reject', 'reject the gate (fail its step; the gate onError then halts or continues the run)')
+  .option('--reason <text>', 'an optional reason recorded on the gate step')
+  .option('--async', 'requeue for the workflow-daemon instead of resuming synchronously (no inline walk)')
+  .action((runId: string, nodeId: string, opts: LeafOpts) =>
+    emit('workflow approve', opts, async () => {
+      ensureDbCredentials();
+      const decision = opts.reject ? 'reject' : 'approve';
+      const verb = decision === 'approve' ? 'approved' : 'rejected';
+      const reason = typeof opts.reason === 'string' ? opts.reason : undefined;
+      const { getWorkflowRun, requeueWorkflowRun } = await import('../lib/workflow-store');
+      const { decideGate } = await import('../lib/workflow-enqueue');
+      const paused = await getWorkflowRun(runId);
+      if (!paused) throw new NotFoundError('workflow run', runId);
+      await decideGate(paused, nodeId, decision, reason); // records the decision on the gate step (throws if not awaiting)
+      // --async = durable: requeue paused→queued and let the workflow-daemon resume off-process (the web path).
+      if (opts.async) {
+        const run = await requeueWorkflowRun(runId);
+        if (!run) throw new ConflictError('workflowRun', `run ${runId} is no longer paused`);
+        return { data: { workflowRunId: run.id, status: run.status, decision }, human: () => console.log(`gate ${nodeId} ${verb} → run ${runId} requeued (${run.status})`) };
+      }
+      // Default: resume synchronously — flip paused→running and walk to the next terminal/paused state.
+      const { resumeWorkflowRun } = await import('../daemon/workflow-runner');
+      const result = await resumeWorkflowRun(runId, { log: (m) => process.stderr.write(`[wf] ${m}\n`) });
+      return { data: { ...result, decision }, human: () => console.log(`gate ${nodeId} ${verb} → run ${runId} → ${result.status}`) };
     }),
   );
 
