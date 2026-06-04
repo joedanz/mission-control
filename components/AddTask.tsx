@@ -5,7 +5,7 @@
 import { useState, useTransition } from 'react';
 import { addTask } from '@/app/actions';
 
-export function AddTask({ projectId }: { projectId: string }) {
+export function AddTask({ projectId, onAdded }: { projectId: string; onAdded?: () => void }) {
   const [label, setLabel] = useState('');
   const [pending, startTransition] = useTransition();
 
@@ -14,7 +14,7 @@ export function AddTask({ projectId }: { projectId: string }) {
     if (!value) return;
     setLabel('');
     startTransition(() => {
-      void addTask(projectId, value);
+      void addTask(projectId, value).then(() => onAdded?.());
     });
   }
 

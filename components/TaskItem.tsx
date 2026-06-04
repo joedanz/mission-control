@@ -11,22 +11,23 @@ type Props = {
   label: string;
   notes?: string | null;
   done: boolean;
+  onChanged?: () => void;
 };
 
-export function TaskItem({ id, label, notes, done }: Props) {
+export function TaskItem({ id, label, notes, done, onChanged }: Props) {
   const [optimisticDone, setOptimisticDone] = useState(done);
   const [, startTransition] = useTransition();
 
   function onToggle() {
     setOptimisticDone((d) => !d);
     startTransition(() => {
-      void toggleTask(id);
+      void toggleTask(id).then(() => onChanged?.());
     });
   }
 
   function onDelete() {
     startTransition(() => {
-      void deleteTask(id);
+      void deleteTask(id).then(() => onChanged?.());
     });
   }
 
