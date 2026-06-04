@@ -1,4 +1,4 @@
-// ABOUTME: DB CRUD for composio_toolkits (cached shared resources) + composio_connections (per
+// ABOUTME: DB CRUD for composio_toolkits (cached shared resources) + mcp_connections (per
 // ABOUTME: project+toolkit). No Composio network calls — the DB-testable seam under the orchestration.
 
 import { eq, and } from 'drizzle-orm';
