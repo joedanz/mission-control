@@ -464,6 +464,21 @@ export type IntegrationNodeData = {
   onError?: WorkflowOnError;
 };
 
+// Comparison operators for a branch node's condition (slice 6a). gt/gte/lt/lte coerce to numbers (a
+// non-numeric operand makes the case false, never throws); eq/ne compare numerically when both operands
+// look numeric, else as strings; contains is array-membership or substring; truthy/falsy ignore `right`.
+export const BRANCH_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'truthy', 'falsy'] as const;
+export type BranchOp = (typeof BRANCH_OPS)[number];
+
+// Config for a type='branch' node (node.data, slice 6a) — the first CONTROL-FLOW node, NO LLM. An ordered
+// list of named cases; the FIRST case whose condition is true wins (none → the implicit 'else'). Execution
+// routes to outgoing edges whose sourceHandle (fallback: label) equals the winning case name; unreached
+// nodes are recorded `skipped`. left/right may carry {{nodeId.field}} refs resolved TYPE-PRESERVING against
+// upstream outputs (so {{a.output.score}} compares as a number). onError = 'halt' (default) | 'continue'.
+export type BranchCondition = { left: unknown; op: BranchOp; right?: unknown };
+export type BranchCase = { name: string; when: BranchCondition };
+export type BranchNodeData = { cases: BranchCase[]; onError?: WorkflowOnError };
+
 export const workflows = pgTable(
   'workflows',
   {

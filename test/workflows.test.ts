@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, validateGraph, readAgentNodeData, readIntegrationNodeData, assertWorkflowStatus,
+  hasCycle, topoOrder, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -212,6 +212,56 @@ describe('workflows — validateGraph integration nodes', () => {
       [edge('e1', 't', 'a'), edge('e2', 'a', 'i')],
     );
     expect(() => validateGraph(bad)).toThrow(/ancestor|edge|reference|unknown/i);
+  });
+});
+
+const branch = (id: string, data: Record<string, unknown>): WorkflowNode => ({ id, type: 'branch', position: { x: 0, y: 0 }, data });
+const oneCase = (overrides: Record<string, unknown> = {}) => ({
+  cases: [{ name: 'high', when: { left: '{{a.output.score}}', op: 'gte', right: 80 } }],
+  ...overrides,
+});
+
+describe('workflows — readBranchNodeData', () => {
+  it('returns the typed branch config (cases + onError)', () => {
+    const d = readBranchNodeData(branch('b', oneCase({ onError: 'continue' })));
+    expect(d.cases).toHaveLength(1);
+    expect(d.cases[0]).toEqual({ name: 'high', when: { left: '{{a.output.score}}', op: 'gte', right: 80 } });
+    expect(d.onError).toBe('continue');
+  });
+
+  it('rejects no cases, a blank/duplicate/reserved name, a missing condition, and an unknown op', () => {
+    expect(() => readBranchNodeData(branch('b', { cases: [] }))).toThrow(/case/i);
+    expect(() => readBranchNodeData(branch('b', { cases: [{ name: '  ', when: { left: 1, op: 'eq' } }] }))).toThrow(/name/i);
+    expect(() => readBranchNodeData(branch('b', { cases: [{ name: 'else', when: { left: 1, op: 'eq' } }] }))).toThrow(/else|fallback/i);
+    const dup = { cases: [{ name: 'x', when: { left: 1, op: 'eq' } }, { name: 'x', when: { left: 2, op: 'eq' } }] };
+    expect(() => readBranchNodeData(branch('b', dup))).toThrow(/duplicate/i);
+    expect(() => readBranchNodeData(branch('b', { cases: [{ name: 'x' }] }))).toThrow(/condition/i);
+    expect(() => readBranchNodeData(branch('b', { cases: [{ name: 'x', when: { left: 1, op: 'nope' } }] }))).toThrow(ValidationError);
+  });
+});
+
+describe('workflows — validateGraph branch nodes', () => {
+  it('accepts a branch whose condition refs an ancestor', () => {
+    // t → a → b: b's condition may reference a (ancestor).
+    const ok = G(
+      [trigger('t'), agent('a'), branch('b', oneCase())],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'b')],
+    );
+    expect(() => validateGraph(ok)).not.toThrow();
+  });
+
+  it('rejects a branch condition ref to a non-ancestor', () => {
+    // d has no edge into b — referencing it from a condition is not edge-backed.
+    const bad = G(
+      [trigger('t'), agent('a'), agent('d'), branch('b', { cases: [{ name: 'x', when: { left: '{{d.result}}', op: 'truthy' } }] })],
+      [edge('e1', 't', 'a'), edge('e2', 'a', 'b')],
+    );
+    expect(() => validateGraph(bad)).toThrow(/ancestor|edge|reference|unknown/i);
+  });
+
+  it('rejects a malformed branch (no cases) during validation', () => {
+    const bad = G([trigger('t'), branch('b', { cases: [] })], [edge('e1', 't', 'b')]);
+    expect(() => validateGraph(bad)).toThrow(/case/i);
   });
 });
 

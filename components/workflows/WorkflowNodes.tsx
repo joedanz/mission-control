@@ -7,7 +7,7 @@
 
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { WorkflowNodeType, WorkflowStepStatus } from '@/lib/db/schema';
+import type { BranchCase, WorkflowNodeType, WorkflowStepStatus } from '@/lib/db/schema';
 
 // node.data the canvas injects (graph data.* + the polled overlay). Kept loose — RF data is Record-typed.
 export type WfNodeData = {
@@ -17,6 +17,7 @@ export type WfNodeData = {
   trigger?: string;
   toolkit?: string;
   action?: string;
+  cases?: BranchCase[];
   stepStatus?: WorkflowStepStatus;
 };
 
@@ -80,7 +81,25 @@ export const IntegrationNode = memo(function IntegrationNode({ data }: NodeProps
   );
 });
 
-// branch / gate aren't executed until later slices, but render so the whole graph is visible.
+// A branch node (slice 6a) routes by case: one source handle per case name (+ the implicit 'else'). The
+// handle ids match edge.sourceHandle, so the canvas wires each case's edge to its own port.
+export const BranchNode = memo(function BranchNode({ data }: NodeProps) {
+  const d = data as WfNodeData;
+  const handles = [...(d.cases ?? []).map((c) => c.name), 'else'];
+  return (
+    <Shell data={d} kind="branch" accent="branch">
+      {TARGET}
+      {(d.cases ?? []).map((c) => (
+        <div key={c.name} className="wf-node__meta wf-node__body--mono">{`${c.name}: ${condLabel(c)}`}</div>
+      ))}
+      {handles.map((name, i) => (
+        <Handle key={name} id={name} type="source" position={Position.Right} style={{ top: `${handleTop(i, handles.length)}%` }} />
+      ))}
+    </Shell>
+  );
+});
+
+// branch is routed above; gate isn't executed until a later slice but still renders via GenericNode.
 export const GenericNode = memo(function GenericNode({ data }: NodeProps) {
   const d = data as WfNodeData;
   return (
@@ -96,11 +115,21 @@ function firstLine(text: string): string {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
-// Every persisted node.type maps to a renderer; the not-yet-executed types (branch/gate) share GenericNode.
+// A compact one-line label for a branch case's condition (e.g. "score gte 80", "label truthy").
+function condLabel(c: BranchCase): string {
+  const ref = (v: unknown) => (typeof v === 'string' ? v.replace(/\{\{\s*|\s*\}\}/g, '') : JSON.stringify(v));
+  const { left, op, right } = c.when;
+  return op === 'truthy' || op === 'falsy' ? `${ref(left)} ${op}` : `${ref(left)} ${op} ${ref(right)}`;
+}
+
+// Distribute N source handles down the node's right edge (avoids overlap when a branch has several cases).
+const handleTop = (i: number, n: number): number => (n <= 1 ? 50 : 20 + (60 * i) / (n - 1));
+
+// Every persisted node.type maps to a renderer; the not-yet-executed gate type shares GenericNode.
 export const nodeTypes = {
   trigger: TriggerNode,
   agent: AgentNode,
   integration: IntegrationNode,
-  branch: GenericNode,
+  branch: BranchNode,
   gate: GenericNode,
 } as const;

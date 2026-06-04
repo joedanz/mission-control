@@ -24,7 +24,7 @@ export function extractRefs(text: string): Ref[] {
 // schema-validated structured_output; `status` = the linked run's terminal status.
 export type RefView = { result: string | null; output: unknown; status: string | null };
 
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+export const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Project a step's stored `output` (jsonb) into the resolvable RefView. Two stored shapes:
  *  - agent step  `{ runId, runStatus, result: <claude result line> | null, … }` — `result.result` is the free

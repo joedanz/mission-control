@@ -340,4 +340,85 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     expect(i.status).toBe('failed');
     expect(i.error).toMatch(/rate limited|composio/i);
   });
+
+  // ── Branch nodes (slice 6a): a deterministic condition pick that ROUTES the walk. The upstream agent stub
+  // ── emits a structured `score`; the branch picks a case and the not-taken path's nodes are recorded `skipped`.
+  const scoreStub = (n: number) => `echo '{"type":"result","result":"ok","structured_output":{"score":${n}},"total_cost_usd":0}'`;
+  // t → a → b(branch); b routes to hi on the 'high' handle (score>=80) else to lo on the 'else' handle.
+  const branchGraph = (): WorkflowGraph => ({
+    nodes: [
+      { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+      { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'score it' } },
+      { id: 'b', type: 'branch', position: { x: 320, y: 0 }, data: { cases: [{ name: 'high', when: { left: '{{a.output.score}}', op: 'gte', right: 80 } }] } },
+      { id: 'hi', type: 'agent', position: { x: 480, y: -60 }, data: { prompt: 'report {{a.output.score}}' } },
+      { id: 'lo', type: 'agent', position: { x: 480, y: 60 }, data: { prompt: 'low path' } },
+    ],
+    edges: [
+      { id: 'e1', source: 't', target: 'a' },
+      { id: 'e2', source: 'a', target: 'b' },
+      { id: 'e3', source: 'b', target: 'hi', sourceHandle: 'high' },
+      { id: 'e4', source: 'b', target: 'lo', sourceHandle: 'else' },
+    ],
+  });
+
+  it('routes a branch to the matching case, runs that path (data flows across it), and skips the other', async () => {
+    const slug = `vt-wf-br-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: branchGraph() });
+
+    const res = runWorkflowCli(slug, scoreStub(88));
+    expect(res.ok).toBe(true);
+    expect(res.data?.status).toBe('completed');
+
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const b = steps.find((s) => s.nodeId === 'b')!;
+    expect(b.status).toBe('completed');
+    expect(b.runId).toBeNull(); // a branch opens NO runs row (no LLM)
+    expect((b.output as { chosen?: string }).chosen).toBe('high');
+    // the taken path ran, and the upstream agent's data resolved THROUGH the branch into it…
+    expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('completed');
+    expect((steps.find((s) => s.nodeId === 'hi')!.output as StepOut).prompt).toBe('report 88');
+    // …while the not-taken path was skipped (never spawned).
+    expect(steps.find((s) => s.nodeId === 'lo')!.status).toBe('skipped');
+  }, 60000);
+
+  it('falls through to the else path when no case matches, skipping the matched-case path', async () => {
+    const slug = `vt-wf-br-else-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: branchGraph() });
+
+    const res = runWorkflowCli(slug, scoreStub(10)); // 10 < 80 → no case → else
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect((steps.find((s) => s.nodeId === 'b')!.output as { chosen?: string }).chosen).toBe('else');
+    expect(steps.find((s) => s.nodeId === 'lo')!.status).toBe('completed'); // the 'else' handle
+    expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('skipped');
+  }, 60000);
+
+  it('hard-fails a branch whose condition ref is missing (halt stops the run, no path runs)', async () => {
+    const slug = `vt-wf-br-miss-${Date.now()}`;
+    await createWorkflow({
+      projectId, slug, name: slug,
+      graph: {
+        nodes: [
+          { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+          { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'score it' } },
+          { id: 'b', type: 'branch', position: { x: 320, y: 0 }, data: { cases: [{ name: 'x', when: { left: '{{a.output.nope}}', op: 'gt', right: 1 } }] } },
+          { id: 'hi', type: 'agent', position: { x: 480, y: 0 }, data: { prompt: 'after' } },
+        ],
+        edges: [
+          { id: 'e1', source: 't', target: 'a' },
+          { id: 'e2', source: 'a', target: 'b' },
+          { id: 'e3', source: 'b', target: 'hi', sourceHandle: 'x' },
+        ],
+      },
+    });
+
+    const res = runWorkflowCli(slug, scoreStub(88)); // a.output has `score`, not `nope`
+    expect(res.data?.status).toBe('failed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const b = steps.find((s) => s.nodeId === 'b')!;
+    expect(b.status).toBe('failed');
+    expect(b.error).toMatch(/unresolved data references/i);
+    expect(b.runId).toBeNull();
+    expect(steps.find((s) => s.nodeId === 'hi')).toBeUndefined(); // halt broke the walk before hi
+  }, 60000);
 });
