@@ -5,6 +5,8 @@
 import { assertEnum, ValidationError } from './validation';
 import { extractRefs, isObject } from './workflow-refs';
 import { getCatalogEntry, catalogSlugs } from './composio-catalog';
+import { isValidCron, isValidTimezone } from './profiles';
+import { SCHEDULE_MIN_INTERVAL_SEC } from './constants';
 import {
   WORKFLOW_STATUSES,
   WORKFLOW_RUN_STATUSES,
@@ -25,6 +27,8 @@ import {
   type IntegrationNodeData,
   type BranchNodeData,
   type BranchCase,
+  type TriggerNodeData,
+  type WorkflowSchedule,
 } from './db/schema';
 import { ELSE } from './workflow-branch';
 
@@ -182,8 +186,11 @@ export function validateGraph(graph: WorkflowGraph): void {
     } else if (n.type === 'branch') {
       refText = JSON.stringify(readBranchNodeData(n).cases); // validates cases; refs live in when.left/right
       field = 'node.data.cases';
+    } else if (n.type === 'trigger') {
+      readTriggerNodeData(n); // validates the optional cron/interval schedule (slice 7); carries no refs
+      continue;
     } else {
-      continue; // trigger (and future gate) carry no refs
+      continue; // future gate carries no refs
     }
 
     // Data-passing: every {{ref}} must point at an existing ANCESTOR (an edge-backed upstream node), so the
@@ -259,4 +266,45 @@ export function readBranchNodeData(node: WorkflowNode): BranchNodeData {
   const out: BranchNodeData = { cases };
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
+}
+
+/** Validate + return a type='trigger' node's config (slice 7). A trigger with no `schedule` is a manual
+ *  trigger (fires only via `mc workflow run` / the canvas). A `schedule` must carry EXACTLY ONE of cron /
+ *  intervalSec (cron parseable by croner; intervalSec an integer ≥ SCHEDULE_MIN_INTERVAL_SEC — each fire is a
+ *  paid run), plus an optional valid IANA timezone for the cron. Reuses the profile scheduler's validators so
+ *  a bad schedule is rejected at authoring (mc workflow create) rather than throwing inside the daemon tick. */
+export function readTriggerNodeData(node: WorkflowNode): TriggerNodeData {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (data.schedule == null) return {};
+  if (!isObject(data.schedule)) throw new ValidationError('node.data.schedule', `trigger node "${node.id}" has a malformed schedule`);
+  const s = data.schedule;
+  const hasCron = typeof s.cron === 'string' && s.cron.trim() !== '';
+  const hasInterval = s.intervalSec != null;
+  if (hasCron === hasInterval) {
+    throw new ValidationError('node.data.schedule', `trigger node "${node.id}" schedule needs exactly one of cron or intervalSec`);
+  }
+  const schedule: WorkflowSchedule = {};
+  if (hasCron) {
+    const cron = (s.cron as string).trim();
+    if (!isValidCron(cron)) throw new ValidationError('node.data.schedule.cron', `trigger node "${node.id}" has an invalid cron expression: ${cron}`);
+    schedule.cron = cron;
+  } else {
+    const intervalSec = s.intervalSec;
+    if (typeof intervalSec !== 'number' || !Number.isInteger(intervalSec) || intervalSec < SCHEDULE_MIN_INTERVAL_SEC) {
+      throw new ValidationError('node.data.schedule.intervalSec', `trigger node "${node.id}" intervalSec must be an integer ≥ ${SCHEDULE_MIN_INTERVAL_SEC} (each fire is a paid run)`);
+    }
+    schedule.intervalSec = intervalSec;
+  }
+  if (s.timezone != null && s.timezone !== '') {
+    const tz = String(s.timezone);
+    if (!isValidTimezone(tz)) throw new ValidationError('node.data.schedule.timezone', `trigger node "${node.id}" has an invalid IANA timezone: ${tz}`);
+    schedule.timezone = tz;
+  }
+  return { schedule };
+}
+
+/** The entry trigger's schedule, or null for a manual (un-scheduled) trigger. The workflow-daemon reads this to
+ *  decide which active workflows fire on a cadence. Assumes a validated graph (exactly one trigger node). */
+export function triggerSchedule(graph: WorkflowGraph): WorkflowSchedule | null {
+  return readTriggerNodeData(entryNode(graph)).schedule ?? null;
 }

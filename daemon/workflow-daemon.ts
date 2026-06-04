@@ -12,8 +12,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sleep, acquireLock, type Log } from './runner';
-import { listQueuedWorkflowRuns, claimWorkflowRun } from '../lib/workflow-store';
+import { listQueuedWorkflowRuns, claimWorkflowRun, listWorkflows, latestCronRunAt } from '../lib/workflow-store';
 import { walkWorkflowRun } from './workflow-runner';
+import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
+import { triggerSchedule } from '../lib/workflows';
+import { ConflictError } from '../lib/validation';
+import { isDue } from './schedule';
 
 type Args = { once: boolean; pollSec: number; timeoutSec: number; graceSec: number };
 
@@ -41,9 +45,49 @@ let shuttingDown = false;
  *  it — though a claimed run flips to 'running', so listQueuedWorkflowRuns already stops returning it next tick. */
 const inFlight = new Map<string, Promise<void>>();
 
-/** One pass: list queued runs, claim each race-safe, fire-and-forget its walk. Per-run try/catch so a single
- *  bad run (DB blip on claim, etc.) never aborts the whole tick. */
+/** Cron trigger (slice 7): enqueue a 'cron' run for each ACTIVE workflow whose schedule is due, reusing the
+ *  scheduler's isDue. The due-math anchor is the last cron run's startedAt, or — before the first fire — the
+ *  workflow's updatedAt, so a freshly-activated cron waits for its next real instant instead of firing instantly.
+ *  enqueueWorkflowRun's single-flight guard suppresses a fire while a run is already queued/running (ConflictError
+ *  → skip), so a slow workflow never piles up; the just-enqueued run is then claimed + walked by THIS same tick's
+ *  drain loop. Best-effort throughout: a list/enqueue failure logs and the tick proceeds to drain queued runs. */
+async function scanCronWorkflows(): Promise<void> {
+  let active;
+  try {
+    active = await listWorkflows({ status: 'active' });
+  } catch (e) {
+    log(`cron scan: list active workflows failed: ${e instanceof Error ? e.message : e} — skipping scan`);
+    return;
+  }
+  const now = new Date();
+  for (const wf of active) {
+    if (shuttingDown) break;
+    let schedule;
+    try {
+      schedule = triggerSchedule(wf.graph); // null = a manual / un-scheduled trigger
+    } catch {
+      continue; // a malformed graph that slipped past create-time validation — never crash the scan
+    }
+    if (!schedule) continue;
+
+    const anchor = (await latestCronRunAt(wf.id)) ?? wf.updatedAt;
+    const fields = { scheduleCron: schedule.cron ?? null, scheduleIntervalSec: schedule.intervalSec ?? null, scheduleTimezone: schedule.timezone ?? null, lastCheckInAt: anchor };
+    if (!isDue(fields, now)) continue;
+
+    try {
+      const run = await enqueueWorkflowRun(wf.slug, { trigger: 'cron' });
+      log(`cron: workflow ${wf.slug} due → enqueued run ${run.id.slice(0, 8)}`);
+    } catch (e) {
+      // ConflictError = a run is already queued/running (single-flight) → not an error, just skip this fire.
+      if (!(e instanceof ConflictError)) log(`cron enqueue of ${wf.slug} failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+}
+
+/** One pass: enqueue due cron workflows (slice 7), then list queued runs, claim each race-safe, fire-and-forget
+ *  its walk. Per-run try/catch so a single bad run (DB blip on claim, etc.) never aborts the whole tick. */
 async function tick(a: Args): Promise<void> {
+  await scanCronWorkflows(); // enqueue this tick's due cron runs; the drain loop below claims + walks them
   let queued;
   try {
     queued = await listQueuedWorkflowRuns();

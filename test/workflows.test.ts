@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   nodeById, outgoers, incomers, triggerNodes, entryNode, ancestors,
-  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, assertWorkflowStatus,
+  hasCycle, topoOrder, decidableNodes, validateGraph, readAgentNodeData, readIntegrationNodeData, readBranchNodeData, readTriggerNodeData, triggerSchedule, assertWorkflowStatus,
 } from '../lib/workflows';
 import type { WorkflowGraph, WorkflowNode } from '../lib/db/schema';
 import { ValidationError } from '../lib/validation';
@@ -295,6 +295,46 @@ describe('workflows — validateGraph branch nodes', () => {
   it('rejects a malformed branch (no cases) during validation', () => {
     const bad = G([trigger('t'), branch('b', { cases: [] })], [edge('e1', 't', 'b')]);
     expect(() => validateGraph(bad)).toThrow(/case/i);
+  });
+});
+
+describe('workflows — readTriggerNodeData (slice 7 schedule)', () => {
+  const triggerWith = (data: Record<string, unknown>): WorkflowNode => ({ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data });
+
+  it('a manual trigger (no schedule) returns an empty config', () => {
+    expect(readTriggerNodeData(trigger('t'))).toEqual({});
+    expect(readTriggerNodeData(triggerWith({}))).toEqual({});
+  });
+
+  it('accepts a valid cron schedule (with timezone)', () => {
+    const d = readTriggerNodeData(triggerWith({ schedule: { cron: '0 9 * * *', timezone: 'America/New_York' } }));
+    expect(d.schedule).toEqual({ cron: '0 9 * * *', timezone: 'America/New_York' });
+  });
+
+  it('accepts a valid interval schedule', () => {
+    expect(readTriggerNodeData(triggerWith({ schedule: { intervalSec: 3600 } })).schedule).toEqual({ intervalSec: 3600 });
+  });
+
+  it('rejects both cron and intervalSec, or neither', () => {
+    expect(() => readTriggerNodeData(triggerWith({ schedule: { cron: '0 9 * * *', intervalSec: 3600 } }))).toThrow(/exactly one/i);
+    expect(() => readTriggerNodeData(triggerWith({ schedule: {} }))).toThrow(/exactly one/i);
+  });
+
+  it('rejects an invalid cron, a sub-floor interval, and a bad timezone', () => {
+    expect(() => readTriggerNodeData(triggerWith({ schedule: { cron: 'not a cron !!' } }))).toThrow(/cron/i);
+    expect(() => readTriggerNodeData(triggerWith({ schedule: { intervalSec: 30 } }))).toThrow(/intervalSec/i);
+    expect(() => readTriggerNodeData(triggerWith({ schedule: { cron: '0 9 * * *', timezone: 'Mars/Phobos' } }))).toThrow(/timezone/i);
+  });
+
+  it('triggerSchedule reads the entry node schedule, or null for a manual trigger', () => {
+    const scheduled = G([{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { schedule: { intervalSec: 600 } } }, agent('a')], [edge('e1', 't', 'a')]);
+    expect(triggerSchedule(scheduled)).toEqual({ intervalSec: 600 });
+    expect(triggerSchedule(linear())).toBeNull();
+  });
+
+  it('validateGraph rejects a workflow whose trigger schedule is malformed', () => {
+    const bad = G([{ id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { schedule: { intervalSec: 5 } } }, agent('a')], [edge('e1', 't', 'a')]);
+    expect(() => validateGraph(bad)).toThrow(/intervalSec/i);
   });
 });
 
