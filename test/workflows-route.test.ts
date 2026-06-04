@@ -27,7 +27,7 @@ const store = {
 };
 vi.mock('@/lib/workflow-store', () => store);
 
-const enqueue = { enqueueWorkflowRun: vi.fn(), decideGate: vi.fn(), saveWorkflowGraph: vi.fn() };
+const enqueue = { enqueueWorkflowRun: vi.fn(), decideGate: vi.fn(), saveWorkflowGraph: vi.fn(), createDraftWorkflow: vi.fn() };
 vi.mock('@/lib/workflow-enqueue', () => enqueue);
 
 // Import AFTER mocks are registered. ConflictError/ValidationError are the REAL classes (validation has no DB
@@ -237,6 +237,27 @@ describe('POST save (slice 9b canvas authoring)', () => {
     const res = await post({ action: 'save', workflow: 'triage', graph: GRAPH });
     expect(res.status).toBe(404);
     expect(enqueue.saveWorkflowGraph).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST create (slice 9c — in-UI new workflow)', () => {
+  it('creates an empty draft for the project and returns its slug', async () => {
+    enqueue.createDraftWorkflow.mockResolvedValue(wfRow({ slug: 'triage', name: 'Triage', status: 'draft' }));
+    const res = await post({ action: 'create', name: 'Triage' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.workflow.slug).toBe('triage');
+    expect(enqueue.createDraftWorkflow).toHaveBeenCalledWith('p1', 'Triage'); // project.id, name
+  });
+
+  it('422 when the name is blank (no create attempted)', async () => {
+    expect((await post({ action: 'create', name: '   ' })).status).toBe(422);
+    expect(enqueue.createDraftWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('maps a ConflictError (slug taken) to 409', async () => {
+    enqueue.createDraftWorkflow.mockRejectedValue(new ConflictError('workflow', 'slug "triage" already exists'));
+    const res = await post({ action: 'create', name: 'Triage' });
+    expect(res.status).toBe(409);
   });
 });
 

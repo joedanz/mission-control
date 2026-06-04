@@ -5,9 +5,9 @@
 // ABOUTME: spawns — plan correction #2). The synchronous daemon runner reuses prepareWorkflowRun for the same
 // ABOUTME: validate + guard before it walks in-process.
 
-import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflowRun, updateWorkflowGraph, getStepRun, upsertStepRun } from './workflow-store';
+import { getWorkflowBySlug, countPendingWorkflowRuns, createWorkflow, createWorkflowRun, updateWorkflowGraph, getStepRun, upsertStepRun } from './workflow-store';
 import { validateGraph, nodeById } from './workflows';
-import { NotFoundError, ConflictError, ValidationError } from './validation';
+import { NotFoundError, ConflictError, ValidationError, slugify } from './validation';
 import type { Workflow, WorkflowRun, WorkflowTrigger, WorkflowGraph } from './db/schema';
 
 // `context` (slice 8) is the trigger payload (e.g. a webhook body) persisted onto workflow_runs.context; the
@@ -51,6 +51,29 @@ export async function saveWorkflowGraph(
   const updated = await updateWorkflowGraph(slug, graph, { name: opts.name, description: opts.description });
   if (!updated) throw new NotFoundError('workflow', slug);
   return updated;
+}
+
+/** Create a workflow for a project — the SINGLE create SSOT for BOTH the web "New workflow" button (slice 9c,
+ *  empty draft) AND `mc workflow create` (which may pass a `--graph`/`--slug`/`--description`). Lib-tier, NO
+ *  spawn. Slugifies the name (or an explicit `slug`), rejects a collision UP FRONT so a duplicate maps to a
+ *  clean ConflictError (→ 409 / exit CONFLICT) instead of a raw DB unique-violation, and validates a provided
+ *  graph through the SAME validateGraph SSOT (an empty graph is a valid draft). Mirrors how `saveWorkflowGraph`
+ *  unified the `update` path. Throws ValidationError (blank/slug-less name) / ConflictError (slug taken). */
+export async function createDraftWorkflow(
+  projectId: string,
+  name: string,
+  opts: { slug?: string; graph?: WorkflowGraph; description?: string } = {},
+): Promise<Workflow> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new ValidationError('name', 'a workflow name is required');
+  const slug = slugify(opts.slug ?? trimmed);
+  if (!slug) throw new ValidationError(opts.slug ? 'slug' : 'name', 'name must contain at least one letter or number');
+  if (await getWorkflowBySlug(slug)) {
+    throw new ConflictError('workflow', `a workflow with slug "${slug}" already exists (workflow slugs are global)`);
+  }
+  const graph = opts.graph ?? { nodes: [], edges: [] };
+  if (graph.nodes.length) validateGraph(graph); // empty = a valid draft; a provided graph must be runnable
+  return createWorkflow({ projectId, slug, name: trimmed, description: opts.description ?? null, graph });
 }
 
 export type GateDecision = 'approve' | 'reject';

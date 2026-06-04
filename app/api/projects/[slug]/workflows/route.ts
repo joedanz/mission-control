@@ -7,7 +7,7 @@
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { getProjectBySlug } from '@/lib/queries';
 import { listWorkflows, getWorkflowBySlug, getWorkflowById, getWorkflowRun, requeueWorkflowRun, listWorkflowRuns, listStepRuns } from '@/lib/workflow-store';
-import { enqueueWorkflowRun, decideGate, saveWorkflowGraph } from '@/lib/workflow-enqueue';
+import { enqueueWorkflowRun, decideGate, saveWorkflowGraph, createDraftWorkflow } from '@/lib/workflow-enqueue';
 import { toWorkflowListItem, toWorkflowDetail } from '@/lib/workflow-view';
 import { NotFoundError, ConflictError, ValidationError } from '@/lib/validation';
 import type { WorkflowGraph } from '@/lib/db/schema';
@@ -63,7 +63,7 @@ export async function GET(
   return Response.json({ ok: true, data: { workflows: items } });
 }
 
-type PostBody = { action?: string; workflow?: string; runId?: string; nodeId?: string; decision?: string; reason?: string; graph?: WorkflowGraph };
+type PostBody = { action?: string; workflow?: string; runId?: string; nodeId?: string; decision?: string; reason?: string; graph?: WorkflowGraph; name?: string };
 
 /** Trigger a workflow run from the canvas Run button. Enqueues a 'queued' run for the workflow-daemon — a pure
  *  DB write, no spawn. The single-flight guard surfaces as 409 (a run is already queued or in progress). */
@@ -102,6 +102,16 @@ export async function POST(
       const requeued = await requeueWorkflowRun(runId);
       if (!requeued) return Response.json({ ok: false, error: 'conflict', message: `run ${runId} is no longer paused` }, { status: 409 });
       return Response.json({ ok: true, data: { workflowRunId: requeued.id, status: requeued.status, decision } });
+    }
+
+    // Create a new EMPTY draft workflow from the canvas "New workflow" button (slice 9c) — a pure DB write,
+    // no spawn, so authoring a workflow from zero never needs the CLI. ValidationError (blank name) → 422,
+    // ConflictError (slug taken) → 409, both via the shared catch below.
+    if (action === 'create') {
+      const { name } = body;
+      if (!name || !name.trim()) return Response.json({ ok: false, error: 'validation', message: 'a workflow name is required' }, { status: 422 });
+      const created = await createDraftWorkflow(project.id, name);
+      return Response.json({ ok: true, data: { workflow: { slug: created.slug, name: created.name, status: created.status } } });
     }
 
     // Save an edited graph (slice 9b canvas authoring): the foreign-project guard here, then the shared

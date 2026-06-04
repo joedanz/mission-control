@@ -22,7 +22,7 @@ import {
   PROFILE_RUNTIMES,
   PERMISSION_MODES,
 } from '../lib/db/schema';
-import { assertEnum, ValidationError, NotFoundError, ConflictError, slugify } from '../lib/validation';
+import { assertEnum, ValidationError, NotFoundError, ConflictError } from '../lib/validation';
 import { SPEND_GROUP_BYS, SCHEDULE_MIN_INTERVAL_SEC } from '../lib/constants';
 import { parseGitHubRepo, listIssues, GitHubError } from '../lib/github';
 import { statusLabel, isTaskDone, taskState } from '../lib/ui';
@@ -1053,20 +1053,16 @@ withFlags(workflow.command('create'))
   .action((opts: LeafOpts) =>
     emit('workflow create', opts, async () => {
       ensureDbCredentials();
-      const { validateGraph } = await import('../lib/workflows');
-      const { createWorkflow } = await import('../lib/workflow-store');
+      // The shared create SSOT (same slugify + collision-precheck + graph validation as the canvas "New
+      // workflow" button): omit --graph for an empty draft; a provided graph is validated.
+      const { createDraftWorkflow } = await import('../lib/workflow-enqueue');
       const { getProjectIdBySlug } = await import('../lib/queries');
       const projectId = await getProjectIdBySlug(String(opts.project));
       if (!projectId) throw new NotFoundError('project', String(opts.project), NO_SLUG_HINT);
-      const graph = opts.graph ? parseGraphArg(String(opts.graph)) : { nodes: [], edges: [] };
-      if (graph.nodes.length) validateGraph(graph); // empty = draft; a provided graph must be runnable
-      const slug = slugify(String(opts.slug ?? opts.name));
-      const wf = await createWorkflow({
-        projectId,
-        slug,
-        name: String(opts.name),
-        description: opts.description ? String(opts.description) : null,
-        graph,
+      const wf = await createDraftWorkflow(projectId, String(opts.name), {
+        ...(opts.slug !== undefined && { slug: String(opts.slug) }),
+        ...(opts.graph !== undefined && { graph: parseGraphArg(String(opts.graph)) }),
+        ...(opts.description !== undefined && { description: String(opts.description) }),
       });
       return { data: wf, human: () => console.log(`created workflow ${wf.slug} (${wf.id})`) };
     }),
