@@ -45,10 +45,10 @@ afterEach(async () => {
 
 describe('profileMatchesContext (pure)', () => {
   it('matches when every present rule passes (ANDed)', () => {
-    const rules = { projectSlugs: ['acme'], taskKinds: ['custom'] };
-    expect(profileMatchesContext(rules, { projectSlug: 'acme', taskKind: 'custom' })).toBe(true);
-    expect(profileMatchesContext(rules, { projectSlug: 'acme', taskKind: 'integration' })).toBe(false);
-    expect(profileMatchesContext(rules, { projectSlug: 'other', taskKind: 'custom' })).toBe(false);
+    const rules = { projectSlugs: ['acme'], labelPattern: '^fix:' };
+    expect(profileMatchesContext(rules, { projectSlug: 'acme', taskLabel: 'fix: bug' })).toBe(true);
+    expect(profileMatchesContext(rules, { projectSlug: 'acme', taskLabel: 'feat: x' })).toBe(false);
+    expect(profileMatchesContext(rules, { projectSlug: 'other', taskLabel: 'fix: bug' })).toBe(false);
   });
 
   it('empty / null rules never match (default-only profiles)', () => {
@@ -171,7 +171,7 @@ describe('resolveProfile (auto-routing)', () => {
     const lo = await mkProfile(tag(), { matchRules: { projectSlugs: [slug] }, priority: 1 });
     const hi = await mkProfile(tag(), { matchRules: { projectSlugs: [slug] }, priority: 9 });
 
-    const matched = await resolveProfile({ projectSlug: slug, taskKind: 'custom' });
+    const matched = await resolveProfile({ projectSlug: slug });
     expect(matched?.id).toBe(hi.id);
     expect(lo.id).not.toBe(hi.id);
 

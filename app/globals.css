@@ -779,27 +779,6 @@ button:focus:not(:focus-visible) { outline: none; }
 }
 .tag-more { color: var(--ink-mute); font-family: var(--font-mono); font-size: var(--fs-11); align-self: center; }
 
-.col-intg {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-.col-intg.none { color: var(--ink-mute); }
-.intg-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.col-intg.done    { color: var(--ok); }
-.col-intg.done    .intg-dot { background: var(--ok); box-shadow: 0 0 0 2.5px var(--ok-soft); }
-.col-intg.pending { color: var(--warn); }
-.col-intg.pending .intg-dot { background: var(--warn); box-shadow: 0 0 0 2.5px var(--warn-soft); }
-.col-intg.needed  { color: var(--ink-mute); }
-.col-intg.needed  .intg-dot { background: transparent; border: 1.5px solid var(--ink-mute); }
-
 .pill {
   display: inline-flex;
   align-items: center;
@@ -953,8 +932,6 @@ button:focus:not(:focus-visible) { outline: none; }
   }
   .col-name { flex: initial; }
   .col-stack { display: flex; }
-  .col-intg.none { display: inline-flex; }
-  .col-intg .lbl { display: none; }
 }
 
 /* ===================== BUTTONS ===================== */
@@ -1319,12 +1296,6 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 /* ── Kanban board (per-project status columns + overall swimlanes) ───────────── */
 .board { display: flex; flex-direction: column; gap: 10px; }
 .board-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.board-intg {
-  font-family: var(--font-mono); font-size: var(--fs-11, 11px);
-  color: var(--ink-dim); text-decoration: none;
-  border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 8px;
-}
-.board-intg:hover { color: var(--ink); border-color: var(--ink-mute); }
 .board-donewin { font-family: var(--font-mono); font-size: var(--fs-11, 11px); color: var(--ink-dim); display: inline-flex; align-items: center; gap: 6px; }
 .board-donewin select {
   font-family: var(--font-mono); font-size: var(--fs-11, 11px);

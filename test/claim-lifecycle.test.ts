@@ -13,7 +13,6 @@ import {
   addTask,
   claimTask,
   setTaskStatus,
-  upsertIntegration,
   importTasks,
   recordRunStart,
   recordRunEnd,
@@ -89,12 +88,6 @@ describe('claimTask', () => {
   it('an absent task returns null (NotFound)', async () => {
     const r = await mkRun();
     await expect(claimTask(ZERO_UUID, r.id)).resolves.toBeNull();
-  });
-
-  it('an integration task is not claimable (ConflictError)', async () => {
-    const r = await mkRun();
-    const it = await upsertIntegration(projectId, 'sentry', 'needed');
-    await expect(claimTask(it.id, r.id)).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('an expired claim is re-claimable by another run', async () => {

@@ -19,7 +19,6 @@ function matchSummary(p: AgentProfile): string {
   const parts: string[] = [];
   if (r.projectSlugs?.length) parts.push(`projects: ${r.projectSlugs.join(', ')}`);
   if (r.projectCategories?.length) parts.push(`categories: ${r.projectCategories.join(', ')}`);
-  if (r.taskKinds?.length) parts.push(`kinds: ${r.taskKinds.join(', ')}`);
   if (r.labelPattern) parts.push(`label ~ /${r.labelPattern}/`);
   return parts.length ? parts.join(' · ') : 'No match rules (never auto-selected)';
 }

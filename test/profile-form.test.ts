@@ -106,10 +106,9 @@ describe('formStateToInput — match rules', () => {
       ...emptyFormState(),
       matchProjectSlugs: ['acme'],
       matchProjectCategories: [],
-      matchTaskKinds: ['custom'],
       matchLabelPattern: '^fix:',
     };
-    expect(formStateToInput(s).matchRules).toEqual({ projectSlugs: ['acme'], taskKinds: ['custom'], labelPattern: '^fix:' });
+    expect(formStateToInput(s).matchRules).toEqual({ projectSlugs: ['acme'], labelPattern: '^fix:' });
   });
 
   it('returns null when no dimension is set (default-only profile)', () => {

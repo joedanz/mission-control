@@ -53,7 +53,6 @@ you opt in with `MC_ALLOW_DATABASE_URL_FALLBACK=1` (not recommended). See [`cli/
 ```bash
 npm run cli -- project list --json
 npm run cli -- task add my-project "Wire up billing"
-npm run cli -- integration set my-project sentry done
 ```
 
 Beyond the project/task catalog, the CLI also drives **Mission Control** — agent runs, the

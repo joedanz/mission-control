@@ -12,8 +12,6 @@ import {
   ACCENTS,
   PRIORITIES,
   TASK_STATUSES,
-  INTEGRATION_TYPES,
-  INTEGRATION_STATUSES,
   RUN_STATUSES,
   RUN_SOURCES,
   EVENT_TYPES,
@@ -55,8 +53,6 @@ describe('spec-sync: mc spec catalog tracks the real CLI', () => {
     expect(ENUMS.accent).toEqual([...ACCENTS]);
     expect(ENUMS.priority).toEqual([...PRIORITIES]);
     expect(ENUMS.taskStatus).toEqual([...TASK_STATUSES]);
-    expect(ENUMS.integrationType).toEqual([...INTEGRATION_TYPES]);
-    expect(ENUMS.integrationStatus).toEqual([...INTEGRATION_STATUSES]);
     expect(ENUMS.runStatus).toEqual([...RUN_STATUSES]);
     expect(ENUMS.runSource).toEqual([...RUN_SOURCES]);
     expect(ENUMS.eventType).toEqual([...EVENT_TYPES]);

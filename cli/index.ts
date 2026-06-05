@@ -13,8 +13,6 @@ import {
   ACCENTS,
   PRIORITIES,
   TASK_STATUSES,
-  INTEGRATION_TYPES,
-  INTEGRATION_STATUSES,
   RUN_STATUSES,
   RUN_SOURCES,
   EVENT_TYPES,
@@ -255,7 +253,6 @@ function coerceProfileFields(opts: LeafOpts): ProfileUpdate {
   const rules: Record<string, unknown> = {};
   if (opts.matchProject !== undefined) rules.projectSlugs = csv(opts.matchProject);
   if (opts.matchCategory !== undefined) rules.projectCategories = csv(opts.matchCategory).map((c) => assertEnum(c, CATEGORIES, 'match-category'));
-  if (opts.matchKind !== undefined) rules.taskKinds = csv(opts.matchKind);
   if (opts.matchLabel !== undefined) rules.labelPattern = String(opts.matchLabel);
   if (Object.keys(rules).length) out.matchRules = rules as ProfileUpdate['matchRules'];
   if (opts.priority !== undefined) {
@@ -310,7 +307,7 @@ function printProjectLine(p: Project): void {
 
 function printTaskLine(t: Task): void {
   const done = isTaskDone(t) ? '✓' : ' ';
-  console.log(`  [${done}] ${taskState(t).padEnd(11)} ${t.label}${t.integrationType ? ` (${t.integrationType})` : ''}`);
+  console.log(`  [${done}] ${taskState(t).padEnd(11)} ${t.label}`);
 }
 
 // ── Static catalogs (no DB) ────────────────────────────────────────────────────
@@ -321,8 +318,6 @@ const ENUMS = {
   accent: ACCENTS,
   priority: PRIORITIES,
   taskStatus: TASK_STATUSES,
-  integrationType: INTEGRATION_TYPES,
-  integrationStatus: INTEGRATION_STATUSES,
   runStatus: RUN_STATUSES,
   runSource: RUN_SOURCES,
   eventType: EVENT_TYPES,
@@ -340,7 +335,7 @@ const SPEC = [
   { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address', '--stripe-site'] },
   { name: 'project rm', readonly: false, summary: 'Delete a project (cascades tasks); requires --yes', args: ['<slug>'], required: ['--yes'] },
   { name: 'project set-repo', readonly: false, summary: 'Set a project repo path + url', args: ['<slug>', '<path>', '[url]'] },
-  { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status', '--kind custom|integration'] },
+  { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status'] },
   { name: 'task get', readonly: true, summary: 'Get a single task by id', args: ['<id>'] },
   { name: 'task add', readonly: false, summary: 'Add a custom task', args: ['<slug>', '<label...>'] },
   { name: 'task set-status', readonly: false, summary: 'Set a task status (idempotent)', args: ['<id>', '<status>'] },
@@ -350,8 +345,6 @@ const SPEC = [
   { name: 'task next', readonly: true, summary: 'Show the next claimable task (FIFO: custom, todo, unclaimed/expired)', options: ['--project'] },
   { name: 'task claim', readonly: false, summary: 'Claim a task for the current run (single-statement, race-safe)', args: ['<id>'], options: ['--run', '--ttl'] },
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
-  { name: 'integration set', readonly: false, summary: 'Upsert an integration status (idempotent)', args: ['<slug>', '<type>', '<status>'] },
-  { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
   { name: 'mcp catalog', readonly: true, summary: "List Composio's full live catalog", options: ['--search', '--limit'] },
   { name: 'mcp connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
   { name: 'mcp add-remote', readonly: false, summary: 'Attach a remote-http MCP server (URL + ${ENV} headers)', args: ['<slug>'], required: ['--name', '--url'], options: ['--header'] },
@@ -374,12 +367,12 @@ const SPEC = [
   { name: 'workflow webhook-url', readonly: true, summary: 'Print the external webhook URL + HMAC signing details for an event-triggered workflow', args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
-  { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
-  { name: 'profile update', readonly: false, summary: 'Update an agent profile (only provided flags change)', args: ['<slug>'], options: ['--name', '--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--enabled', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
+  { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
+  { name: 'profile update', readonly: false, summary: 'Update an agent profile (only provided flags change)', args: ['<slug>'], options: ['--name', '--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-label', '--priority', '--default', '--enabled', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
   { name: 'profile set-default', readonly: false, summary: 'Make a profile the single global default (idempotent)', args: ['<slug>'] },
   { name: 'profile checked-in', readonly: false, summary: 'Record a scheduled check-in (advances clock; --status ok|fail tracks failures/auto-pause)', args: ['<slug>'], options: ['--status'] },
   { name: 'profile rm', readonly: false, summary: 'Delete an agent profile; requires --yes', args: ['<slug>'], required: ['--yes'] },
-  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task', options: ['--project', '--task', '--label', '--kind'] },
+  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task', options: ['--project', '--task', '--label'] },
   { name: 'run start', readonly: false, summary: 'Open an agent run (prints runId)', required: ['--agent'], options: ['--project', '--profile', '--title', '--source', '--model', '--session-id', '--work-dir', '--id'] },
   { name: 'run end', readonly: false, summary: 'Close a run with a terminal status', args: ['<id>', '<status>'], options: ['--tokens-in', '--tokens-out', '--cache-read', '--cache-write', '--cost-micros', '--authoritative', '--agent'] },
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
@@ -625,14 +618,11 @@ withFlags(task.command('list'))
   .description("List a project's tasks")
   .argument('<slug>')
   .option('--status <status>', 'filter custom-task status')
-  .option('--kind <kind>', 'custom | integration')
   .action((slug: string, opts: LeafOpts) =>
     emit('task list', opts, async () => {
-      if (opts.kind) assertEnum(String(opts.kind), ['custom', 'integration'] as const, 'kind');
       const { queries } = await loadDb();
       const p = await resolveProject(queries, slug);
       let items = p.tasks;
-      if (opts.kind) items = items.filter((t) => t.kind === opts.kind);
       if (opts.status) items = items.filter((t) => t.status === opts.status);
       return {
         data: { items, count: items.length },
@@ -701,14 +691,11 @@ withFlags(task.command('move'))
       // Read first so a null from moveTask means "couldn't move" (live claim), not "no such task".
       const current = await queries.getTaskById(id);
       if (!current) throw new NotFoundError('task', id);
-      if (current.kind !== 'custom') {
-        throw new ValidationError('id', `Only custom tasks live on the board (task ${id} is ${current.kind})`);
-      }
       const toStatus = opts.status ? assertEnum(String(opts.status), TASK_STATUSES, 'status') : undefined;
       const destStatus = toStatus ?? current.status;
       // Destination column siblings in board order (the query sorts by sortOrder), moved id excluded.
       const columnIds = (await queries.getTasksByProjectId(current.projectId))
-        .filter((t) => t.kind === 'custom' && t.status === destStatus && t.id !== id)
+        .filter((t) => t.status === destStatus && t.id !== id)
         .map((t) => t.id);
       const orderedIds = planMoveOrder(columnIds, id, {
         top: !!opts.top,
@@ -842,43 +829,6 @@ withFlags(task.command('import-issues'))
         human: () => {
           console.log(`${repoLabel}: imported ${created.length} new task(s), ${issues.length - created.length} skipped`);
           created.forEach((t) => console.log(`  + ${t.id}  ${t.label}`));
-        },
-      };
-    }),
-  );
-
-// ── integration ──
-const integration = program.command('integration').description('Manage project integrations');
-
-withFlags(integration.command('set'))
-  .description('Upsert an integration status (idempotent)')
-  .argument('<slug>')
-  .argument('<type>', INTEGRATION_TYPES.join(' | '))
-  .argument('<status>', INTEGRATION_STATUSES.join(' | '))
-  .action((slug: string, type: string, status: string, opts: LeafOpts) =>
-    emit('integration set', opts, async () => {
-      const t = assertEnum(type, INTEGRATION_TYPES, 'type');
-      const s = assertEnum(status, INTEGRATION_STATUSES, 'status');
-      const { mutations, queries } = await loadDb();
-      const id = await resolveProjectId(queries, slug);
-      const row = await mutations.upsertIntegration(id, t, s);
-      return { data: row, human: () => console.log(`${slug}: ${t} → ${s}`) };
-    }),
-  );
-
-withFlags(integration.command('list'))
-  .description("List a project's integrations")
-  .argument('<slug>')
-  .action((slug: string, opts: LeafOpts) =>
-    emit('integration list', opts, async () => {
-      const { queries } = await loadDb();
-      const p = await resolveProject(queries, slug);
-      const items = p.tasks.filter((t) => t.kind === 'integration');
-      return {
-        data: { items, count: items.length },
-        human: () => {
-          items.forEach((t) => printTaskLine(t));
-          console.log(`\n${items.length} integrations`);
         },
       };
     }),
@@ -1381,7 +1331,6 @@ function profileFieldOptions(cmd: Command): Command {
     .option('--exec-template <cmd>', "command template for runtime 'exec'")
     .option('--match-project <csv>', 'route tasks of these project slugs here')
     .option('--match-category <csv>', `${CATEGORIES.join(' | ')}`)
-    .option('--match-kind <csv>', 'custom | integration')
     .option('--match-label <regex>', 'route tasks whose label matches this regex')
     .option('--priority <n>', 'routing tie-break (higher wins)')
     // Scheduled check-ins (Slice 5): a profile wakes on its own schedule and runs a standing mission in
@@ -1523,7 +1472,6 @@ withFlags(profile.command('resolve'))
   .option('--project <slug>', 'project context (provides slug + category)')
   .option('--task <id>', 'task context (provides kind + label)')
   .option('--label <text>', 'task label override')
-  .option('--kind <kind>', 'task kind override (custom | integration)')
   .action((opts: LeafOpts) =>
     emit('profile resolve', opts, async () => {
       const { queries } = await loadDb();
@@ -1536,10 +1484,8 @@ withFlags(profile.command('resolve'))
       if (opts.task) {
         const t = await queries.getTaskById(String(opts.task));
         if (!t) throw new NotFoundError('task', String(opts.task));
-        ctx.taskKind = t.kind;
         ctx.taskLabel = t.label;
       }
-      if (opts.kind !== undefined) ctx.taskKind = String(opts.kind);
       if (opts.label !== undefined) ctx.taskLabel = String(opts.label);
       const resolved = await queries.resolveProfile(ctx);
       return {

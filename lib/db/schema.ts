@@ -24,15 +24,10 @@ export const accentEnum = pgEnum('accent', ['orange', 'green', 'blue', 'violet',
 
 // Churny sets stay as text, validated in the app/CLI layer:
 //   status:             prelaunch | launched | testing | active | design | planning
-//   task.kind:          integration | custom
-//   integration_type:   google_oauth | stripe | sentry | zoho_email | other
-//   task.status:        todo | in_progress | done           (custom tasks)
-//   integration_status: needed | pending | done             (integration tasks)
+//   task.status:        todo | in_progress | done
 
 export const STATUSES = ['prelaunch', 'launched', 'testing', 'active', 'design', 'planning'] as const;
-export const INTEGRATION_TYPES = ['google_oauth', 'stripe', 'sentry', 'zoho_email', 'other'] as const;
 export const TASK_STATUSES = ['todo', 'in_progress', 'done'] as const;
-export const INTEGRATION_STATUSES = ['needed', 'pending', 'done'] as const;
 export const PRIORITIES = ['low', 'medium', 'high'] as const;
 
 // ── Mission Control allow-lists (Phase 1) ───────────────────────────────────────
@@ -50,7 +45,6 @@ export const EVENT_TYPES = [
   'task.status_changed',
   'task.claimed',
   'task.deleted',
-  'integration.upserted',
   'run.started',
   'run.ended',
   'run.abandoned',
@@ -97,7 +91,6 @@ export type McpServerConfig = {
 export type ProfileMatchRules = {
   projectSlugs?: string[];
   projectCategories?: Category[];
-  taskKinds?: string[];
   labelPattern?: string; // a regex tested against task.label
 };
 
@@ -106,9 +99,7 @@ export const CATEGORIES = categoryEnum.enumValues; // ['internal', 'open_source'
 export const ACCENTS = accentEnum.enumValues; //     ['orange', 'green', 'blue', 'violet', 'warm']
 
 export type Status = (typeof STATUSES)[number];
-export type IntegrationType = (typeof INTEGRATION_TYPES)[number];
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 export type Category = (typeof CATEGORIES)[number];
 export type Accent = (typeof ACCENTS)[number];
@@ -162,10 +153,7 @@ export const tasks = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     label: text('label').notNull(),
     notes: text('notes'),
-    kind: text('kind').notNull().default('custom'), // integration | custom
-    integrationType: text('integration_type'), // null for custom tasks
     status: text('status').notNull().default('todo'), // custom workflow status
-    integrationStatus: text('integration_status'), // tri-state for integration tasks
     sortOrder: integer('sort_order').notNull().default(0),
     // Optimistic-concurrency token, bumped on every status/claim write. No CAS reader today — the bump
     // is the collision signal; claimTask/getNextClaimableTask gate on claim state, not on this version.
@@ -183,23 +171,17 @@ export const tasks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // one integration row per type per project (keeps derived grids from double-counting)
-    uniqueIndex('tasks_project_integration_uq')
-      .on(t.projectId, t.integrationType)
-      .where(sql`integration_type IS NOT NULL`),
     // lets the custom-task seed use ON CONFLICT (project_id, label)
-    uniqueIndex('tasks_project_label_uq')
-      .on(t.projectId, t.label)
-      .where(sql`integration_type IS NULL`),
+    uniqueIndex('tasks_project_label_uq').on(t.projectId, t.label),
     index('tasks_project_idx').on(t.projectId),
     // Phase 2 claim peek (getNextClaimableTask) — partial + FIFO-ordered over ONLY claimable-eligible rows.
-    // The auto-claim daemon polls this on a loop; the predicate matches the query's status/kind filter so
+    // The auto-claim daemon polls this on a loop; the predicate matches the query's status filter so
     // the planner walks created_at order and applies the claim-expiry test on the small candidate set.
     // Claim-queue head: priority by sortOrder, then FIFO by createdAt. Matches getNextClaimableTask's
     // ORDER BY so the Kanban board's drag-to-reorder steers what the auto-claim daemon picks up next.
     index('tasks_claimable_idx')
       .on(t.sortOrder, t.createdAt)
-      .where(sql`status = 'todo' and kind = 'custom'`),
+      .where(sql`status = 'todo'`),
   ],
 );
 

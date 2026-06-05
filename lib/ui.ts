@@ -129,26 +129,15 @@ export function runTone(run: { live: boolean; status: string }): 'ok' | 'bad' | 
 }
 
 export function isTaskDone(t: Task): boolean {
-  return t.integrationType ? t.integrationStatus === 'done' : t.status === 'done';
+  return t.status === 'done';
 }
 
-/** The state word shown for a task: its integration status (default 'needed') or its workflow status. */
+/** The state word shown for a task: its workflow status. */
 export function taskState(t: Task): string {
-  return t.integrationType ? (t.integrationStatus ?? 'needed') : t.status;
+  return t.status;
 }
 
 /** Count of incomplete tasks; the row badge hides this when zero. */
 export function incompleteCount(p: ProjectWithTasks): number {
   return p.tasks.filter((t) => !isTaskDone(t)).length;
-}
-
-/** Per-project integration state for the inline row chips (null = project lacks that task). */
-export function integrationStatusOf(
-  p: ProjectWithTasks,
-  type: 'sentry' | 'zoho_email',
-): 'done' | 'pending' | 'needed' | null {
-  const task = p.tasks.find((t) => t.integrationType === type);
-  if (!task) return null;
-  const s = task.integrationStatus ?? 'needed';
-  return s === 'done' || s === 'pending' ? s : 'needed';
 }

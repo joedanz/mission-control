@@ -67,7 +67,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const tone = statusTone(project.status);
-  const integrationTasks = project.tasks.filter((t) => t.integrationType);
   const githubRepo = parseGitHubRepo(project.repoUrl);
 
   const overview = (
@@ -112,17 +111,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const mcpPanel = <McpTab slug={project.slug} />;
 
   const boardInitial = { projects: [toBoardProject(project, false)], runs: [] };
-  const boardIntegrations = {
-    done: integrationTasks.filter((t) => t.integrationStatus === 'done').length,
-    total: integrationTasks.length,
-  };
   const tasksPanel = (
-    <TasksPanel
-      slug={project.slug}
-      projectId={project.id}
-      initial={boardInitial}
-      integrations={boardIntegrations}
-    />
+    <TasksPanel slug={project.slug} projectId={project.id} initial={boardInitial} />
   );
 
   const activityPanel = (

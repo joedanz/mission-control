@@ -24,7 +24,6 @@ const CATEGORY_OPTS = [
   ['open_source', 'Open source'],
   ['client', 'Client'],
 ] as const;
-const TASK_KINDS = ['custom', 'integration'] as const;
 
 export type ProjectOption = { id: string; slug: string; name: string };
 
@@ -243,22 +242,6 @@ export function ProfileModal({
                       onClick={() => patch({ matchProjectCategories: toggle(s.matchProjectCategories, v) })}
                     >
                       {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="match-line">
-                <span className="lbl">Task kinds</span>
-                <div className="toggle-row">
-                  {TASK_KINDS.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      aria-pressed={s.matchTaskKinds.includes(k)}
-                      className={`toggle-chip${s.matchTaskKinds.includes(k) ? ' on' : ''}`}
-                      onClick={() => patch({ matchTaskKinds: toggle(s.matchTaskKinds, k) })}
-                    >
-                      {k}
                     </button>
                   ))}
                 </div>

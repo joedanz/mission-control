@@ -178,7 +178,6 @@ function validateMcpServers(servers: Record<string, McpServerConfig>): void {
 export type MatchContext = {
   projectSlug?: string | null;
   projectCategory?: Category | null;
-  taskKind?: string | null;
   taskLabel?: string | null;
 };
 
@@ -188,7 +187,7 @@ export type MatchContext = {
  *  project-only resolve). Disabled profiles are filtered by the caller, not here. */
 export function profileMatchesContext(rules: ProfileMatchRules | null | undefined, ctx: MatchContext): boolean {
   if (!rules) return false;
-  const { projectSlugs, projectCategories, taskKinds, labelPattern } = rules;
+  const { projectSlugs, projectCategories, labelPattern } = rules;
   // Each present rule must pass (fail closed if its dimension is absent); `matched` makes an empty
   // ruleset return false without restating the rule-key list a second time.
   let matched = false;
@@ -198,10 +197,6 @@ export function profileMatchesContext(rules: ProfileMatchRules | null | undefine
   }
   if (projectCategories?.length) {
     if (!ctx.projectCategory || !projectCategories.includes(ctx.projectCategory)) return false;
-    matched = true;
-  }
-  if (taskKinds?.length) {
-    if (!ctx.taskKind || !taskKinds.includes(ctx.taskKind)) return false;
     matched = true;
   }
   if (labelPattern && labelPattern !== '') {

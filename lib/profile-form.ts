@@ -46,7 +46,6 @@ export type ProfileFormState = {
   mcpServers: McpRow[];
   matchProjectSlugs: string[];
   matchProjectCategories: Category[];
-  matchTaskKinds: string[];
   matchLabelPattern: string;
   priority: string; // numeric text
   isDefault: boolean;
@@ -84,7 +83,6 @@ export function emptyFormState(): ProfileFormState {
     mcpServers: [],
     matchProjectSlugs: [],
     matchProjectCategories: [],
-    matchTaskKinds: [],
     matchLabelPattern: '',
     priority: '0',
     isDefault: false,
@@ -144,7 +142,6 @@ function buildMatchRules(s: ProfileFormState): ProfileMatchRules | null {
   const rules: ProfileMatchRules = {};
   if (s.matchProjectSlugs.length) rules.projectSlugs = s.matchProjectSlugs;
   if (s.matchProjectCategories.length) rules.projectCategories = s.matchProjectCategories;
-  if (s.matchTaskKinds.length) rules.taskKinds = s.matchTaskKinds;
   const label = s.matchLabelPattern.trim();
   if (label) rules.labelPattern = label;
   return Object.keys(rules).length ? rules : null;
@@ -236,7 +233,6 @@ export function formStateFromProfile(p: AgentProfile): ProfileFormState {
     mcpServers: Object.entries(p.mcpServers ?? {}).map(([name, cfg]) => configToCard(name, cfg)),
     matchProjectSlugs: m.projectSlugs ?? [],
     matchProjectCategories: m.projectCategories ?? [],
-    matchTaskKinds: m.taskKinds ?? [],
     matchLabelPattern: m.labelPattern ?? '',
     priority: String(p.priority),
     isDefault: p.isDefault,
