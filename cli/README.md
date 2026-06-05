@@ -148,7 +148,7 @@ mc spend [--group-by project|agent|day|run] [--since <iso>] [--until <iso>] [--p
 ```
 
 Run `mc enums --json` for the valid `category`, `status`, `accent`, `priority`, task `status`,
-`integration` type/status, plus `runStatus`, `runSource`, `eventType`, `eventLevel`, `runtime`, and
+plus `runStatus`, `runSource`, `eventType`, `eventLevel`, `runtime`, and
 `permissionMode` values.
 
 **Agent profiles & auto-routing.** A profile is a slug-addressed bundle of capabilities (skills, MCP
