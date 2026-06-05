@@ -160,29 +160,64 @@ Dropping `tasks.kind` makes the `--match-kind` routing dimension dead; left in p
 ### Task 5: Drop the schema columns + enums + retrim indexes + the kind filters (migration 0020)
 
 **Files:**
-- Modify: `lib/db/schema.ts`
-- Modify: `lib/mutations.ts` (`claimTask` WHERE + error-reason; `moveTask` guard)
-- Modify: `lib/queries.ts` (`getNextClaimableTask` WHERE)
-- Modify: `cli/index.ts` (`mc task move`: the `current.kind !== 'custom'` guard ~704-705 + the `t.kind === 'custom'` sibling filter ~711)
-- Modify: `test/board.test.ts` (remove the non-custom move case)
-- Create: `migrations/0020_*.sql` (+ updated `meta/_journal.json` + snapshot via `db:generate`)
+**SCOPE CORRECTION (recon gap):** the initial recon classified by symbol name and missed several readers of `tasks.kind`/`integration_type`/`integration_status`. The full reader set (all legacy-tracker, all must go) is: `lib/mutations.ts` (`claimTask` WHERE+reason, `moveTask` guard, `toggleTask` integration branch + payload, `terminalizeClaimsForRun` kind filter, `importTasks` onConflict `where`), `lib/queries.ts` (`getNextClaimableTask`), `cli/index.ts` (`task move` guard+filter, `task list` printer `(${t.integrationType})` suffix), `lib/ui.ts` (`isTaskDone`/`taskState` integration branch), and the **board "Integrations N/M" badge**: `lib/board.ts` (`BoardProject.integrations` + the custom/integration split), `components/TasksPanel.tsx` + `components/board/ProjectBoard.tsx` (prop + render `board-intg`), `components/board/OverallBoard.tsx` (render `board-intg`), `app/p/[slug]/page.tsx` (`integrationTasks` + `boardIntegrations`). Task 5 is split: **5a** removes every reader (columns stay → tsc/tests green), **5b** drops the columns + migration.
 
-- [ ] **Step 1: Remove the `kind` filters from code (so the dropped column has no readers):**
-  - `lib/mutations.ts` `claimTask`: remove `eq(tasks.kind, 'custom')` from the WHERE `and(...)`, and remove the branch `if (existing.kind !== 'custom') reason = ...;` (keep the other reason branches — re-chain the remaining `if/else if/else`).
+This is **Task 5a** below; the column-drop migration is **Task 5b**.
+
+**Files (5a):**
+- Modify: `lib/mutations.ts` (`claimTask`, `moveTask`, `toggleTask`, `terminalizeClaimsForRun`), `lib/queries.ts`, `cli/index.ts` (`task move`, `task list` printer), `lib/ui.ts`, `lib/board.ts`, `components/TasksPanel.tsx`, `components/board/ProjectBoard.tsx`, `components/board/OverallBoard.tsx`, `app/p/[slug]/page.tsx`, `test/board.test.ts`
+- NOTE: keep `importTasks`'s `onConflictDoNothing({ ..., where: sql\`integration_type is null\` })` UNTOUCHED in 5a — its `where` is the arbiter predicate for the partial `tasks_project_label_uq` index; it's removed in 5b when that index becomes non-partial. The `integration_type` column still exists in 5a, so it compiles.
+
+- [ ] **Step 1: Remove the `kind` claim/move filters:**
+  - `lib/mutations.ts` `claimTask`: remove `eq(tasks.kind, 'custom')` from the WHERE `and(...)`, and remove the branch `if (existing.kind !== 'custom') reason = ...;` (re-chain the remaining `if (heldNow) … else if (status !== 'todo') … else …`).
   - `lib/mutations.ts` `moveTask`: remove the guard `if (current.kind !== 'custom') return null;`.
+  - `lib/mutations.ts` `terminalizeClaimsForRun`: change `.where(and(eq(tasks.claimedByRunId, runId), eq(tasks.kind, 'custom')))` → `.where(eq(tasks.claimedByRunId, runId))`.
   - `lib/queries.ts` `getNextClaimableTask`: remove `eq(tasks.kind, 'custom')` from its WHERE.
-  - `cli/index.ts` `mc task move`: remove the guard `if (current.kind !== 'custom') { throw new ValidationError('id', \`Only custom tasks live on the board …\`); }` (~704-705) and the `t.kind === 'custom' &&` clause from the sibling-task filter (~711) so it filters only on `status === destStatus && t.id !== id`.
+  - `cli/index.ts` `mc task move`: remove the guard `if (current.kind !== 'custom') { throw new ValidationError('id', …); }` and the `t.kind === 'custom' &&` clause from the sibling-task filter (→ `.filter((t) => t.status === destStatus && t.id !== id)`).
 
-- [ ] **Step 2: Remove the integration case from `test/board.test.ts`** (the "moveTask returns null for a non-custom task" `it(...)` that inserts `kind: 'integration', integrationType: 'sentry', integrationStatus: 'needed'`).
+- [ ] **Step 2: Remove the `toggleTask` integration branch** (`lib/mutations.ts`): the function currently branches `task.integrationType ? <flip integrationStatus> : <flip status>`. Replace with the status-only flip (the `else` branch) directly on `taskId` (`.returning()` returns `[]` → return null if no row), dropping the `getTaskById` pre-read + the integration comment. Change the event payload `payload: { status: row.status, integrationStatus: row.integrationStatus }` → `payload: { status: row.status }`. Verify `getTaskById`/`eq` imports are still used elsewhere before removing.
 
-- [ ] **Step 3: Edit `lib/db/schema.ts`:**
+- [ ] **Step 3: Simplify `lib/ui.ts`** — `isTaskDone(t)` → `return t.status === 'done';`; `taskState(t)` → `return t.status;` (drop the `t.integrationType ? … :` ternary in both).
+
+- [ ] **Step 4: Remove the board integration badge:**
+  - `lib/board.ts`: remove the `integrations: { done: number; total: number }` field from the `BoardProject` type; in `toBoardProject`, remove `const integration = p.tasks.filter((t) => t.integrationType);`, change `const custom = p.tasks.filter((t) => !t.integrationType);` → `const custom = p.tasks;`, and remove the `integrations: { done: …, total: … },` entry from the returned object.
+  - `components/TasksPanel.tsx`: remove the `integrations` prop (the destructure `integrations,`, the type `integrations: { done: number; total: number };`, and the `integrations={integrations}` pass-through to `<ProjectBoard>`).
+  - `components/board/ProjectBoard.tsx`: remove the `integrations` prop (destructure + type) and the `<a className="board-intg" …>Integrations {integrations.done}/{integrations.total}</a>` element (~142-143).
+  - `components/board/OverallBoard.tsx`: remove the `<a className="board-intg" …>Integrations {project.integrations.done}/{project.integrations.total}</a>` element (~50-51).
+  - `app/p/[slug]/page.tsx`: remove `const integrationTasks = …` (~70), the `const boardIntegrations = {…}` block (~116), and the `integrations={boardIntegrations}` prop on `<TasksPanel>`.
+  - Note the now-unused `.board-intg` CSS class in `app/globals.css` for the Task 6 cleanup (leave CSS here).
+
+- [ ] **Step 5: `cli/index.ts` `task list` printer** — remove the `${t.integrationType ? ` (${t.integrationType})` : ''}` suffix from the `console.log` task line.
+
+- [ ] **Step 6: `test/board.test.ts`** — remove the "moveTask returns null for a non-custom task" `it(...)` (inserts `kind: 'integration', integrationType, integrationStatus`).
+
+- [ ] **Step 7: Verify 5a.**
+  - `npx tsc --noEmit` → only the 4 WorkflowNode errors (columns still exist, so no `kind`/`integration` errors — all readers are gone).
+  - `npx eslint` on every changed file → clean.
+  - `npx vitest run test/board.test.ts test/claim-lifecycle.test.ts test/spec-sync.test.ts` → PASS.
+  - `npm run build` → compiles (board + project page render without the badge).
+  - `grep -rn "integrationType\|integrationStatus\|tasks.kind\|\.kind === 'custom'\|\.kind !== 'custom'\|board-intg" lib app cli components` → zero matches (the only surviving `kind`s are unrelated: daemon workflow step marker, `kind:'agent'` actors, React `state.kind` unions).
+
+- [ ] **Step 8: Commit** — `git add -A && git commit -m "feat(mcp): remove all legacy integration-task readers + board badge (slice 5)"`
+
+---
+
+### Task 5b: Drop the schema columns + enums + retrim indexes (migration 0020)
+
+**Files:**
+- Modify: `lib/db/schema.ts`, `lib/mutations.ts` (`importTasks` onConflict `where`)
+- Create: `migrations/0020_*.sql` (+ snapshot + journal via `db:generate`)
+
+- [ ] **Step 0: `lib/mutations.ts` `importTasks`** — remove the `where: sql\`integration_type is null\`` from `onConflictDoNothing` (→ `.onConflictDoNothing({ target: [tasks.projectId, tasks.label] })`), since the `tasks_project_label_uq` index becomes non-partial in this migration.
+
+- [ ] **Step 1: Edit `lib/db/schema.ts`:**
   - Remove `export const INTEGRATION_TYPES = [...]` and `export const INTEGRATION_STATUSES = [...]` and their `export type IntegrationType` / `IntegrationStatus`.
   - In the `tasks` table: remove the `kind`, `integrationType`, and `integrationStatus` column definitions. Update the column comments accordingly.
   - In the `tasks` index block: remove the `tasks_project_integration_uq` index entirely; change `tasks_project_label_uq` to drop `.where(sql\`integration_type IS NULL\`)` (plain `uniqueIndex('tasks_project_label_uq').on(t.projectId, t.label)`); change `tasks_claimable_idx`'s predicate from `` sql`status = 'todo' and kind = 'custom'` `` to `` sql`status = 'todo'` ``.
 
-- [ ] **Step 4: Generate the migration** — `npm run db:generate`. It creates `migrations/0020_*.sql` + updates the snapshot + journal.
+- [ ] **Step 2: Generate the migration** — `npm run db:generate`. It creates `migrations/0020_*.sql` + updates the snapshot + journal.
 
-- [ ] **Step 5: Hand-edit the generated `0020_*.sql`** so its body is EXACTLY this (preserve the drizzle-assigned filename; the DELETE is a data step drizzle won't emit, and `IF EXISTS` + index-drops-before-column-drops avoids dependency-order errors):
+- [ ] **Step 3: Hand-edit the generated `0020_*.sql`** so its body is EXACTLY this (preserve the drizzle-assigned filename; the DELETE is a data step drizzle won't emit, and `IF EXISTS` + index-drops-before-column-drops avoids dependency-order errors):
 ```sql
 DELETE FROM "tasks" WHERE "kind" = 'integration';--> statement-breakpoint
 DROP INDEX IF EXISTS "tasks_project_integration_uq";--> statement-breakpoint
@@ -196,18 +231,18 @@ CREATE INDEX "tasks_claimable_idx" ON "tasks" USING btree ("sort_order","created
 ```
   (Match drizzle's exact `CREATE INDEX` syntax/quoting from what it generated for the surviving indexes — copy its `USING btree (...)` form. The hand-edits — the leading DELETE, `IF EXISTS`, and statement order — don't affect the snapshot.)
 
-- [ ] **Step 6: Apply + verify the migration:**
+- [ ] **Step 4: Apply + verify the migration:**
   - `npm run db:migrate` → applies cleanly.
   - `npm run db:generate` → must report **No schema changes** (snapshot matches schema.ts).
-  - Confirm columns gone + rows deleted (use `mc` or a quick query): e.g. `mc task list <slug> --json` returns tasks with no `kind`/`integrationType` fields and no "… setup" integration rows remain.
+  - Confirm columns gone + rows deleted: `mc task list <slug> --json` returns tasks with no `kind`/`integrationType` fields and no "… setup" integration rows remain.
 
-- [ ] **Step 7: Verify code.**
+- [ ] **Step 5: Verify code.**
   - `npx tsc --noEmit` → ONLY the 4 WorkflowNode errors, zero `kind`/`integration` errors.
-  - `npx eslint lib/db/schema.ts lib/mutations.ts lib/queries.ts test/board.test.ts` → clean.
+  - `npx eslint lib/db/schema.ts lib/mutations.ts` → clean.
   - `npx vitest run test/board.test.ts test/claim-lifecycle.test.ts test/spec-sync.test.ts` → PASS.
-  - `grep -rn "integration_type\|integration_status\|INTEGRATION_TYPES\|INTEGRATION_STATUSES\|\.kind\b\|tasks.kind" lib app cli components` → only legitimate matches remain (the workflow node's `kind: 'integration'` step marker in `daemon/`, NOT touched here, and any unrelated `.kind`). Confirm zero references to `tasks.kind` / the dropped columns.
+  - `grep -rn "integration_type\|integration_status\|INTEGRATION_TYPES\|INTEGRATION_STATUSES\|tasks.kind" lib app cli components` → zero matches (the only surviving `kind:'integration'` is the daemon workflow step marker, NOT touched).
 
-- [ ] **Step 8: Commit** — `git add -A && git commit -m "feat(mcp)!: drop tasks.kind + integration columns, retrim indexes (migration 0020, slice 5)"`
+- [ ] **Step 6: Commit** — `git add -A && git commit -m "feat(mcp)!: drop tasks.kind + integration columns, retrim indexes (migration 0020, slice 5)"`
 
 ---
 
