@@ -141,14 +141,3 @@ export function taskState(t: Task): string {
 export function incompleteCount(p: ProjectWithTasks): number {
   return p.tasks.filter((t) => !isTaskDone(t)).length;
 }
-
-/** Per-project integration state for the inline row chips (null = project lacks that task). */
-export function integrationStatusOf(
-  p: ProjectWithTasks,
-  type: 'sentry' | 'zoho_email',
-): 'done' | 'pending' | 'needed' | null {
-  const task = p.tasks.find((t) => t.integrationType === type);
-  if (!task) return null;
-  const s = task.integrationStatus ?? 'needed';
-  return s === 'done' || s === 'pending' ? s : 'needed';
-}

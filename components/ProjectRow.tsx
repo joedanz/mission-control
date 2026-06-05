@@ -7,7 +7,6 @@ import {
   statusLabel,
   isTaskDone,
   incompleteCount,
-  integrationStatusOf,
   categoryShort,
   categoryLabel,
   categoryTone,
@@ -19,38 +18,11 @@ import { AddTask } from './AddTask';
 import { ProjectCardActions } from './ProjectCardActions';
 import { RowNameLink } from './RowNameLink';
 
-const STATE_WORD: Record<string, string> = { done: 'done', pending: 'pend', needed: 'need' };
-
 function ExternalIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
       <path d="M7 17L17 7M17 7H9M17 7v8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-  );
-}
-
-function IntgCell({
-  lane,
-  label,
-  state,
-}: {
-  lane: string;
-  label: string;
-  state: 'done' | 'pending' | 'needed' | null;
-}) {
-  if (!state) {
-    return (
-      <span className={`col-intg ${lane} none`} title={`${label}: not tracked`}>
-        <span className="lbl">{label} </span>—
-      </span>
-    );
-  }
-  return (
-    <span className={`col-intg ${lane} ${state}`} title={`${label}: ${state}`}>
-      <span className="intg-dot" aria-hidden="true" />
-      <span className="lbl">{label} </span>
-      {STATE_WORD[state]}
-    </span>
   );
 }
 
@@ -88,9 +60,6 @@ export function ProjectRow({ project }: { project: ProjectWithTasks }) {
           ))}
           {extra > 0 && <span className="tag-more">+{extra}</span>}
         </span>
-
-        <IntgCell lane="sen" label="SEN" state={integrationStatusOf(project, 'sentry')} />
-        <IntgCell lane="zoh" label="ZOH" state={integrationStatusOf(project, 'zoho_email')} />
 
         <span className={`pill ${tone}`}>{statusLabel(project.status)}</span>
 
