@@ -1,13 +1,11 @@
 'use client';
 
-// ABOUTME: One toolkit row in the Integrations tab — status pill + Connect/Check status/Disconnect.
-// ABOUTME: Posts to /api/projects/[slug]/composio; opens the Composio hosted link on connect.
+// ABOUTME: One connected MCP server row — composio (Disconnect / Check status / open link) or remote
+// ABOUTME: (Remove). Posts to /api/projects/[slug]/composio; opens the Composio hosted link on connect.
 
 import { useState } from 'react';
 import type { McpServerView, McpServerStatus } from '@/lib/composio-view';
 
-// Status → pill className + label. A Record (not a switch) makes exhaustiveness compile-checked:
-// adding a McpServerStatus value without an entry is a type error.
 const PILL: Record<McpServerStatus, { cls: string; label: string }> = {
   active: { cls: 'pill ok', label: 'Active' },
   initializing: { cls: 'pill warn', label: 'Initializing' },
@@ -20,7 +18,7 @@ type PostResult =
   | { ok: true; data: { linkUrl?: string; status?: string } }
   | { ok: false; error: string; message?: string };
 
-export function IntegrationRow({
+export function McpServerRow({
   slug,
   view,
   onChanged,
@@ -32,24 +30,22 @@ export function IntegrationRow({
   const [pending, setPending] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  async function run(action: 'connect' | 'status' | 'disconnect') {
+  async function run(body: Record<string, unknown>, opensLink = false) {
     setPending(true);
     setRowError(null);
     try {
       const res = await fetch(`/api/projects/${slug}/composio`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, toolkit: view.toolkitSlug ?? view.key }),
+        body: JSON.stringify(body),
       });
       const json = (await res.json()) as PostResult;
       if (!json.ok) {
         setRowError(json.message ?? json.error ?? 'Request failed');
         return;
       }
-      if (action === 'connect' && json.data.linkUrl) {
-        window.open(json.data.linkUrl, '_blank', 'noopener,noreferrer');
-      }
-      await onChanged(); // refresh the list only after a successful mutation
+      if (opensLink && json.data.linkUrl) window.open(json.data.linkUrl, '_blank', 'noopener,noreferrer');
+      await onChanged();
     } catch (err) {
       setRowError(String(err));
     } finally {
@@ -58,13 +54,15 @@ export function IntegrationRow({
   }
 
   const pill = PILL[view.status];
-  const connected = view.status === 'active';
+  const isRemote = view.source === 'remote';
   const initializing = view.status === 'initializing';
 
   return (
     <div className="intg-control">
       <span className="intg-control-label">
+        <span className="mcp-source-tag">{isRemote ? 'Remote' : 'Composio'}</span>
         {view.name}
+        {view.url && <span className="intg-tools"> · {view.url}</span>}
         {initializing && view.linkUrl && (
           <>
             {' · '}
@@ -75,17 +73,17 @@ export function IntegrationRow({
       </span>
       <span className="intg-actions">
         <span className={pill.cls}>{pill.label}</span>
-        {connected ? (
-          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run('disconnect')}>
-            Disconnect
+        {isRemote ? (
+          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run({ action: 'remove-remote', name: view.key })}>
+            Remove
           </button>
         ) : initializing ? (
-          <button type="button" className="btn-sm" disabled={pending} onClick={() => void run('status')}>
+          <button type="button" className="btn-sm" disabled={pending} onClick={() => void run({ action: 'status', toolkit: view.key })}>
             Check status
           </button>
         ) : (
-          <button type="button" className="btn-sm btn-ok" disabled={pending} onClick={() => void run('connect')}>
-            Connect
+          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run({ action: 'disconnect', toolkit: view.key })}>
+            Disconnect
           </button>
         )}
       </span>
