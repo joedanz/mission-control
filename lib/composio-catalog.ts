@@ -32,3 +32,10 @@ export function getCatalogEntry(slug: string): CatalogEntry | null {
 export function catalogSlugs(): string[] {
   return Object.keys(COMPOSIO_CATALOG).sort();
 }
+
+/** The allow-list to bind a toolkit's MCP server to: the curated list for a known toolkit, else `[]`.
+ *  Composio expands `[]` to ALL of the toolkit's tools (verified live) — so any toolkit is connectable,
+ *  with curated toolkits kept deliberately narrow. */
+export function allowedToolsFor(slug: string): string[] {
+  return getCatalogEntry(slug)?.allowedTools ?? [];
+}
