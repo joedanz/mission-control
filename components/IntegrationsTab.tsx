@@ -4,18 +4,18 @@
 // ABOUTME: row list, and re-polls any initializing connection when the window regains focus.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ToolkitView } from '@/lib/composio-view';
+import type { McpServerView } from '@/lib/composio-view';
 import { IntegrationRow } from './IntegrationRow';
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'data'; toolkits: ToolkitView[] };
+  | { kind: 'data'; servers: McpServerView[] };
 
-type GetResponse = { ok: boolean; error?: string; message?: string; data?: { toolkits: ToolkitView[] } };
+type GetResponse = { ok: boolean; error?: string; message?: string; data?: { servers: McpServerView[] } };
 
 function toState(json: GetResponse): State {
-  if (json.ok && json.data) return { kind: 'data', toolkits: json.data.toolkits };
+  if (json.ok && json.data) return { kind: 'data', servers: json.data.servers };
   return { kind: 'error', message: json.message ?? json.error ?? 'Failed to load integrations' };
 }
 
@@ -25,7 +25,7 @@ export function IntegrationsTab({ slug }: { slug: string }) {
   const loadSeq = useRef(0);
 
   // Mirror the latest state into a ref (in an effect, not during render) so the focus listener can
-  // read the current toolkits without re-binding on every refresh.
+  // read the current servers without re-binding on every refresh.
   useEffect(() => {
     stateRef.current = state;
   });
@@ -55,19 +55,20 @@ export function IntegrationsTab({ slug }: { slug: string }) {
       });
   }, [slug]);
 
-  // On window focus, poll any still-initializing toolkit (the user just returned from authorizing), then refresh.
+  // On window focus, poll any still-initializing composio server (the user just returned from
+  // authorizing), then refresh. Remote servers have no initializing lifecycle.
   useEffect(() => {
     async function onFocus() {
       const s = stateRef.current;
       if (s.kind !== 'data') return;
-      const initializing = s.toolkits.filter((t) => t.status === 'initializing');
+      const initializing = s.servers.filter((v) => v.source === 'composio' && v.status === 'initializing');
       if (initializing.length === 0) return;
       await Promise.all(
-        initializing.map((t) =>
+        initializing.map((v) =>
           fetch(`/api/projects/${slug}/composio`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ action: 'status', toolkit: t.slug }),
+            body: JSON.stringify({ action: 'status', toolkit: v.toolkitSlug ?? v.key }),
           }).catch(() => undefined),
         ),
       );
@@ -106,8 +107,8 @@ export function IntegrationsTab({ slug }: { slug: string }) {
 
   return (
     <div className="detail-integrations">
-      {state.toolkits.map((t) => (
-        <IntegrationRow key={t.slug} slug={slug} view={t} onChanged={load} />
+      {state.servers.map((v) => (
+        <IntegrationRow key={v.key} slug={slug} view={v} onChanged={load} />
       ))}
     </div>
   );

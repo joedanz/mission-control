@@ -4,17 +4,16 @@
 // ABOUTME: Posts to /api/projects/[slug]/composio; opens the Composio hosted link on connect.
 
 import { useState } from 'react';
-import type { ToolkitView, ToolkitStatus } from '@/lib/composio-view';
+import type { McpServerView, McpServerStatus } from '@/lib/composio-view';
 
 // Status → pill className + label. A Record (not a switch) makes exhaustiveness compile-checked:
-// adding a ToolkitStatus value without an entry is a type error.
-const PILL: Record<ToolkitStatus, { cls: string; label: string }> = {
+// adding a McpServerStatus value without an entry is a type error.
+const PILL: Record<McpServerStatus, { cls: string; label: string }> = {
   active: { cls: 'pill ok', label: 'Active' },
   initializing: { cls: 'pill warn', label: 'Initializing' },
   error: { cls: 'pill bad', label: 'Error' },
   expired: { cls: 'pill bad', label: 'Expired' },
   disconnected: { cls: 'pill', label: 'Off' },
-  not_connected: { cls: 'pill', label: 'Off' },
 };
 
 type PostResult =
@@ -27,7 +26,7 @@ export function IntegrationRow({
   onChanged,
 }: {
   slug: string;
-  view: ToolkitView;
+  view: McpServerView;
   onChanged: () => void | Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
@@ -40,7 +39,7 @@ export function IntegrationRow({
       const res = await fetch(`/api/projects/${slug}/composio`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, toolkit: view.slug }),
+        body: JSON.stringify({ action, toolkit: view.toolkitSlug ?? view.key }),
       });
       const json = (await res.json()) as PostResult;
       if (!json.ok) {
@@ -66,7 +65,6 @@ export function IntegrationRow({
     <div className="intg-control">
       <span className="intg-control-label">
         {view.name}
-        <span className="intg-tools"> · {view.toolCount} tools</span>
         {initializing && view.linkUrl && (
           <>
             {' · '}

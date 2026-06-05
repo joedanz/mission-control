@@ -41,17 +41,17 @@ beforeEach(() => {
 });
 
 describe('GET', () => {
-  it('returns merged toolkit views', async () => {
+  it('returns the project mcp server views', async () => {
     lib.listConnections.mockResolvedValue([
-      { toolkitSlug: 'linear', status: 'active', linkUrl: null, error: null },
+      { source: 'composio', toolkitSlug: 'linear', remoteName: null, remoteUrl: null, status: 'active', linkUrl: null, error: null },
     ]);
     const res = await GET(new Request('http://localhost/api/projects/demo/composio'), { params });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    const linear = json.data.toolkits.find((t: { slug: string }) => t.slug === 'linear');
+    const linear = json.data.servers.find((s: { key: string }) => s.key === 'linear');
     expect(linear.status).toBe('active');
-    expect(linear.toolCount).toBe(4);
+    expect(linear.source).toBe('composio');
   });
 
   it('401 when the auth gate rejects', async () => {

@@ -3,7 +3,7 @@
 
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { listConnections, connectStart, connectPoll, disconnect } from '@/lib/composio-connections';
-import { toolkitViews } from '@/lib/composio-view';
+import { mcpServerViews } from '@/lib/composio-view';
 import { NotFoundError, ValidationError } from '@/lib/validation';
 import { ComposioApiError } from '@/lib/composio-api';
 
@@ -46,7 +46,7 @@ export async function GET(
   const { slug } = await params;
   try {
     const connections = await listConnections(slug);
-    return Response.json({ ok: true, data: { toolkits: toolkitViews(connections) } });
+    return Response.json({ ok: true, data: { servers: mcpServerViews(connections) } });
   } catch (e) {
     return mapError(e);
   }
