@@ -1,7 +1,7 @@
 'use client';
 
-// ABOUTME: One connected MCP server row — composio (Disconnect / Check status / open link) or remote
-// ABOUTME: (Remove). Posts to /api/projects/[slug]/composio; opens the Composio hosted link on connect.
+// ABOUTME: One connected MCP server row — composio (Disconnect / Check status, with an open-link anchor
+// ABOUTME: while initializing) or remote (Remove). Posts the matching action to /api/projects/[slug]/composio.
 
 import { useState } from 'react';
 import type { McpServerView, McpServerStatus } from '@/lib/composio-view';
@@ -14,9 +14,7 @@ const PILL: Record<McpServerStatus, { cls: string; label: string }> = {
   disconnected: { cls: 'pill', label: 'Off' },
 };
 
-type PostResult =
-  | { ok: true; data: { linkUrl?: string; status?: string } }
-  | { ok: false; error: string; message?: string };
+type PostResult = { ok: boolean; error?: string; message?: string };
 
 export function McpServerRow({
   slug,
@@ -30,7 +28,7 @@ export function McpServerRow({
   const [pending, setPending] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  async function run(body: Record<string, unknown>, opensLink = false) {
+  async function run(body: Record<string, unknown>) {
     setPending(true);
     setRowError(null);
     try {
@@ -44,7 +42,6 @@ export function McpServerRow({
         setRowError(json.message ?? json.error ?? 'Request failed');
         return;
       }
-      if (opensLink && json.data.linkUrl) window.open(json.data.linkUrl, '_blank', 'noopener,noreferrer');
       await onChanged();
     } catch (err) {
       setRowError(String(err));

@@ -5,6 +5,7 @@ import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
 import { listToolkits, ComposioApiError } from '@/lib/composio-api';
 import { listConnections } from '@/lib/composio-connections';
 import { COMPOSIO_CATALOG } from '@/lib/composio-catalog';
+import { NotFoundError } from '@/lib/validation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,9 @@ export async function GET(
       },
     });
   } catch (e) {
+    if (e instanceof NotFoundError) {
+      return Response.json({ ok: false, error: 'not_found', message: e.message }, { status: 404 });
+    }
     if (e instanceof ComposioApiError) {
       return Response.json({ ok: false, error: 'composio_api_error', message: e.message }, { status: e.status ?? 502 });
     }

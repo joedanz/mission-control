@@ -1,6 +1,7 @@
 // ABOUTME: Tests the MCP catalog browse endpoint — GET lists Composio's live catalog with featured +
 // ABOUTME: connected flags. CI-safe: mocks the auth gate, listToolkits, and listConnections.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NotFoundError } from '../lib/validation';
 
 class FakeUnauthorized extends Error {}
 const requireAllowedUser = vi.fn(async () => ({ user: { email: 'joe@ticc.net' } }));
@@ -51,5 +52,13 @@ describe('GET catalog', () => {
   it('401 when the auth gate rejects', async () => {
     requireAllowedUser.mockRejectedValue(new FakeUnauthorized());
     expect((await get()).status).toBe(401);
+  });
+
+  it('404 when the project does not exist (listConnections throws NotFoundError)', async () => {
+    listToolkits.mockResolvedValue([]);
+    listConnections.mockRejectedValue(new NotFoundError('project', 'demo'));
+    const res = await get();
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('not_found');
   });
 });
