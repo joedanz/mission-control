@@ -50,9 +50,11 @@ mc integration list <slug>
 mc mcp catalog [--search <q>] [--limit <n>]  # list Composio's FULL live catalog (~1000+ toolkits) via GET /api/v3/toolkits; --search is a server-side fuzzy filter, --limit caps the page (default 50, max 500). Items carry {slug, name, description, toolCount, categories, featured} where featured = the slug is in the curated editorial set (lib/composio-catalog.ts). No DB; reads COMPOSIO_API_KEY from host env (never stored)
 mc mcp connect <slug> <toolkit>              # start a Composio connection to ANY catalog toolkit (not just the curated pair); prints OAuth authorize URL; follow up with mc mcp status. A curated toolkit (linear|slack) binds its narrow editorial tool list; any other toolkit binds allowed_tools=[] which Composio expands to ALL of that toolkit's tools. At most one connection per (project, toolkit)
 mc mcp status <slug> <toolkit>               # poll Composio and persist connection status (initializing|active|error|expired|disconnected)
-mc mcp list <slug>                           # list a project's MCP connections and their statuses
-mc mcp disconnect <slug> <toolkit>           # revoke at Composio and mark disconnected locally
-mc mcp config <slug>                         # resolve active connections into an mcpServers JSON map (daemons call this at spawn to auto-feed the agent with remote-http MCP servers for Linear/Slack/…)
+mc mcp add-remote <slug> --name <n> --url <u> [--header K=V …]  # attach a `remote`-source MCP server — a direct remote-http endpoint, NO OAuth/Composio. Header values are ${ENV} placeholders resolved at spawn (NEVER stored literally — a literal-secret value is rejected with VALIDATION); --name doubles as the mcpServers map key; the row is immediately `active`. Idempotent on (project, name) — a re-add updates url+headers
+mc mcp remove-remote <slug> <name>           # detach a remote MCP server by name (a row delete, no network; NOT_FOUND if no such remote row)
+mc mcp list <slug>                           # list a project's MCP connections (BOTH sources, source-tagged composio|remote) and their statuses
+mc mcp disconnect <slug> <toolkit>           # revoke a COMPOSIO connection at Composio and mark disconnected locally (composio-only — remote rows use `mc mcp remove-remote`)
+mc mcp config <slug>                         # resolve active connections (BOTH composio + remote sources) into one mcpServers JSON map (daemons call this at spawn to auto-feed the agent; on a key collision a remote server wins over a composio one)
 mc mcp refresh <slug>                        # re-poll all of a project's connections; emit composio.connection_changed events on status changes
 mc workflow list [--project <slug>]          # list agentic workflows (node graphs of agent runs + integrations)
 mc workflow get <slug>                       # one workflow (graph + status + version)
