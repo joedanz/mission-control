@@ -1,7 +1,7 @@
 // ABOUTME: DB CRUD for composio_toolkits (cached shared resources) + mcp_connections (per
 // ABOUTME: project+toolkit). No Composio network calls — the DB-testable seam under the orchestration.
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import { composioToolkits, mcpConnections, type ComposioToolkit, type McpConnection, type ConnectionStatus } from './db/schema';
 
@@ -71,6 +71,48 @@ export async function setConnectionStatus(
     .update(mcpConnections)
     .set({ status, error, updatedAt: new Date() })
     .where(eq(mcpConnections.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+export async function getRemoteConnection(projectId: string, remoteName: string): Promise<McpConnection | null> {
+  const rows = await db
+    .select()
+    .from(mcpConnections)
+    .where(and(eq(mcpConnections.projectId, projectId), eq(mcpConnections.source, 'remote'), eq(mcpConnections.remoteName, remoteName)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Upsert a remote-source MCP server row (source='remote', status pinned 'active'). Idempotent on
+ *  (project, remote_name) via the partial unique index — a re-add updates url + headers. */
+export async function upsertRemoteConnection(
+  projectId: string,
+  patch: { remoteName: string; remoteUrl: string; remoteHeaders: Record<string, string> },
+): Promise<McpConnection> {
+  const rows = await db
+    .insert(mcpConnections)
+    .values({
+      projectId,
+      source: 'remote',
+      status: 'active',
+      remoteName: patch.remoteName,
+      remoteUrl: patch.remoteUrl,
+      remoteHeaders: patch.remoteHeaders,
+    })
+    .onConflictDoUpdate({
+      target: [mcpConnections.projectId, mcpConnections.remoteName],
+      targetWhere: sql`source = 'remote'`,
+      set: { remoteUrl: patch.remoteUrl, remoteHeaders: patch.remoteHeaders, updatedAt: new Date() },
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function deleteRemoteConnection(projectId: string, remoteName: string): Promise<McpConnection | null> {
+  const rows = await db
+    .delete(mcpConnections)
+    .where(and(eq(mcpConnections.projectId, projectId), eq(mcpConnections.source, 'remote'), eq(mcpConnections.remoteName, remoteName)))
     .returning();
   return rows[0] ?? null;
 }
