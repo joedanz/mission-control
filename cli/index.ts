@@ -13,8 +13,6 @@ import {
   ACCENTS,
   PRIORITIES,
   TASK_STATUSES,
-  INTEGRATION_TYPES,
-  INTEGRATION_STATUSES,
   RUN_STATUSES,
   RUN_SOURCES,
   EVENT_TYPES,
@@ -321,8 +319,6 @@ const ENUMS = {
   accent: ACCENTS,
   priority: PRIORITIES,
   taskStatus: TASK_STATUSES,
-  integrationType: INTEGRATION_TYPES,
-  integrationStatus: INTEGRATION_STATUSES,
   runStatus: RUN_STATUSES,
   runSource: RUN_SOURCES,
   eventType: EVENT_TYPES,
@@ -340,7 +336,7 @@ const SPEC = [
   { name: 'project update', readonly: false, summary: 'Update a project (only provided flags change)', args: ['<slug>'], options: ['--name', '--category', '--status', '--accent', '--domain', '--tech', '--repo-path', '--repo-url', '--live-url', '--priority', '--notes', '--sentry-project', '--email-provider', '--email-address', '--stripe-site'] },
   { name: 'project rm', readonly: false, summary: 'Delete a project (cascades tasks); requires --yes', args: ['<slug>'], required: ['--yes'] },
   { name: 'project set-repo', readonly: false, summary: 'Set a project repo path + url', args: ['<slug>', '<path>', '[url]'] },
-  { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status', '--kind custom|integration'] },
+  { name: 'task list', readonly: true, summary: "List a project's tasks", args: ['<slug>'], options: ['--status'] },
   { name: 'task get', readonly: true, summary: 'Get a single task by id', args: ['<id>'] },
   { name: 'task add', readonly: false, summary: 'Add a custom task', args: ['<slug>', '<label...>'] },
   { name: 'task set-status', readonly: false, summary: 'Set a task status (idempotent)', args: ['<id>', '<status>'] },
@@ -350,8 +346,6 @@ const SPEC = [
   { name: 'task next', readonly: true, summary: 'Show the next claimable task (FIFO: custom, todo, unclaimed/expired)', options: ['--project'] },
   { name: 'task claim', readonly: false, summary: 'Claim a task for the current run (single-statement, race-safe)', args: ['<id>'], options: ['--run', '--ttl'] },
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
-  { name: 'integration set', readonly: false, summary: 'Upsert an integration status (idempotent)', args: ['<slug>', '<type>', '<status>'] },
-  { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
   { name: 'mcp catalog', readonly: true, summary: "List Composio's full live catalog", options: ['--search', '--limit'] },
   { name: 'mcp connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
   { name: 'mcp add-remote', readonly: false, summary: 'Attach a remote-http MCP server (URL + ${ENV} headers)', args: ['<slug>'], required: ['--name', '--url'], options: ['--header'] },
@@ -625,14 +619,11 @@ withFlags(task.command('list'))
   .description("List a project's tasks")
   .argument('<slug>')
   .option('--status <status>', 'filter custom-task status')
-  .option('--kind <kind>', 'custom | integration')
   .action((slug: string, opts: LeafOpts) =>
     emit('task list', opts, async () => {
-      if (opts.kind) assertEnum(String(opts.kind), ['custom', 'integration'] as const, 'kind');
       const { queries } = await loadDb();
       const p = await resolveProject(queries, slug);
       let items = p.tasks;
-      if (opts.kind) items = items.filter((t) => t.kind === opts.kind);
       if (opts.status) items = items.filter((t) => t.status === opts.status);
       return {
         data: { items, count: items.length },
@@ -842,43 +833,6 @@ withFlags(task.command('import-issues'))
         human: () => {
           console.log(`${repoLabel}: imported ${created.length} new task(s), ${issues.length - created.length} skipped`);
           created.forEach((t) => console.log(`  + ${t.id}  ${t.label}`));
-        },
-      };
-    }),
-  );
-
-// ── integration ──
-const integration = program.command('integration').description('Manage project integrations');
-
-withFlags(integration.command('set'))
-  .description('Upsert an integration status (idempotent)')
-  .argument('<slug>')
-  .argument('<type>', INTEGRATION_TYPES.join(' | '))
-  .argument('<status>', INTEGRATION_STATUSES.join(' | '))
-  .action((slug: string, type: string, status: string, opts: LeafOpts) =>
-    emit('integration set', opts, async () => {
-      const t = assertEnum(type, INTEGRATION_TYPES, 'type');
-      const s = assertEnum(status, INTEGRATION_STATUSES, 'status');
-      const { mutations, queries } = await loadDb();
-      const id = await resolveProjectId(queries, slug);
-      const row = await mutations.upsertIntegration(id, t, s);
-      return { data: row, human: () => console.log(`${slug}: ${t} → ${s}`) };
-    }),
-  );
-
-withFlags(integration.command('list'))
-  .description("List a project's integrations")
-  .argument('<slug>')
-  .action((slug: string, opts: LeafOpts) =>
-    emit('integration list', opts, async () => {
-      const { queries } = await loadDb();
-      const p = await resolveProject(queries, slug);
-      const items = p.tasks.filter((t) => t.kind === 'integration');
-      return {
-        data: { items, count: items.length },
-        human: () => {
-          items.forEach((t) => printTaskLine(t));
-          console.log(`\n${items.length} integrations`);
         },
       };
     }),
