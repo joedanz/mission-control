@@ -352,7 +352,7 @@ const SPEC = [
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
   { name: 'integration set', readonly: false, summary: 'Upsert an integration status (idempotent)', args: ['<slug>', '<type>', '<status>'] },
   { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
-  { name: 'mcp catalog', readonly: true, summary: 'List supported Composio toolkits' },
+  { name: 'mcp catalog', readonly: true, summary: "List Composio's full live catalog", options: ['--search', '--limit'] },
   { name: 'mcp connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
   { name: 'mcp status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
   { name: 'mcp list', readonly: true, summary: "List a project's MCP connections", args: ['<slug>'] },
@@ -886,18 +886,22 @@ withFlags(integration.command('list'))
 const mcp = program.command('mcp').description('Manage MCP server connections (Composio toolkits + remote)');
 
 withFlags(mcp.command('catalog'))
-  .description('List supported Composio toolkits')
+  .description("List Composio's full live catalog")
+  .option('--search <q>', 'Filter the catalog (server-side fuzzy match)')
+  .option('--limit <n>', 'Max toolkits to return (default 50, max 500)')
   .action((opts: LeafOpts) =>
     emit('mcp catalog', opts, async () => {
+      const { listToolkits } = await import('../lib/composio-api');
       const { COMPOSIO_CATALOG } = await import('../lib/composio-catalog');
-      const items = Object.entries(COMPOSIO_CATALOG).map(([slug, entry]) => ({
-        slug,
-        name: entry.name,
-        tools: entry.allowedTools.length,
-      }));
+      const toolkits = await listToolkits({
+        search: opts.search as string | undefined,
+        limit: opts.limit ? Number(opts.limit) : undefined,
+      });
+      const items = toolkits.map((t) => ({ ...t, featured: t.slug in COMPOSIO_CATALOG }));
       return {
         data: { items, count: items.length },
-        human: () => items.forEach((t) => console.log(`${t.slug}  ${t.name}  (${t.tools} tools)`)),
+        human: () =>
+          items.forEach((t) => console.log(`${t.featured ? '★' : ' '} ${t.slug}  ${t.name}  (${t.toolCount} tools)`)),
       };
     }),
   );
