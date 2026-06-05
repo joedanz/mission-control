@@ -96,7 +96,6 @@ export type McpServerConfig = {
 export type ProfileMatchRules = {
   projectSlugs?: string[];
   projectCategories?: Category[];
-  taskKinds?: string[];
   labelPattern?: string; // a regex tested against task.label
 };
 

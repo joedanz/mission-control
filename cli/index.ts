@@ -253,7 +253,6 @@ function coerceProfileFields(opts: LeafOpts): ProfileUpdate {
   const rules: Record<string, unknown> = {};
   if (opts.matchProject !== undefined) rules.projectSlugs = csv(opts.matchProject);
   if (opts.matchCategory !== undefined) rules.projectCategories = csv(opts.matchCategory).map((c) => assertEnum(c, CATEGORIES, 'match-category'));
-  if (opts.matchKind !== undefined) rules.taskKinds = csv(opts.matchKind);
   if (opts.matchLabel !== undefined) rules.labelPattern = String(opts.matchLabel);
   if (Object.keys(rules).length) out.matchRules = rules as ProfileUpdate['matchRules'];
   if (opts.priority !== undefined) {
@@ -368,12 +367,12 @@ const SPEC = [
   { name: 'workflow webhook-url', readonly: true, summary: 'Print the external webhook URL + HMAC signing details for an event-triggered workflow', args: ['<slug>'] },
   { name: 'profile list', readonly: true, summary: 'List agent profiles', options: ['--enabled', '--runtime claude-code|exec', '--schedulable'] },
   { name: 'profile get', readonly: true, summary: 'Get one agent profile by slug', args: ['<slug>'] },
-  { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
-  { name: 'profile update', readonly: false, summary: 'Update an agent profile (only provided flags change)', args: ['<slug>'], options: ['--name', '--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-kind', '--match-label', '--priority', '--default', '--enabled', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
+  { name: 'profile add', readonly: false, summary: 'Create an agent profile', required: ['--slug', '--name'], options: ['--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-label', '--priority', '--default', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
+  { name: 'profile update', readonly: false, summary: 'Update an agent profile (only provided flags change)', args: ['<slug>'], options: ['--name', '--description', '--runtime', '--model', '--fallback-model', '--daily-budget-micros', '--provider', '--base-url', '--permission-mode', '--skills', '--mcp-config', '--allowed-tools', '--disallowed-tools', '--append-system-prompt', '--env', '--exec-template', '--match-project', '--match-category', '--match-label', '--priority', '--default', '--enabled', '--disabled', '--schedule-enabled', '--schedule-disabled', '--schedule-project', '--schedule-interval', '--schedule-cron', '--schedule-timezone', '--check-in-prompt'] },
   { name: 'profile set-default', readonly: false, summary: 'Make a profile the single global default (idempotent)', args: ['<slug>'] },
   { name: 'profile checked-in', readonly: false, summary: 'Record a scheduled check-in (advances clock; --status ok|fail tracks failures/auto-pause)', args: ['<slug>'], options: ['--status'] },
   { name: 'profile rm', readonly: false, summary: 'Delete an agent profile; requires --yes', args: ['<slug>'], required: ['--yes'] },
-  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task', options: ['--project', '--task', '--label', '--kind'] },
+  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task', options: ['--project', '--task', '--label'] },
   { name: 'run start', readonly: false, summary: 'Open an agent run (prints runId)', required: ['--agent'], options: ['--project', '--profile', '--title', '--source', '--model', '--session-id', '--work-dir', '--id'] },
   { name: 'run end', readonly: false, summary: 'Close a run with a terminal status', args: ['<id>', '<status>'], options: ['--tokens-in', '--tokens-out', '--cache-read', '--cache-write', '--cost-micros', '--authoritative', '--agent'] },
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
@@ -1335,7 +1334,6 @@ function profileFieldOptions(cmd: Command): Command {
     .option('--exec-template <cmd>', "command template for runtime 'exec'")
     .option('--match-project <csv>', 'route tasks of these project slugs here')
     .option('--match-category <csv>', `${CATEGORIES.join(' | ')}`)
-    .option('--match-kind <csv>', 'custom | integration')
     .option('--match-label <regex>', 'route tasks whose label matches this regex')
     .option('--priority <n>', 'routing tie-break (higher wins)')
     // Scheduled check-ins (Slice 5): a profile wakes on its own schedule and runs a standing mission in
@@ -1477,7 +1475,6 @@ withFlags(profile.command('resolve'))
   .option('--project <slug>', 'project context (provides slug + category)')
   .option('--task <id>', 'task context (provides kind + label)')
   .option('--label <text>', 'task label override')
-  .option('--kind <kind>', 'task kind override (custom | integration)')
   .action((opts: LeafOpts) =>
     emit('profile resolve', opts, async () => {
       const { queries } = await loadDb();
@@ -1490,10 +1487,8 @@ withFlags(profile.command('resolve'))
       if (opts.task) {
         const t = await queries.getTaskById(String(opts.task));
         if (!t) throw new NotFoundError('task', String(opts.task));
-        ctx.taskKind = t.kind;
         ctx.taskLabel = t.label;
       }
-      if (opts.kind !== undefined) ctx.taskKind = String(opts.kind);
       if (opts.label !== undefined) ctx.taskLabel = String(opts.label);
       const resolved = await queries.resolveProfile(ctx);
       return {

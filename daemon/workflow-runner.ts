@@ -311,7 +311,7 @@ async function runAgentNode(
   // Profile: an explicit slug must exist; otherwise auto-route (may be null → planSpawn's back-compat path).
   const profile = data.profileSlug
     ? await getProfileBySlug(data.profileSlug)
-    : await resolveProfile({ projectSlug: home.slug, taskKind: 'custom', taskLabel: prompt.split('\n')[0] });
+    : await resolveProfile({ projectSlug: home.slug, taskLabel: prompt.split('\n')[0] });
   if (data.profileSlug && !profile) return fail(`profile "${data.profileSlug}" not found`);
 
   const runId = randomUUID();
