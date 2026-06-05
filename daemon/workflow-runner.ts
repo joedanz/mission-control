@@ -394,6 +394,7 @@ async function runIntegrationNode(
   if (!conn) return fail(`no ${data.toolkit} connection for project "${home.slug}" (${reauth})`);
   if (conn.status !== 'active') return fail(`${data.toolkit} connection is ${conn.status}, not active (${reauth})`);
   if (!conn.connectedAccountId) return fail(`${data.toolkit} connection has no connected account (${reauth})`);
+  if (!conn.userId) return fail(`${data.toolkit} connection has no user id (${reauth})`);
 
   // Mark running before the (network) action so the canvas overlay shows it in-flight and the reaper can see a
   // mid-action node — same rationale as the agent path's running write (here there's no runId to link).

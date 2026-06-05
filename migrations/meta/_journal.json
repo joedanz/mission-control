@@ -127,6 +127,13 @@
       "when": 1780616403435,
       "tag": "0017_lush_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780631633670,
+      "tag": "0018_smooth_meggan",
+      "breakpoints": true
     }
   ]
 }
