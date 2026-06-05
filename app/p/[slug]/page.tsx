@@ -1,4 +1,4 @@
-// ABOUTME: Project detail page (Server Component). Auth-gated, dynamic; tabs for overview/tasks/integrations/activity.
+// ABOUTME: Project detail page (Server Component). Auth-gated, dynamic; tabs for overview/tasks/mcp/activity.
 
 import { redirect, notFound } from 'next/navigation';
 import { Suspense } from 'react';
@@ -17,7 +17,7 @@ import { PullsTab } from '@/components/PullsTab';
 import { ErrorsTab } from '@/components/ErrorsTab';
 import { EmailTab } from '@/components/EmailTab';
 import { RevenueTab } from '@/components/RevenueTab';
-import { IntegrationsTab } from '@/components/IntegrationsTab';
+import { McpTab } from '@/components/McpTab';
 import { WorkflowsTab } from '@/components/workflows/WorkflowsTab';
 
 export const dynamic = 'force-dynamic';
@@ -109,7 +109,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     </dl>
   );
 
-  const integrationsPanel = <IntegrationsTab slug={project.slug} />;
+  const mcpPanel = <McpTab slug={project.slug} />;
 
   const boardInitial = { projects: [toBoardProject(project, false)], runs: [] };
   const boardIntegrations = {
@@ -162,12 +162,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           }
         >
           <TabbedPanels
-            aliases={{ board: 'tasks' }}
+            aliases={{ board: 'tasks', integrations: 'mcp' }}
             tabs={[
               { key: 'overview', label: 'Overview', content: overview },
               { key: 'tasks', label: 'Tasks', content: tasksPanel },
               { key: 'workflows', label: 'Workflows', content: <WorkflowsTab slug={project.slug} /> },
-              { key: 'integrations', label: 'Integrations', content: integrationsPanel },
+              { key: 'mcp', label: 'MCP', content: mcpPanel },
               { key: 'activity', label: 'Activity', content: activityPanel },
               ...(githubRepo ? [
                 { key: 'commits', label: 'Commits', content: <CommitsTab slug={project.slug} /> },

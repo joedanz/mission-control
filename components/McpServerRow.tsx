@@ -1,56 +1,48 @@
 'use client';
 
-// ABOUTME: One toolkit row in the Integrations tab — status pill + Connect/Check status/Disconnect.
-// ABOUTME: Posts to /api/projects/[slug]/composio; opens the Composio hosted link on connect.
+// ABOUTME: One connected MCP server row — composio (Disconnect / Check status, with an open-link anchor
+// ABOUTME: while initializing) or remote (Remove). Posts the matching action to /api/projects/[slug]/composio.
 
 import { useState } from 'react';
-import type { ToolkitView, ToolkitStatus } from '@/lib/composio-view';
+import type { McpServerView, McpServerStatus } from '@/lib/composio-view';
 
-// Status → pill className + label. A Record (not a switch) makes exhaustiveness compile-checked:
-// adding a ToolkitStatus value without an entry is a type error.
-const PILL: Record<ToolkitStatus, { cls: string; label: string }> = {
+const PILL: Record<McpServerStatus, { cls: string; label: string }> = {
   active: { cls: 'pill ok', label: 'Active' },
   initializing: { cls: 'pill warn', label: 'Initializing' },
   error: { cls: 'pill bad', label: 'Error' },
   expired: { cls: 'pill bad', label: 'Expired' },
   disconnected: { cls: 'pill', label: 'Off' },
-  not_connected: { cls: 'pill', label: 'Off' },
 };
 
-type PostResult =
-  | { ok: true; data: { linkUrl?: string; status?: string } }
-  | { ok: false; error: string; message?: string };
+type PostResult = { ok: boolean; error?: string; message?: string };
 
-export function IntegrationRow({
+export function McpServerRow({
   slug,
   view,
   onChanged,
 }: {
   slug: string;
-  view: ToolkitView;
+  view: McpServerView;
   onChanged: () => void | Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  async function run(action: 'connect' | 'status' | 'disconnect') {
+  async function run(body: Record<string, unknown>) {
     setPending(true);
     setRowError(null);
     try {
       const res = await fetch(`/api/projects/${slug}/composio`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, toolkit: view.slug }),
+        body: JSON.stringify(body),
       });
       const json = (await res.json()) as PostResult;
       if (!json.ok) {
         setRowError(json.message ?? json.error ?? 'Request failed');
         return;
       }
-      if (action === 'connect' && json.data.linkUrl) {
-        window.open(json.data.linkUrl, '_blank', 'noopener,noreferrer');
-      }
-      await onChanged(); // refresh the list only after a successful mutation
+      await onChanged();
     } catch (err) {
       setRowError(String(err));
     } finally {
@@ -59,14 +51,15 @@ export function IntegrationRow({
   }
 
   const pill = PILL[view.status];
-  const connected = view.status === 'active';
+  const isRemote = view.source === 'remote';
   const initializing = view.status === 'initializing';
 
   return (
     <div className="intg-control">
       <span className="intg-control-label">
+        <span className="mcp-source-tag">{isRemote ? 'Remote' : 'Composio'}</span>
         {view.name}
-        <span className="intg-tools"> · {view.toolCount} tools</span>
+        {view.url && <span className="intg-tools"> · {view.url}</span>}
         {initializing && view.linkUrl && (
           <>
             {' · '}
@@ -77,17 +70,17 @@ export function IntegrationRow({
       </span>
       <span className="intg-actions">
         <span className={pill.cls}>{pill.label}</span>
-        {connected ? (
-          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run('disconnect')}>
-            Disconnect
+        {isRemote ? (
+          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run({ action: 'remove-remote', name: view.key })}>
+            Remove
           </button>
         ) : initializing ? (
-          <button type="button" className="btn-sm" disabled={pending} onClick={() => void run('status')}>
+          <button type="button" className="btn-sm" disabled={pending} onClick={() => void run({ action: 'status', toolkit: view.key })}>
             Check status
           </button>
         ) : (
-          <button type="button" className="btn-sm btn-ok" disabled={pending} onClick={() => void run('connect')}>
-            Connect
+          <button type="button" className="btn-sm btn-bad" disabled={pending} onClick={() => void run({ action: 'disconnect', toolkit: view.key })}>
+            Disconnect
           </button>
         )}
       </span>

@@ -3,7 +3,7 @@
 // ABOUTME: Workflows tab — a left rail of the project's workflows + the read-only @xyflow/react canvas for the
 // ABOUTME: selected one, with its live per-node step overlay (polled). The "Run" button POSTs to enqueue a run
 // ABOUTME: (status 'queued') that the workflow-daemon executes (slice 4); the poll reflects queued→running→done.
-// ABOUTME: A run already queued/in progress disables Run (single-flight → 409). List fetch mirrors IntegrationsTab.
+// ABOUTME: A run already queued/in progress disables Run (single-flight → 409). List fetch mirrors McpTab.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorkflowListItem, WorkflowRunSummary } from '@/lib/workflow-view';
@@ -53,7 +53,7 @@ export function WorkflowsTab({ slug }: { slug: string }) {
   }, [slug, applyList]);
 
   // Initial fetch inlined with .then (rather than calling loadList) so setState is deferred into the
-  // promise callback — keeps react-hooks/set-state-in-effect satisfied (same idiom as IntegrationsTab).
+  // promise callback — keeps react-hooks/set-state-in-effect satisfied (same idiom as McpTab).
   useEffect(() => {
     const seq = ++loadSeq.current;
     fetch(`/api/projects/${slug}/workflows`, { cache: 'no-store' })

@@ -19,6 +19,8 @@ const lib = {
   connectStart: vi.fn(),
   connectPoll: vi.fn(),
   disconnect: vi.fn(),
+  addRemote: vi.fn(),
+  removeRemote: vi.fn(),
 };
 vi.mock('@/lib/composio-connections', () => lib);
 
@@ -41,17 +43,17 @@ beforeEach(() => {
 });
 
 describe('GET', () => {
-  it('returns merged toolkit views', async () => {
+  it('returns the project mcp server views', async () => {
     lib.listConnections.mockResolvedValue([
-      { toolkitSlug: 'linear', status: 'active', linkUrl: null, error: null },
+      { source: 'composio', toolkitSlug: 'linear', remoteName: null, remoteUrl: null, status: 'active', linkUrl: null, error: null },
     ]);
     const res = await GET(new Request('http://localhost/api/projects/demo/composio'), { params });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    const linear = json.data.toolkits.find((t: { slug: string }) => t.slug === 'linear');
+    const linear = json.data.servers.find((s: { key: string }) => s.key === 'linear');
     expect(linear.status).toBe('active');
-    expect(linear.toolCount).toBe(4);
+    expect(linear.source).toBe('composio');
   });
 
   it('401 when the auth gate rejects', async () => {
@@ -136,5 +138,48 @@ describe('POST error mapping', () => {
     const res = await post({ action: 'connect', toolkit: 'linear' });
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBe('composio_api_error');
+  });
+});
+
+describe('POST remote actions', () => {
+  it('add-remote → returns the new remote view fields', async () => {
+    lib.addRemote.mockResolvedValue({ source: 'remote', remoteName: 'docs', remoteUrl: 'https://r/mcp', status: 'active' });
+    const res = await post({ action: 'add-remote', name: 'docs', url: 'https://r/mcp', headers: { Authorization: 'Bearer ${TOK}' } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe('active');
+    expect(lib.addRemote).toHaveBeenCalledWith('demo', { name: 'docs', url: 'https://r/mcp', headers: { Authorization: 'Bearer ${TOK}' } });
+  });
+
+  it('add-remote with no headers defaults to {}', async () => {
+    lib.addRemote.mockResolvedValue({ status: 'active' });
+    await post({ action: 'add-remote', name: 'docs', url: 'https://r/mcp' });
+    expect(lib.addRemote).toHaveBeenCalledWith('demo', { name: 'docs', url: 'https://r/mcp', headers: {} });
+  });
+
+  it('add-remote → 422 when name or url missing', async () => {
+    expect((await post({ action: 'add-remote', url: 'https://r/mcp' })).status).toBe(422);
+    expect((await post({ action: 'add-remote', name: 'docs' })).status).toBe(422);
+    expect(lib.addRemote).not.toHaveBeenCalled();
+  });
+
+  it('add-remote → 422 when validateRemoteInput throws (literal secret)', async () => {
+    lib.addRemote.mockRejectedValue(new ValidationError('headers', 'header value must be a ${ENV} placeholder'));
+    expect((await post({ action: 'add-remote', name: 'docs', url: 'https://r/mcp', headers: { Authorization: 'secret' } })).status).toBe(422);
+  });
+
+  it('remove-remote → returns ok', async () => {
+    lib.removeRemote.mockResolvedValue({ source: 'remote', remoteName: 'docs', status: 'disconnected' });
+    const res = await post({ action: 'remove-remote', name: 'docs' });
+    expect(res.status).toBe(200);
+    expect(lib.removeRemote).toHaveBeenCalledWith('demo', 'docs');
+  });
+
+  it('remove-remote → 422 when name missing', async () => {
+    expect((await post({ action: 'remove-remote' })).status).toBe(422);
+  });
+
+  it('remove-remote → 404 when no such remote', async () => {
+    lib.removeRemote.mockRejectedValue(new NotFoundError('remote connection', 'demo/docs'));
+    expect((await post({ action: 'remove-remote', name: 'docs' })).status).toBe(404);
   });
 });

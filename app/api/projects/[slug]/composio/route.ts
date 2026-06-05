@@ -2,8 +2,8 @@
 // ABOUTME: connection statuses; POST drives connect/status/disconnect over the slice-2 lifecycle.
 
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
-import { listConnections, connectStart, connectPoll, disconnect } from '@/lib/composio-connections';
-import { toolkitViews } from '@/lib/composio-view';
+import { listConnections, connectStart, connectPoll, disconnect, addRemote, removeRemote } from '@/lib/composio-connections';
+import { mcpServerViews } from '@/lib/composio-view';
 import { NotFoundError, ValidationError } from '@/lib/validation';
 import { ComposioApiError } from '@/lib/composio-api';
 
@@ -46,13 +46,13 @@ export async function GET(
   const { slug } = await params;
   try {
     const connections = await listConnections(slug);
-    return Response.json({ ok: true, data: { toolkits: toolkitViews(connections) } });
+    return Response.json({ ok: true, data: { servers: mcpServerViews(connections) } });
   } catch (e) {
     return mapError(e);
   }
 }
 
-type PostBody = { action?: string; toolkit?: string };
+type PostBody = { action?: string; toolkit?: string; name?: string; url?: string; headers?: Record<string, string> };
 
 export async function POST(
   req: Request,
@@ -68,23 +68,39 @@ export async function POST(
   } catch {
     return Response.json({ ok: false, error: 'validation', message: 'invalid JSON body' }, { status: 422 });
   }
-  const { action, toolkit } = body;
-  if (!toolkit) {
-    return Response.json({ ok: false, error: 'validation', message: 'toolkit required' }, { status: 422 });
-  }
+  const { action } = body;
 
   try {
     switch (action) {
-      case 'connect': {
-        const { linkUrl, connection } = await connectStart(slug, toolkit);
-        return Response.json({ ok: true, data: { linkUrl, status: connection.status } });
-      }
-      case 'status': {
-        const connection = await connectPoll(slug, toolkit);
+      case 'connect':
+      case 'status':
+      case 'disconnect': {
+        if (!body.toolkit) {
+          return Response.json({ ok: false, error: 'validation', message: 'toolkit required' }, { status: 422 });
+        }
+        if (action === 'connect') {
+          const { linkUrl, connection } = await connectStart(slug, body.toolkit);
+          return Response.json({ ok: true, data: { linkUrl, status: connection.status } });
+        }
+        if (action === 'status') {
+          const connection = await connectPoll(slug, body.toolkit);
+          return Response.json({ ok: true, data: { status: connection.status } });
+        }
+        const connection = await disconnect(slug, body.toolkit);
         return Response.json({ ok: true, data: { status: connection.status } });
       }
-      case 'disconnect': {
-        const connection = await disconnect(slug, toolkit);
+      case 'add-remote': {
+        if (!body.name || !body.url) {
+          return Response.json({ ok: false, error: 'validation', message: 'name and url required' }, { status: 422 });
+        }
+        const connection = await addRemote(slug, { name: body.name, url: body.url, headers: body.headers ?? {} });
+        return Response.json({ ok: true, data: { status: connection.status } });
+      }
+      case 'remove-remote': {
+        if (!body.name) {
+          return Response.json({ ok: false, error: 'validation', message: 'name required' }, { status: 422 });
+        }
+        const connection = await removeRemote(slug, body.name);
         return Response.json({ ok: true, data: { status: connection.status } });
       }
       default:

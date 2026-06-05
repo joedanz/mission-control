@@ -2123,3 +2123,16 @@ a.mc-run:hover { border-color: var(--tone, var(--accent)); background: var(--pan
 .wf-inspector__err { display: block; margin-top: 3px; font-size: var(--fs-11); color: var(--bad-ink); }
 
 .btn-sm--primary { border-color: var(--accent); color: var(--accent); }
+
+/* MCP tab (slice 4) */
+.detail-mcp { display: flex; flex-direction: column; gap: var(--space-lg); }
+.mcp-section { display: flex; flex-direction: column; gap: var(--space-xs); }
+.mcp-section-title { font-size: var(--fs-12); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-mute); margin: 0; }
+.mcp-source-tag { font-size: var(--fs-11); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-mute); margin-right: 8px; }
+.mcp-catalog { display: flex; flex-direction: column; gap: var(--space-xs); }
+.mcp-search, .mcp-input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface, var(--panel)); color: var(--ink); }
+.mcp-catalog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2xs); max-height: 320px; overflow-y: auto; }
+.mcp-catalog-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.mcp-remote-form { display: flex; flex-direction: column; gap: var(--space-2xs); align-items: flex-start; }
+.mcp-header-row { display: flex; gap: 8px; width: 100%; }
+.mcp-hint { font-size: var(--fs-12); }
