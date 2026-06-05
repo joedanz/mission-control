@@ -48,7 +48,7 @@ every log and warning goes to stderr. The envelope is always one of three shapes
 | Command | What it does |
 |---|---|
 | `project list [--category --status --archived --search --limit]` | The project register, filterable and searchable. |
-| `project get <slug>` | One project with its tasks and integrations. |
+| `project get <slug>` | One project with its tasks and MCP connections. |
 | `project add --name --category [--status --accent --tech --repo-path --repo-url --live-url --priority --sentry-project --email-provider --email-address --stripe-site …]` | Create a project; returns the new row (and id). |
 | `project update <slug> [any add flag]` | Patch — only the flags you pass change. `--sentry-project`, `--email-provider`, `--email-address`, `--stripe-site` are new nullable fields wiring the Errors, Email, and Revenue tabs. |
 | `project set-repo <slug> <path> [url]` | Point a project at a local repo (the daemon needs this). |
@@ -104,27 +104,30 @@ and writes rendered MCP config to a `0600` temp file — so a key never reaches 
 warns on stderr if a value *looks* like a raw secret.
 </Note>
 
-## Composio integrations
+## MCP servers
 
-Manage per-project connections to third-party toolkits via Composio. All subcommands emit the
-standard `{ok,command,data|error}` JSON envelope. `catalog` has no DB requirement; all others
-need credentials.
+Attach MCP servers to a project — by `source`: a Composio-brokered toolkit (OAuth) or a direct
+remote-http server. All subcommands emit the standard `{ok,command,data|error}` JSON envelope.
+`catalog` has no DB requirement; all others need credentials. See [MCP servers](/mcp) for the
+concepts.
 
 | Command | What it does |
 |---|---|
-| `composio catalog` | List all supported toolkits — slug, name, and tool count. No DB credentials needed. |
-| `composio connect <slug> <toolkit>` | Start a connection; returns the OAuth authorize URL and prints the next step `mc composio status <slug> <toolkit>`. |
-| `composio status <slug> <toolkit>` | Poll Composio and persist the connection's current status. |
-| `composio list <slug>` | List a project's connections and their statuses. |
-| `composio disconnect <slug> <toolkit>` | Revoke the connection at Composio and mark it disconnected locally. |
-| `composio mcp-config <slug>` | Resolve a project's active connections into an `mcpServers` JSON map — what the daemons use at spawn time. |
-| `composio refresh <slug>` | Re-poll all of a project's connections; emit a `composio.connection_changed` event per status transition. |
+| `mcp catalog [--search <q>] [--limit <n>]` | Browse Composio's **full live catalog** (~1,000+ toolkits) — slug, name, tool count, and a `featured` flag for MC's curated set. `--search` is a server-side fuzzy filter; `--limit` caps the page (default 50, max 500). No DB credentials needed. |
+| `mcp connect <slug> <toolkit>` | Start a Composio connection to any catalog toolkit; returns the OAuth authorize URL and prints the next step `mc mcp status <slug> <toolkit>`. A curated toolkit binds its narrow tool list; any other binds all of its tools. |
+| `mcp status <slug> <toolkit>` | Poll Composio and persist the connection's current status. |
+| `mcp list <slug>` | List a project's MCP servers — **both** sources, each tagged `composio` or `remote` — and their statuses. |
+| `mcp disconnect <slug> <toolkit>` | Revoke a **Composio** connection at Composio and mark it disconnected locally (composio-only — remote rows use `remove-remote`). |
+| `mcp config <slug>` | Resolve a project's active servers (both sources) into one `mcpServers` JSON map — what the daemons use at spawn time. On a key collision a remote server wins over a composio one. |
+| `mcp refresh <slug>` | Re-poll all of a project's Composio connections; emit a `composio.connection_changed` event per status transition. |
+| `mcp add-remote <slug> --name <n> --url <u> [--header K=V …]` | Attach a `remote` MCP server directly (no OAuth/Composio). `--name` doubles as the server key and is unique per project (idempotent on re-add). Every header value must be an `${ENV}` placeholder — a literal secret is rejected. The row is immediately `active`. |
+| `mcp remove-remote <slug> <name>` | Detach a remote MCP server by name (a row delete, no network call). |
 
 <Note>
-**Tokens expire.** Composio access tokens can expire. Run `mc composio refresh <slug>` periodically
-(or on a schedule) to keep a project's connections live — each call re-polls every connection and
-emits a `composio.connection_changed` event for any that changed. See [Integrations](/integrations)
-for the full connection lifecycle.
+**Composio tokens expire; remote servers don't.** Composio access tokens can lapse — run
+`mc mcp refresh <slug>` periodically (or from a check-in) to re-poll every connection and emit a
+`composio.connection_changed` event for any that changed. A `remote` server has no token lifecycle,
+so it stays `active` until you `remove-remote` it. See [MCP servers](/mcp) for the full lifecycle.
 </Note>
 
 ## Workflows

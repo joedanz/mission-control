@@ -80,20 +80,25 @@ shared Composio auth-config and MCP server resources — never a secret.
 | mcp_url | Base MCP URL, e.g. `https://backend.composio.dev/v3/mcp/<id>`. |
 | created_at · updated_at | Timestamps. |
 
-## composio_connections — "a project's link to one toolkit"
+## mcp_connections — "a project's link to one MCP server"
 
-One row per (project, toolkit) pair — the UNIQUE index enforces the one-connection-per-(project, toolkit) invariant intentionally; see the Indexes section.
+One row per MCP server attached to a project, discriminated by `source`. The composio-only columns
+are nullable (a remote row leaves them null) and the reverse; a DB `CHECK` (`mcp_connections_source_shape`)
+enforces that each source carries its required columns. The UNIQUE indexes enforce one Composio
+connection per (project, toolkit) and one remote server per (project, name); see the Indexes section.
 
 | Column | Notes |
 |---|---|
 | `id` | UUID. |
 | project_id | FK to `projects`, `ON DELETE CASCADE` — delete a project, its connections go too. |
-| toolkit_slug | Composio catalog key. Not a FK to `composio_toolkits` — the cache may not exist yet when a connection is first written. |
-| user_id | Composio user identity scoped to this project (`mc-proj-<projectId>`). |
-| connected_account_id | Composio `ca_…` id, set once the OAuth link is initiated. |
-| status | `ConnectionStatus`: `initializing\|active\|error\|expired\|disconnected`. |
-| link_url | Transient hosted OAuth link for an in-flight connect; cleared on completion. |
+| source | `composio` (a brokered toolkit, the default) or `remote` (a directly-supplied remote-http server). |
+| toolkit_slug | *(composio)* Composio catalog key. Not a FK to `composio_toolkits` — the cache may not exist yet when a connection is first written. Nullable (remote rows leave it null). |
+| user_id | *(composio)* Composio user identity scoped to this project (`mc-proj-<projectId>`). Nullable. |
+| connected_account_id | *(composio)* Composio `ca_…` id, set once the OAuth link is initiated. Nullable. |
+| status | `ConnectionStatus`: `initializing\|active\|error\|expired\|disconnected`. A remote row is pinned `active`. |
+| link_url | *(composio)* Transient hosted OAuth link for an in-flight connect; cleared on completion. |
 | error | Last error message, if any. |
+| remote_name · remote_url · remote_headers | *(remote)* The server's key (unique per project), its URL, and a `jsonb` header map whose values are `${ENV}` placeholders (never a literal secret). Null for composio rows. |
 | created_at · updated_at | Timestamps. |
 
 ## agent_profiles — "a reusable agent recipe"
@@ -183,10 +188,9 @@ database. The agent role **cannot see the auth tables at all** — see [Access](
 | **pgEnum** | accent | `orange · green · blue · violet · warm` |
 | app/CLI text | project status | `prelaunch · launched · testing · active · design · planning` |
 | app/CLI text | task status | `todo · in_progress · done` |
-| app/CLI text | integration type / status | `google_oauth · stripe · sentry · zoho_email · other` / `needed · pending · done` |
 | app/CLI text | run status / source | `running · completed · failed · abandoned` / `hook · cli · cron · manual` |
 | app/CLI text | event level | `debug · info · warn · error` |
-| app/CLI text | event type (`EVENT_TYPES`) | `project.created · project.updated · project.deleted · task.created · task.status_changed · task.claimed · task.deleted · integration.upserted · run.started · run.ended · run.abandoned · run.cancel_requested · profile.created · profile.updated · profile.deleted · tool_call · composio.connection_changed · note` |
+| app/CLI text | event type (`EVENT_TYPES`) | `project.created · project.updated · project.deleted · task.created · task.status_changed · task.claimed · task.deleted · run.started · run.ended · run.abandoned · run.cancel_requested · workflow.abandoned · profile.created · profile.updated · profile.deleted · tool_call · composio.connection_changed · note` |
 | app/CLI text | profile runtime | `claude-code · exec` |
 | app/CLI text | permission mode | `plan · acceptEdits · bypassPermissions · default` |
 | app/CLI text | `ConnectionStatus` | `initializing · active · error · expired · disconnected` |
@@ -202,15 +206,15 @@ database. The agent role **cannot see the auth tables at all** — see [Access](
 
 | Index | Purpose |
 |---|---|
-| `tasks_claimable_idx` | Partial over only `status='todo' AND kind='custom'` rows, ordered `(sort_order, created_at)` — priority by board position, then FIFO. The daemon polls this on a loop, so a board re-order changes what it picks up next. |
+| `tasks_claimable_idx` | Partial over only `status='todo'` rows, ordered `(sort_order, created_at)` — priority by board position, then FIFO. The daemon polls this on a loop, so a board re-order changes what it picks up next. |
 | `runs_status_heartbeat_idx` | The reaper's index — finds `running` runs whose heartbeat went stale. |
 | `events_order_idx` | `(created_at, seq)` — the activity feed's replay order. |
 | `events_idempotency_uq` | Partial unique on `idempotency_key` — the dedupe guarantee. |
-| `tasks_project_integration_uq` | One integration row per type per project (keeps the grids from double-counting). |
 | `agent_profiles_slug_uq` | Unique profile slug — the handle you address with `mc profile`. |
 | `agent_profiles_default_uq` | Partial unique over `is_default = true` — enforces *at most one* global default profile. |
 | `agent_profiles_schedulable_idx` | Partial over rows with `schedule_enabled` — the scheduler's scan for profiles that might be due. |
-| `composio_connections_project_toolkit_uq` | UNIQUE on `(project_id, toolkit_slug)` — enforces the intentional one-connection-per-(project, toolkit) invariant. Two connections for the same toolkit in the same project are an explicit non-goal; dropping this index requires a per-connection `user_id` redesign. |
+| `mcp_connections_project_toolkit_uq` | UNIQUE on `(project_id, toolkit_slug)` — enforces the intentional one-Composio-connection-per-(project, toolkit) invariant. Two connections for the same toolkit in the same project are an explicit non-goal; dropping this index requires a per-connection `user_id` redesign. |
+| `mcp_connections_project_remote_uq` | Partial UNIQUE on `(project_id, remote_name)` `WHERE source='remote'` — one remote server per name per project (composio rows are ignored, since `remote_name` is null). |
 | `workflows_slug_uq` | UNIQUE on `slug` — the globally-unique handle you address with `mc workflow`. |
 | `workflow_runs_status_heartbeat_idx` | The reaper's index over `workflow_runs` — finds `running` runs whose heartbeat went stale (a dead walker). `queued` and `paused` runs are excluded by design. |
 | `workflow_step_runs_run_node_uq` | UNIQUE on `(workflow_run_id, node_id)` — makes step writes idempotent so the walker is resumable: it re-derives completed nodes from the table, not from memory. |

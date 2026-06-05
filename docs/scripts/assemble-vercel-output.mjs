@@ -26,5 +26,11 @@ for (const e of manifest.entries) {
   if (path) overrides[file] = { path }
 }
 
-writeFileSync(`${OUT}/config.json`, JSON.stringify({ version: 3, overrides }, null, 2))
-console.log(`Assembled ${OUT}: ${manifest.entries.length} routes, ${Object.keys(overrides).length} clean-URL overrides, no functions.`)
+// Permanent redirects for renamed pages, so old bookmarks/inbound links don't 404.
+// Build Output API v3 expresses redirects as `routes` with a Location header + 3xx status.
+const routes = [
+  { src: '/integrations', status: 308, headers: { Location: '/mcp' } }, // page renamed: Integrations → MCP
+]
+
+writeFileSync(`${OUT}/config.json`, JSON.stringify({ version: 3, routes, overrides }, null, 2))
+console.log(`Assembled ${OUT}: ${manifest.entries.length} routes, ${Object.keys(overrides).length} clean-URL overrides, ${routes.length} redirect(s), no functions.`)

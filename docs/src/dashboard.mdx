@@ -28,7 +28,8 @@ When you sign in, the website has five top-level tabs. Each project page also ga
   <Card title="Tab 3 · Board" icon="square-kanban">
     A drag-and-drop Kanban across every active project — one swimlane per project, with To Do /
     In Progress / Done columns. Drag a card to move or re-prioritise its work, and the order you
-    set steers what the AI picks up next. (Each project also has its own Board tab.)
+    set steers what the AI picks up next. (Each project page has the same board too — as a
+    **List ⇄ Board** toggle inside its Tasks tab.)
   </Card>
   <Card title="Tab 4 · Mission" icon="radar">
     The live ops room. A "fleet" strip shows AI agents working right now, with a pulsing dot for
@@ -62,9 +63,9 @@ what they do next. It comes in two shapes that share the same three columns — 
     project, but a card can't jump to a different project (its lane is fixed).
   </Card>
   <Card title="The per-project board" icon="folder-kanban">
-    A **Board** tab on each project's page (between Tasks and Integrations). Just that one
-    project's columns, plus a readiness chip for its integrations and a selector for how far back
-    the **Done** column reaches.
+    Each project's **Tasks** tab carries a **List ⇄ Board** toggle: the same tasks as a flat list
+    or as that one project's Kanban columns, with a selector for how far back the **Done** column
+    reaches. (There's no longer a separate per-project Board tab — it's a view of the Tasks tab.)
   </Card>
 </CardGroup>
 
@@ -90,11 +91,12 @@ its next refresh.
 
 ## Per-project tabs
 
-Every project page always shows the same core tabs (Overview, Tasks, Board, Integrations, Workflows,
-Activity). Three more — Errors, Email, and Revenue — appear automatically once you set the matching
-project field, and each pulls live data from an external service every time you open it. The table
-below covers those three plus the always-present Integrations and Workflows tabs (which read from the
-database, not a live service).
+Every project page always shows the same core tabs (Overview, Tasks, MCP, Workflows, Activity) — the
+Tasks tab carries the List ⇄ Board toggle, so the board is a view there rather than its own tab.
+Three more — Errors, Email, and Revenue — appear automatically once you set the matching project
+field, and each pulls live data from an external service every time you open it. The table below
+covers those three plus the always-present MCP and Workflows tabs (which read from the database, not
+a live service).
 
 <Frame caption="Fig. 07 — Per-project tabs and where their data comes from.">
   ![Per-project tabs diagram](/figures/fig-07-tabs.svg)
@@ -105,7 +107,7 @@ database, not a live service).
 | **Errors** | `sentryProjectSlug` is set | Up to 25 unresolved Sentry issues from the last 24 h — level, title, culprit, event and user counts, last-seen time, each linking to Sentry; plus a summary of total unresolved and 24 h event volume. If the token is missing the tab shows a setup hint instead of erroring. | Live Sentry REST API |
 | **Email** | `domain` is set | MX, SPF, and DMARC DNS checks — pass/fail with the raw record value. Auto-detects the email provider (Zoho, Google Workspace, Microsoft 365, Proton, Fastmail, iCloud) and also shows any manually set `emailProvider` / `emailAddress`. | Live DNS lookup (no token needed) |
 | **Revenue** | `stripeSite` is set | MRR per currency, active subscription count (shown as N+ when truncated at 1,000), and a table of active subscriptions (customer, amount, billing interval, created date). One Stripe account is shared across all projects; subscriptions are filtered by `metadata.site`. | Live Stripe Search API |
-| **Integrations** | Always present | The full Composio toolkit catalog overlaid with this project's connection statuses — Active, Initializing, Error, Expired, or Off — plus Connect / Check status / Disconnect buttons. When you return to the tab after authorizing a new connection, any still-initializing toolkit is polled automatically. See [Integrations](/integrations) for the full story. | Database read (no live Composio call on GET) |
+| **MCP** | Always present | This project's MCP servers (both sources), a searchable browse of Composio's full live catalog, and a form to add a remote MCP server. Each connected server shows its status — Active, Initializing, Error, Expired, or Disconnected — with the matching action. After you authorize a new Composio connection, any still-initializing toolkit is polled automatically. See [MCP servers](/mcp) for the full story. | Database read (no live Composio call on GET) |
 | **Workflows** | Always present | This project's [workflows](/workflows) on a React Flow canvas — pick one from the rail and its graph renders with a live per-node status overlay during a run. **+ New** creates one and drops you onto a blank canvas; **Edit** mode authors the graph (drag nodes from a palette, connect them, edit each in an inspector, Save); **Run** enqueues an execution; a paused run shows an **Awaiting approval** panel with Approve / Reject. | Database read + the workflow daemon executes |
 
 <Note>
