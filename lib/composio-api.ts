@@ -51,7 +51,7 @@ export function transitionEvent(
 ): { level: EventLevel; summary: string } | null {
   if (from === to) return null;
   if (to === 'active') return { level: 'info', summary: `${toolkitSlug} connection recovered — now active` };
-  return { level: 'warn', summary: `${toolkitSlug} connection ${to} — re-auth needed (mc composio connect ${projectSlug} ${toolkitSlug})` };
+  return { level: 'warn', summary: `${toolkitSlug} connection ${to} — re-auth needed (mc mcp connect ${projectSlug} ${toolkitSlug})` };
 }
 
 async function composioFetch(path: string, init?: RequestInit): Promise<unknown> {
@@ -132,4 +132,35 @@ export async function executeAction(
   })) as { data?: Record<string, unknown>; error?: string | null; successful?: boolean };
   if (j.successful === false) throw new ComposioApiError(j.error || `composio action ${action} failed`);
   return j.data ?? {};
+}
+
+/** A toolkit as shown in the catalog browser (a thin projection of GET /toolkits). */
+export type ToolkitSummary = {
+  slug: string;
+  name: string;
+  description: string;
+  toolCount: number;
+  categories: string[];
+};
+
+type RawToolkit = {
+  slug?: string;
+  name?: string;
+  meta?: { tools_count?: number; description?: string; categories?: { id?: string; name?: string }[] };
+};
+
+/** List Composio's live toolkit catalog (no DB). `search` is a server-side fuzzy filter; `limit`
+ *  caps the page (default 50, Composio max 500). Returns one page — a browse command, not an export. */
+export async function listToolkits(opts?: { search?: string; limit?: number }): Promise<ToolkitSummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.search) params.set('search', opts.search);
+  params.set('limit', String(opts?.limit ?? 50));
+  const j = (await composioFetch(`/toolkits?${params.toString()}`)) as { items?: RawToolkit[] };
+  return (j.items ?? []).map((t) => ({
+    slug: t.slug ?? '',
+    name: t.name ?? t.slug ?? '',
+    description: t.meta?.description ?? '',
+    toolCount: t.meta?.tools_count ?? 0,
+    categories: (t.meta?.categories ?? []).map((c) => c.name ?? c.id ?? '').filter(Boolean),
+  }));
 }

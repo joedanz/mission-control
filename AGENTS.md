@@ -47,8 +47,8 @@ mc task claim <id> [--run <id>] [--ttl <secs>]  # claim a task for the current r
 mc task import-issues <slug> [--state open|closed|all] [--label <n>] [--limit <n>] [--dry-run]  # GitHub issues → tasks (idempotent by issue #; needs repoUrl + gh CLI)
 mc integration set <slug> <type> <status>   # upsert; idempotent
 mc integration list <slug>
-mc mcp catalog                               # list supported Composio toolkits (slug, name, tool count); no DB needed; reads COMPOSIO_API_KEY from host env (never stored)
-mc mcp connect <slug> <toolkit>              # start a Composio connection; prints OAuth authorize URL; follow up with mc mcp status. At most one connection per (project, toolkit)
+mc mcp catalog [--search <q>] [--limit <n>]  # list Composio's FULL live catalog (~1000+ toolkits) via GET /api/v3/toolkits; --search is a server-side fuzzy filter, --limit caps the page (default 50, max 500). Items carry {slug, name, description, toolCount, categories, featured} where featured = the slug is in the curated editorial set (lib/composio-catalog.ts). No DB; reads COMPOSIO_API_KEY from host env (never stored)
+mc mcp connect <slug> <toolkit>              # start a Composio connection to ANY catalog toolkit (not just the curated pair); prints OAuth authorize URL; follow up with mc mcp status. A curated toolkit (linear|slack) binds its narrow editorial tool list; any other toolkit binds allowed_tools=[] which Composio expands to ALL of that toolkit's tools. At most one connection per (project, toolkit)
 mc mcp status <slug> <toolkit>               # poll Composio and persist connection status (initializing|active|error|expired|disconnected)
 mc mcp list <slug>                           # list a project's MCP connections and their statuses
 mc mcp disconnect <slug> <toolkit>           # revoke at Composio and mark disconnected locally

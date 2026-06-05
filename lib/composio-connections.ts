@@ -1,27 +1,25 @@
 // ABOUTME: Composio connection lifecycle — composes the DB store + the v3 API client into
 // ABOUTME: ensureToolkit / connectStart / connectPoll / listConnections / disconnect. Per-project.
 
-import { getCatalogEntry } from './composio-catalog';
+import { allowedToolsFor } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
 import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
 import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent, ComposioApiError } from './composio-api';
 import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
 import { createEvent } from './mutations';
 import type { McpConnection, ConnectionStatus, McpServerConfig } from './db/schema';
-import { NotFoundError, ValidationError } from './validation';
+import { NotFoundError } from './validation';
 
 /** Ensure the shared auth-config + MCP server exist for a toolkit; cache + return their ids. Idempotent
  *  via the composio_toolkits cache (created once per toolkit). */
 export async function ensureToolkit(slug: string): Promise<{ authConfigId: string; mcpServerId: string; mcpUrl: string }> {
-  const entry = getCatalogEntry(slug);
-  if (!entry) throw new ValidationError('toolkit', `unknown toolkit: ${slug}`);
   let row = await getToolkitRow(slug);
   if (!row?.authConfigId) {
-    const authConfigId = await createAuthConfig(slug);
+    const authConfigId = await createAuthConfig(slug); // Composio rejects an unknown/no-auth slug with a 400 → ComposioApiError
     row = await upsertToolkitRow(slug, { authConfigId });
   }
   if (!row.mcpServerId || !row.mcpUrl) {
-    const { mcpServerId, mcpUrl } = await createMcpServer(slug, row.authConfigId!, entry.allowedTools);
+    const { mcpServerId, mcpUrl } = await createMcpServer(slug, row.authConfigId!, allowedToolsFor(slug));
     row = await upsertToolkitRow(slug, { mcpServerId, mcpUrl });
   }
   return { authConfigId: row.authConfigId!, mcpServerId: row.mcpServerId!, mcpUrl: row.mcpUrl! };
