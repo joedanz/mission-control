@@ -16,9 +16,10 @@ export type ToolkitView = {
   error: string | null;
 };
 
-/** Overlay a project's connection rows onto the full static catalog. */
+/** Overlay a project's connection rows onto the full static catalog. Only composio-source rows carry a
+ *  toolkitSlug; remote-source rows are ignored (they aren't catalog toolkits). */
 export function toolkitViews(connections: McpConnection[]): ToolkitView[] {
-  const bySlug = new Map(connections.map((c) => [c.toolkitSlug, c]));
+  const bySlug = new Map(connections.filter((c) => c.source === 'composio').map((c) => [c.toolkitSlug, c]));
   return catalogSlugs().map((slug) => {
     const entry = COMPOSIO_CATALOG[slug];
     const conn = bySlug.get(slug);

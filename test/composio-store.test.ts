@@ -9,6 +9,7 @@ import { createProject } from '../lib/mutations';
 import {
   getToolkitRow, upsertToolkitRow,
   getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus,
+  getRemoteConnection, upsertRemoteConnection, deleteRemoteConnection,
 } from '../lib/composio-store';
 
 const projectIds: string[] = [];
@@ -78,5 +79,38 @@ describe('composio store', () => {
     const p = await freshProject();
     const conn = await upsertConnection(p.id, 'linear', { userId: `mc-proj-${p.id}`, status: 'initializing' });
     expect(conn.source).toBe('composio');
+  });
+
+  it('inserts a remote connection (source=remote, status=active, composio fields null)', async () => {
+    const p = await freshProject();
+    const c = await upsertRemoteConnection(p.id, {
+      remoteName: 'docs', remoteUrl: 'https://mcp.example.com/sse', remoteHeaders: { Authorization: 'Bearer ${DOCS_TOKEN}' },
+    });
+    expect(c.source).toBe('remote');
+    expect(c.status).toBe('active');
+    expect(c.remoteName).toBe('docs');
+    expect(c.remoteUrl).toBe('https://mcp.example.com/sse');
+    expect(c.remoteHeaders).toEqual({ Authorization: 'Bearer ${DOCS_TOKEN}' });
+    expect(c.toolkitSlug).toBeNull();
+    expect(c.userId).toBeNull();
+  });
+
+  it('upsertRemoteConnection is idempotent on (project, name) — re-add updates url/headers', async () => {
+    const p = await freshProject();
+    const a = await upsertRemoteConnection(p.id, { remoteName: 'docs', remoteUrl: 'https://old', remoteHeaders: {} });
+    const b = await upsertRemoteConnection(p.id, { remoteName: 'docs', remoteUrl: 'https://new', remoteHeaders: { X: '${Y}' } });
+    expect(b.id).toBe(a.id);
+    expect(b.remoteUrl).toBe('https://new');
+    expect(b.remoteHeaders).toEqual({ X: '${Y}' });
+    expect((await listConnectionsByProject(p.id)).length).toBe(1);
+  });
+
+  it('getRemoteConnection / deleteRemoteConnection round-trip; delete returns the row then null', async () => {
+    const p = await freshProject();
+    await upsertRemoteConnection(p.id, { remoteName: 'docs', remoteUrl: 'https://x', remoteHeaders: {} });
+    expect((await getRemoteConnection(p.id, 'docs'))?.remoteUrl).toBe('https://x');
+    expect((await deleteRemoteConnection(p.id, 'docs'))?.remoteName).toBe('docs');
+    expect(await getRemoteConnection(p.id, 'docs')).toBeNull();
+    expect(await deleteRemoteConnection(p.id, 'docs')).toBeNull();
   });
 });

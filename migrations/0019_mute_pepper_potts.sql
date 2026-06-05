@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_connections" ADD CONSTRAINT "mcp_connections_source_shape" CHECK ((source = 'composio' and toolkit_slug is not null and user_id is not null) or (source = 'remote' and remote_name is not null and remote_url is not null));

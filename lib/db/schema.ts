@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   date,
   integer,
   jsonb,
@@ -377,12 +378,21 @@ export const mcpConnections = pgTable(
     // CACHE, and a connection is "for the linear toolkit" independent of whether the cache row
     // exists yet. Orchestration validates the slug via getCatalogEntry + ensures the cache row
     // (ensure-before-connect) before any connection is written.
-    toolkitSlug: text('toolkit_slug').notNull(),
-    userId: text('user_id').notNull(), // mc-proj-<projectId> — the Composio user_id
+    // Composio source only (remote rows leave these null).
+    toolkitSlug: text('toolkit_slug'),
+    userId: text('user_id'), // mc-proj-<projectId> — the Composio user_id (composio source only)
     connectedAccountId: text('connected_account_id'), // Composio ca_… (set once link initiated)
     status: text('status').$type<ConnectionStatus>().notNull().default('initializing'),
     linkUrl: text('link_url'), // transient hosted link for an in-flight connect
     error: text('error'),
+    // ── Remote source (slice 3) ─────────────────────────────────────────────────
+    // A 'remote' connection is a directly-supplied remote-http MCP server (no OAuth). For remote rows
+    // toolkitSlug / userId / connectedAccountId are null and these three carry the server. remoteName
+    // doubles as the mcpServers map key; remoteHeaders values are ${ENV} placeholders (never a secret —
+    // resolved at spawn by the daemon). status is pinned 'active' (remote rows have no lifecycle).
+    remoteName: text('remote_name'),
+    remoteUrl: text('remote_url'),
+    remoteHeaders: jsonb('remote_headers').$type<Record<string, string>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -394,6 +404,17 @@ export const mcpConnections = pgTable(
     // a per-connection user_id rework. Do NOT drop this index to "allow multiple" without that redesign.
     uniqueIndex('mcp_connections_project_toolkit_uq').on(t.projectId, t.toolkitSlug),
     index('mcp_connections_project_idx').on(t.projectId),
+    // Remote rows are unique per (project, remote_name) — a partial index so it ignores composio rows
+    // (remote_name null). Composio uniqueness stays on (project, toolkit_slug) above; toolkit_slug is now
+    // nullable, and Postgres treats NULLs as distinct, so remote rows never collide on that index.
+    uniqueIndex('mcp_connections_project_remote_uq').on(t.projectId, t.remoteName).where(sql`source = 'remote'`),
+    // Enforce the source↔shape invariant at the DB layer (the columns are nullable to share one table across
+    // both sources): a composio row MUST carry toolkit_slug + user_id; a remote row MUST carry remote_name +
+    // remote_url. Without this, a future caller could insert a malformed row the app-layer writers never would.
+    check(
+      'mcp_connections_source_shape',
+      sql`(source = 'composio' and toolkit_slug is not null and user_id is not null) or (source = 'remote' and remote_name is not null and remote_url is not null)`,
+    ),
   ],
 );
 

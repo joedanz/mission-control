@@ -7,8 +7,9 @@ import type { McpConnection } from '../lib/db/schema';
 
 function conn(partial: Partial<McpConnection>): McpConnection {
   return {
-    id: 'id', projectId: 'p', toolkitSlug: 'linear', userId: 'mc-proj-p',
+    id: 'id', projectId: 'p', source: 'composio', toolkitSlug: 'linear', userId: 'mc-proj-p',
     connectedAccountId: null, status: 'active', linkUrl: null, error: null,
+    remoteName: null, remoteUrl: null, remoteHeaders: null,
     createdAt: new Date(), updatedAt: new Date(),
     ...partial,
   } as McpConnection;
@@ -46,5 +47,12 @@ describe('toolkitViews', () => {
   it('passes the connection error through', () => {
     const views = toolkitViews([conn({ toolkitSlug: 'slack', status: 'error', error: 'boom' })]);
     expect(views.find((v) => v.slug === 'slack')!.error).toBe('boom');
+  });
+
+  it('ignores remote-source rows (they are not catalog toolkits)', () => {
+    const views = toolkitViews([
+      conn({ source: 'remote', toolkitSlug: null, remoteName: 'docs', remoteUrl: 'https://r', status: 'active' }),
+    ]);
+    expect(views.every((v) => v.status === 'not_connected')).toBe(true); // the remote row didn't overlay anything
   });
 });

@@ -7,7 +7,7 @@ import { inArray } from 'drizzle-orm';
 import { db } from '../lib/db/index';
 import { projects, composioToolkits } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
-import { upsertToolkitRow, upsertConnection } from '../lib/composio-store';
+import { upsertToolkitRow, upsertConnection, upsertRemoteConnection } from '../lib/composio-store';
 import { resolveProjectMcpServers } from '../lib/composio-connections';
 
 const projectIds: string[] = [];
@@ -55,5 +55,30 @@ describe('resolveProjectMcpServers (real Neon)', () => {
     const p = await createProject({ name: tag(), category: 'internal', status: 'prelaunch' });
     projectIds.push(p.id);
     expect(await resolveProjectMcpServers(p.slug)).toEqual({});
+  });
+
+  it('emits a remote-source connection as a direct http entry (headers preserved)', async () => {
+    const p = await createProject({ name: tag(), category: 'internal', status: 'prelaunch' });
+    projectIds.push(p.id);
+    await upsertRemoteConnection(p.id, {
+      remoteName: 'docs', remoteUrl: 'https://mcp.example.com/sse', remoteHeaders: { Authorization: 'Bearer ${DOCS_TOKEN}' },
+    });
+    const map = await resolveProjectMcpServers(p.slug);
+    expect(map.docs).toEqual({ type: 'http', url: 'https://mcp.example.com/sse', headers: { Authorization: 'Bearer ${DOCS_TOKEN}' } });
+  });
+
+  it('unions composio + remote sources in one map', async () => {
+    const p = await createProject({ name: tag(), category: 'internal', status: 'prelaunch' });
+    projectIds.push(p.id);
+    const lin = tag();
+    toolkitSlugs.push(lin);
+    await upsertToolkitRow(lin, { mcpUrl: `https://x/v3/mcp/${lin}` });
+    await upsertConnection(p.id, lin, { userId: `mc-proj-${p.id}`, status: 'active', connectedAccountId: 'ca_1' });
+    await upsertRemoteConnection(p.id, { remoteName: 'docs', remoteUrl: 'https://r/sse', remoteHeaders: {} });
+
+    const map = await resolveProjectMcpServers(p.slug);
+    expect(Object.keys(map).sort()).toEqual([`composio-${lin}`, 'docs']);
+    expect(map[`composio-${lin}`].url).toBe(`https://x/v3/mcp/${lin}?user_id=mc-proj-${p.id}`);
+    expect(map.docs).toEqual({ type: 'http', url: 'https://r/sse' });
   });
 });

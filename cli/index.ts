@@ -354,6 +354,8 @@ const SPEC = [
   { name: 'integration list', readonly: true, summary: "List a project's integrations", args: ['<slug>'] },
   { name: 'mcp catalog', readonly: true, summary: "List Composio's full live catalog", options: ['--search', '--limit'] },
   { name: 'mcp connect', readonly: false, summary: 'Start a Composio connection (prints authorize link)', args: ['<slug>', '<toolkit>'] },
+  { name: 'mcp add-remote', readonly: false, summary: 'Attach a remote-http MCP server (URL + ${ENV} headers)', args: ['<slug>'], required: ['--name', '--url'], options: ['--header'] },
+  { name: 'mcp remove-remote', readonly: false, summary: 'Detach a remote MCP server by name', args: ['<slug>', '<name>'] },
   { name: 'mcp status', readonly: false, summary: 'Poll a Composio connection status', args: ['<slug>', '<toolkit>'] },
   { name: 'mcp list', readonly: true, summary: "List a project's MCP connections", args: ['<slug>'] },
   { name: 'mcp disconnect', readonly: false, summary: 'Disconnect a Composio toolkit', args: ['<slug>', '<toolkit>'] },
@@ -925,6 +927,41 @@ withFlags(mcp.command('connect'))
     }),
   );
 
+withFlags(mcp.command('add-remote'))
+  .description('Attach a remote-http MCP server (URL + ${ENV} headers)')
+  .argument('<slug>')
+  .requiredOption('--name <name>', 'display name (also the mcpServers key)')
+  .requiredOption('--url <url>', 'remote MCP endpoint URL (http/https)')
+  .option('--header <kv>', 'repeatable header KEY=VALUE (use ${ENV} for secrets)', collect, [])
+  .action((slug: string, opts: LeafOpts) =>
+    emit('mcp add-remote', opts, async () => {
+      ensureDbCredentials();
+      const headers = Object.fromEntries(
+        ((opts.header as string[]) ?? []).map((kv) => {
+          const i = kv.indexOf('=');
+          if (i < 0) throw new ValidationError('header', `Invalid --header "${kv}" — expected KEY=VALUE`);
+          return [kv.slice(0, i), kv.slice(i + 1)];
+        }),
+      );
+      const { addRemote } = await import('../lib/composio-connections');
+      const connection = await addRemote(slug, { name: String(opts.name), url: String(opts.url), headers });
+      return { data: connection, human: () => console.log(`${slug}: remote "${connection.remoteName}" added (${connection.status})`) };
+    }),
+  );
+
+withFlags(mcp.command('remove-remote'))
+  .description('Detach a remote MCP server by name')
+  .argument('<slug>')
+  .argument('<name>')
+  .action((slug: string, name: string, opts: LeafOpts) =>
+    emit('mcp remove-remote', opts, async () => {
+      ensureDbCredentials();
+      const { removeRemote } = await import('../lib/composio-connections');
+      const connection = await removeRemote(slug, name);
+      return { data: connection, human: () => console.log(`${slug}: remote "${connection.remoteName}" removed`) };
+    }),
+  );
+
 withFlags(mcp.command('status'))
   .description('Poll a Composio connection status')
   .argument('<slug>')
@@ -949,7 +986,9 @@ withFlags(mcp.command('list'))
       return {
         data: { items, count: items.length },
         human: () => {
-          items.forEach((c) => console.log(`${c.toolkitSlug}  ${c.status}`));
+          items.forEach((c) =>
+            console.log(`${c.source === 'remote' ? 'remote' : 'composio'}  ${c.remoteName ?? c.toolkitSlug ?? '?'}  ${c.status}`),
+          );
           console.log(`\n${items.length} connection${items.length === 1 ? '' : 's'}`);
         },
       };
