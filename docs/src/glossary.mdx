@@ -17,7 +17,7 @@ Every bit of jargon used above, translated.
 | Agent profile | A named, reusable recipe for *how* an agent runs — its model, skills, MCP tools, permission posture, runtime, and the rules for when to use it. Drive it with `mc profile`. |
 | Runtime | How a profiled worker is launched: `claude-code` (Claude with rich flags) or `exec` (any command — the path to non-Claude models). |
 | Auto-routing | Picking a profile for a task by its match rules, breaking ties by priority, falling back to the global default. |
-| Auto-feed | At agent spawn, a project's active Composio connections are automatically injected into the agent's MCP servers (keys like `composio-<toolkit>`). The profile's own MCP servers win on a name collision. |
+| Auto-feed | At agent spawn, a project's active MCP servers — Composio toolkits *and* direct remote servers — are automatically injected into the agent's MCP servers (a Composio server is keyed `composio-<toolkit>`, a remote server by its name). The profile's own MCP servers win on a name collision. |
 | MCP server | A Model Context Protocol tool an agent can call — a local `stdio` command or a remote `http`/`sse`/`ws` endpoint. The "powers" a profile grants. |
 | Fallback model | A cheaper/secondary model a profile drops to when the primary is overloaded, or when its daily budget is spent. |
 | Budget downgrade | When a profile's same-day run cost passes its cap, new runs switch to the fallback model — decided from real measured spend. |
@@ -32,10 +32,10 @@ Every bit of jargon used above, translated.
 | Cron | A compact schedule expression (e.g. `0 9 * * 1-5` = 9am on weekdays) read in a chosen timezone. |
 | Auto-pause | The scheduler switching off a profile's schedule after three check-ins fail in a row, so a broken mission stops costing money. |
 | Reaper | A cleanup script that marks silent or crashed runs as "abandoned" so the live view stays accurate. |
-| Remote MCP server | An MCP server reached over HTTP (as opposed to a local one launched as a subprocess). Composio connections surface as remote MCP servers inside the agent's tool set. |
+| Remote MCP server | An MCP server reached over HTTP (as opposed to a local one launched as a subprocess). A project gets one two ways: a Composio connection (OAuth-brokered) or a `remote` server you attach directly by URL + `${ENV}` headers (`mc mcp add-remote`). |
 | Kill-switch | The cancel button — it flags a run to stop, and the agent halts itself before its next action. |
 | Token | The unit AI models charge by — roughly a fragment of a word. Cost is tokens × the model's rate. |
-| Toolkit | A Composio-supported service (e.g. `linear`, `slack`). The full supported set is a built-in catalog; each project can hold at most one active connection per toolkit. |
+| Toolkit | A Composio-supported service (e.g. `linear`, `slack`). The supported set is Composio's full live catalog (~1,000+ toolkits, browsable with `mc mcp catalog`); each project can hold at most one active connection per toolkit. |
 | CLI (mc) | "Command-line interface" — the typed-command tool agents use instead of a mouse and screen. |
 | Composio | A third-party OAuth broker that exposes long-tail services (Linear, Slack, and more) as hosted remote MCP servers, so a project can connect to them without bespoke wiring. |
 | Connection (Composio) | A per-project link to one Composio toolkit. There is at most one connection per (project, toolkit). Has a status: `initializing`, `active`, `error`, `expired`, or `disconnected`. |
@@ -54,11 +54,11 @@ Every bit of jargon used above, translated.
 | Run-only | A workflow's agent node opens a real run (for cost, heartbeat, and the kill-switch) but creates no claimable task — so it can't race the auto-claim daemon. |
 | Single-flight guard | The rule that refuses a second run of a workflow while one is already queued, running, or paused (unless you opt out). |
 | Telemetry | The automatic stream of status updates agents send about what they're doing. |
-| Integration | Standard "plumbing" a project may need — payments (Stripe), error tracking (Sentry), email, or Google sign-in — plus any Composio-brokered service (Linear, Slack, …) connected as a remote MCP tool. |
+| Integration | Two senses in current MC: an **integration node** in a [workflow](/workflows) (a deterministic Composio action, no LLM), or — loosely — a service a project connects to as an [MCP server](/mcp). Stripe, Sentry, and email still appear as the Revenue / Errors / Email tabs, but those are driven by project fields, not tracked "integration" records. |
 | Optimistic concurrency | Letting many workers reach for the same row, but writing in a way where only one can win — no locks held up front. |
 | Idempotent | Safe to repeat — running the command (or re-sending a hook) twice has the same effect as once. An *idempotency key* is the tag that makes a retry a no-op. |
 | Micro-dollars | Cost stored as millionths of a dollar (integer), so even a fraction-of-a-cent run is tracked exactly without rounding. |
-| Upsert | "Insert or update" — create the row if it's new, otherwise patch the existing one. Used for integrations and retried run starts. |
+| Upsert | "Insert or update" — create the row if it's new, otherwise patch the existing one. Used for MCP connection records and retried run starts. |
 | Bearer token | A shared secret sent in a request header (`Authorization: Bearer …`) that the telemetry door checks before accepting writes. |
 | pgEnum / GIN index | A Postgres fixed-value type, and a specialized index that makes searching inside JSON arrays (like a tech stack) fast. |
 | Drizzle / BetterAuth | The type-safe layer that defines the database schema, and the library that runs Google sign-in and sessions. |

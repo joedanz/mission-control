@@ -63,7 +63,7 @@
           {
             "group": "How It Runs",
             "icon": "workflow",
-            "pages": ["autonomy", "profiles", "integrations", "workflows", "telemetry", "safety", "cost", "access"]
+            "pages": ["autonomy", "profiles", "mcp", "workflows", "telemetry", "safety", "cost", "access"]
           }
         ]
       },

@@ -14,7 +14,7 @@ integration calls, branches, triggers, and human approval gates.
 [Autonomy](/autonomy) runs **one** task at a time: claim it, spawn an agent, report back. A
 **workflow** strings those steps into a defined flow — a graph you draw on a canvas. The
 differentiator versus tools like n8n or Zapier is the headline node type: an **agent node** is a
-real [run](/data-model) with a [profile](/profiles), skills, [MCP tools](/integrations), and a
+real [run](/data-model) with a [profile](/profiles), skills, [MCP tools](/mcp), and a
 budget — not a fixed API call. You compose Claude agents the same way those tools compose webhooks.
 
 <Note>
@@ -41,7 +41,7 @@ agent node spawns an AI — the rest are deterministic (no LLM, no cost, no spaw
     `responseSchema` for structured output. The only node that costs money.
   </Card>
   <Card title="Integration" icon="plug">
-    **A deterministic tool call.** Runs one [Composio](/integrations) action (e.g. create a Linear
+    **A deterministic tool call.** Runs one [Composio](/mcp) action (e.g. create a Linear
     issue, post to Slack) against the project's active connection — no agent, no run row. Carries a
     `toolkit`, an `action`, and `arguments`.
   </Card>
@@ -260,7 +260,7 @@ deterministic side effects, a branch for the decision, and a gate for the human 
 ---
 
 Workflows compose the rest of the system: [agent profiles](/profiles) decide *how* an agent node runs,
-[Composio integrations](/integrations) back the integration nodes, and every agent node shows up in the
+[Composio integrations](/mcp) back the integration nodes, and every agent node shows up in the
 same [telemetry](/telemetry), [cost](/cost), and [safety](/safety) surfaces as any other run. For the
 full command list see the [CLI reference](/reference/cli#workflows); for the tables, the
 [schema](/reference/schema#workflows-a-defined-flow-of-nodes); for the endpoints, the

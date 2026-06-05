@@ -1,0 +1,247 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+rendering: static
+title: MCP servers
+description: Give a project's agents extra tools by attaching MCP servers — either an OAuth toolkit brokered by Composio, or a remote-http server you supply directly.
+icon: plug
+---
+
+# Giving projects the tools they use
+
+Attach **MCP servers** to a project so its spawned agents can reach the services it lives
+inside — issues in Linear, messages in Slack, or any tool you expose over the Model Context
+Protocol.
+
+Most projects live inside a larger ecosystem. Mission Control bridges that gap by letting each
+project hold one or more **MCP servers**, and every server comes from one of two **sources**:
+
+- **`composio`** — a service brokered through [Composio](https://composio.io), a third-party OAuth
+  broker that hosts a remote MCP server for each of ~1,000+ supported services. You authorize
+  once; Composio manages the tokens. Use this for the long tail (Linear, Slack, Notion, GitHub, …).
+- **`remote`** — a remote-http MCP server you point at directly, by URL plus auth headers. No
+  OAuth, no broker. Use this for a server you host yourself or any MCP endpoint you already have a
+  token for.
+
+Either way the result is the same: when the daemon spawns an agent for the project, the server is
+injected into the agent's MCP tool set automatically — no custom wiring, and the agent calls those
+tools the way it calls any other.
+
+<Note>
+**`COMPOSIO_API_KEY` is required for the `composio` source.** All Composio features — CLI and
+dashboard — need this env var set in the daemon's environment. Agents never see it; MC resolves it
+at spawn and passes it as an HTTP header. The `remote` source needs no broker key (its own headers
+carry whatever auth it requires). See [Operating](/reference/operating) for where to set it.
+</Note>
+
+A **toolkit** is one Composio-supported service (e.g. `linear`, `slack`). A **connection** is a
+live, authorized link between one project and one toolkit. Each project can have at most one
+connection per toolkit (see the [note below](#one-connection-per-project-toolkit)).
+
+## Source 1 — connecting a Composio toolkit
+
+<Frame caption="Fig. 08 — Connecting a toolkit: from `mc mcp connect` to an active link.">
+  ![Connecting a toolkit](/figures/fig-08-mcp-connect.svg)
+</Frame>
+
+Connecting a toolkit is a short, one-time flow. Browse the live catalog, then walk the OAuth
+handshake.
+
+<Steps>
+  <Step title="Browse the catalog">
+    Search Composio's full live catalog — over a thousand toolkits. This is read-only; no
+    credentials needed.
+
+    ```bash
+    mc mcp catalog --search linear   # server-side fuzzy search; --limit caps the page
+    ```
+
+    Each row carries the toolkit slug (what you pass to every other command), its display name, the
+    number of tools Composio exposes, and a `featured` flag for the slugs in MC's curated editorial
+    set. A curated toolkit (`linear`, `slack`) binds a narrow, hand-picked tool list; any other
+    toolkit binds all of its tools.
+  </Step>
+  <Step title="Start the connection">
+    Point MC at your project and the toolkit. MC provisions the shared Composio resources
+    (idempotent) and prints an authorization URL.
+
+    ```bash
+    mc mcp connect <project-slug> <toolkit-slug>
+    # Example: mc mcp connect myapp linear
+    ```
+
+    Open the printed `https://…` link in a browser and complete the OAuth flow (log in, grant
+    access). You don't need to stay on the page — MC tracks the handshake in the background.
+  </Step>
+  <Step title="Poll until active">
+    After authorizing, poll to confirm MC has seen the completed handshake and persisted the
+    connection.
+
+    ```bash
+    mc mcp status <project-slug> <toolkit-slug>
+    ```
+
+    When the connection is ready the status field reads `active`. The full set of statuses is
+    `initializing` → `active`, or `error` / `expired` / `disconnected` if something goes wrong.
+  </Step>
+  <Step title="Verify the connection list">
+    Confirm the project's live servers — both sources — at any time. Each row is tagged with its
+    source.
+
+    ```bash
+    mc mcp list <project-slug>
+    ```
+  </Step>
+</Steps>
+
+## Source 2 — attaching a remote MCP server
+
+When you already have a remote-http MCP endpoint — one you host, or a third-party server you hold a
+token for — attach it directly, with no broker in the middle.
+
+```bash
+mc mcp add-remote <project-slug> \
+  --name notes \
+  --url https://mcp.example.com/sse \
+  --header "Authorization=Bearer ${NOTES_TOKEN}"
+```
+
+The row is created **`active`** immediately — a remote server has no OAuth lifecycle to poll. The
+key details:
+
+- **`--name` doubles as the server key.** It's the name the server appears under in the agent's
+  `--mcp-config` and in tool-call logs, and it's unique per project. Re-adding the same name updates
+  the URL and headers (idempotent).
+- **Header values must be `${ENV}` placeholders.** Every header value has to reference an
+  environment variable (e.g. `${NOTES_TOKEN}`) — a literal secret is rejected. The placeholder is
+  resolved from the daemon's environment at spawn, exactly like a profile secret, so a raw token
+  never lands in the database.
+
+Remove one by name:
+
+```bash
+mc mcp remove-remote <project-slug> notes
+```
+
+(`mc mcp disconnect` is for the `composio` source only — it revokes the OAuth account at Composio.
+Remote servers have no account to revoke, so they use `remove-remote`.)
+
+## Tools show up automatically
+
+<Frame caption="Fig. 09 — Auto-feed: a project's active servers become an agent's tools at spawn time.">
+  ![Auto-feed diagram](/figures/fig-09-mcp-feed.svg)
+</Frame>
+
+Once a server is active, you don't configure anything else. Every time the daemon spawns an agent
+for that project — whether from an auto-claimed task or a scheduled check-in — MC resolves the
+project's active servers from **both** sources and injects them into the agent's MCP server list.
+
+The key details:
+
+- **Server key** — a Composio server is keyed `composio-<toolkit>` (e.g. `composio-linear`); a
+  remote server is keyed by its `--name`. These are the names that appear in `--mcp-config` and in
+  tool-call logs.
+- **Per-project identity (Composio)** — each Composio connection carries a stable `user_id`
+  (`mc-proj-<projectId>`) so Composio routes calls to the right project's authorized account.
+- **Profile wins on collision** — if a [profile's](/profiles) own `mcpServers` already defines a key
+  that matches an auto-fed server, the profile's entry wins. Auto-feed only fills gaps. Across the
+  two sources, a remote server wins over a composio one on a key collision.
+- **No profile required** — if no profile matches the task, MC still injects the active servers via
+  `--strict-mcp-config`, so only those servers are visible to the agent.
+- **`COMPOSIO_API_KEY` stays on the host** — each injected Composio server carries an
+  `x-api-key: ${COMPOSIO_API_KEY}` header; remote servers carry their own `${ENV}` headers. Every
+  placeholder is resolved from the daemon's environment at spawn and written to a `0600` temp file.
+  The raw values never land in the database or in `ps` output.
+
+You can inspect exactly what a spawn would receive before it happens:
+
+```bash
+mc mcp config <project-slug>
+```
+
+This prints the resolved `mcpServers` JSON for the project's current active servers (both
+sources) — the same map MC passes to the agent at spawn.
+
+## Keeping Composio connections healthy
+
+OAuth tokens expire, and users sometimes revoke access. MC handles this gracefully. (Remote
+servers have no token lifecycle — these commands are Composio-only.)
+
+**Checking status manually.** Run `mc mcp status` at any time to re-poll Composio and persist the
+latest status. The CLI logs a `composio.connection_changed` event whenever a status transitions, so
+the activity feed reflects changes automatically.
+
+**Bulk refresh.** To re-poll every connection of a project in one shot:
+
+```bash
+mc mcp refresh <project-slug>
+```
+
+This polls each connection that has a linked Composio account, persists any status changes, and
+emits a `composio.connection_changed` event per transition. A transient Composio error on one
+connection is skipped — the rest still update.
+
+**Reconnecting.** If a connection expires or errors, run `mc mcp connect` again for that toolkit. MC
+revokes the old Composio `connected_account` before creating the new one, so you don't accumulate
+orphaned accounts. (The revocation is best-effort — if it fails, the new connection still succeeds.)
+
+**Disconnecting.** To revoke a Composio connection entirely:
+
+```bash
+mc mcp disconnect <project-slug> <toolkit-slug>
+```
+
+This revokes the account at Composio and marks the connection `disconnected` locally. The entry
+stays in the list so you can reconnect later.
+
+## From the dashboard
+
+The **MCP** tab on a project's page does everything the CLI does, without leaving the browser. It
+has three sections:
+
+- **Connected** — the project's current servers (both sources), each with its status as a
+  color-coded pill and the matching action (Check status / Disconnect for Composio, Remove for
+  remote).
+- **Browse catalog** — a live, searchable view of Composio's full catalog. Each toolkit shows
+  whether it's `featured` and whether it's already connected; Connect kicks off the OAuth flow
+  inline.
+- **Add remote server** — a small form for a `remote` server: a name, a URL, and repeatable
+  `${ENV}`-placeholder header rows. A literal-secret header value is rejected before anything is
+  saved.
+
+| Pill | Meaning |
+|---|---|
+| **Active** | Connected and ready. Tools are auto-fed to agents. |
+| **Initializing** | OAuth flow started; waiting for the browser handshake to complete. |
+| **Error** | The last poll returned an error from Composio. |
+| **Expired** | The token has expired. Reconnect to restore access. |
+| **Disconnected** | The connection was revoked; reconnect to restore it. |
+
+While a Composio connection is `initializing`, the tab auto-polls every few seconds so the pill
+updates once the browser handshake completes, without a manual refresh.
+
+## One connection per (project, toolkit) {#one-connection-per-project-toolkit}
+
+<Note>
+**This limit is intentional.** Each project has exactly one authorized account per Composio toolkit,
+enforced by a unique index in the database. Mission Control is a single-user tool — there's no need
+to juggle multiple Slack workspaces or Linear organizations per project. If you need a different
+account, disconnect first and reconnect with the new credentials. (Remote servers are likewise
+unique per `--name` within a project.)
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Every `mc mcp` command and its flags, in full.
+  </Card>
+  <Card title="Agent profiles" icon="sliders-horizontal" href="/profiles">
+    How profiles define MCP servers, and how auto-feed interacts with profile-level config.
+  </Card>
+  <Card title="Schema" icon="table" href="/reference/schema">
+    The `mcp_connections` and `composio_toolkits` tables, column by column.
+  </Card>
+  <Card title="Dashboard" icon="monitor" href="/dashboard">
+    The MCP tab: status pills, catalog browse, add-remote, and auto-poll behavior.
+  </Card>
+</CardGroup>

@@ -36,16 +36,16 @@ The right one shows up for the right job, automatically.
 | **match rules** · **priority** · **default** | When this profile applies, how ties break, and the global fallback. |
 | **scheduled check-in** | An optional cadence (interval or cron) that wakes this profile on its own to work a bound project's queue (see [below](#scheduled-check-ins)). |
 
-## Composio auto-feed
+## MCP auto-feed
 
-When the daemon spawns an agent it also fetches the project's active [Composio](/integrations)
-connections and merges them into the agent's MCP server set automatically — no extra profile
-configuration required.
+When the daemon spawns an agent it also fetches the project's active [MCP servers](/mcp) — both
+Composio-brokered toolkits and direct remote servers — and merges them into the agent's MCP server
+set automatically, with no extra profile configuration required.
 
 How it works:
 
-- Each active connection becomes an MCP server keyed `composio-<toolkit>` (e.g.
-  `composio-linear`, `composio-slack`).
+- Each active server becomes an MCP server in the agent's config — a Composio connection keyed
+  `composio-<toolkit>` (e.g. `composio-linear`, `composio-slack`), a remote server keyed by its name.
 - These servers are merged **under** the profile's own `mcpServers`. If the profile already
   declares a key that matches, the **profile wins** — you can always override an auto-fed server
   with a hand-crafted one.
@@ -64,8 +64,8 @@ environment at the moment the agent is launched. The resolved value is written t
 file and is never visible in the database, in `ps` output, or on disk in the clear.
 </Note>
 
-See [Integrations](/integrations) for how to connect a project to Composio and manage its active
-connections.
+See [MCP servers](/mcp) for how to connect a project to a toolkit or a remote server and manage its
+active connections.
 
 ## How the right profile gets picked
 
@@ -73,9 +73,9 @@ Routing is rule-based and runs every time the daemon claims a task.
 
 <Steps>
   <Step title="Match on the task's context">
-    Each profile can declare **match rules** — any mix of project slugs, project categories, task
-    kinds, and a label regex. A profile applies only when *every* rule it sets is satisfied (they're
-    ANDed). A profile with no rules never matches by rule — it can only be the default.
+    Each profile can declare **match rules** — any mix of project slugs, project categories, and a
+    label regex. A profile applies only when *every* rule it sets is satisfied (they're ANDed). A
+    profile with no rules never matches by rule — it can only be the default.
   </Step>
   <Step title="Break ties by priority">
     If several profiles match, the one with the highest **priority** wins; the oldest is the

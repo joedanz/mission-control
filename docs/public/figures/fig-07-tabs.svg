@@ -41,9 +41,9 @@
   <text x="140" y="126" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Mission</text>
   <text x="140" y="145" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
-  <!-- Tab: Integrations  y=168 -->
+  <!-- Tab: MCP  y=168 -->
   <rect x="60" y="168" width="160" height="52" rx="4" fill="#fbf9f4" stroke="#2a2620" stroke-width="1.2"/>
-  <text x="140" y="190" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">Integrations</text>
+  <text x="140" y="190" text-anchor="middle" class="t-disp" font-size="14" fill="#2a2620">MCP</text>
   <text x="140" y="209" text-anchor="middle" class="t-mono" font-size="9" fill="#9a9082" letter-spacing="1">PROJECT TAB</text>
 
   <!-- Tab: Workflows  y=232 -->
