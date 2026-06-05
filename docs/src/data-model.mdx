@@ -28,6 +28,14 @@ one "belongs to" the one above it, like folders inside folders. A fifth — the 
 | **MCP connection** | A project's live link to one MCP server, by `source`: a Composio-brokered toolkit (Linear, Slack, …) or a direct remote-http server. Each project holds at most one connection per toolkit. | For a Composio source: toolkit slug, OAuth status (`initializing`, `active`, `error`, `expired`, `disconnected`), and the connected-account ID. For a remote source: name, URL, and `${ENV}` headers. See [MCP servers](/mcp). |
 | **Workflow** | A defined *flow* of work — a graph of nodes (a trigger, AI agents, integration calls, branches, approval gates) you draw on a canvas. It composes the pieces above rather than replacing them. | The node graph and its version, plus — per execution — a **workflow run** that snapshots the graph and a **step** per node (an agent node's step links the [run](/data-model) it spawned). See [Workflows](/workflows). |
 
+<Frame caption="A project's detail page — the fields it remembers (category, status, stack, links), with tabs for its tasks, MCP servers, and workflows.">
+  ![A project detail page](/screenshots/project-overview.png)
+</Frame>
+
+<Frame caption="A project's Tasks tab — each task with its status, switchable between a flat list and that project's Kanban board.">
+  ![A project's Tasks tab](/screenshots/project-tasks.png)
+</Frame>
+
 <Note>
 **No two agents can grab the same task.** When an AI claims a task, it stamps the task with its
 own ID *and* an expiry time in a single, indivisible database operation. If two agents reach
