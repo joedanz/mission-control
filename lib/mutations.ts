@@ -261,7 +261,7 @@ export async function importTasks(
   const inserted = await db
     .insert(tasks)
     .values(items.map((i) => ({ projectId, label: i.label, notes: i.notes ?? null, status: 'todo' as const })))
-    .onConflictDoNothing({ target: [tasks.projectId, tasks.label], where: sql`integration_type is null` })
+    .onConflictDoNothing({ target: [tasks.projectId, tasks.label] })
     .returning();
   if (inserted.length) {
     await Promise.all([
