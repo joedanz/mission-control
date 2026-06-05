@@ -24,6 +24,10 @@ claimable task**. That keeps a workflow from racing the [auto-claim daemon](/aut
 ever picks up `custom` `todo` tasks.
 </Note>
 
+<Frame caption="A workflow on the canvas — a trigger feeds an agent, then a branch routes the high-severity path to a Linear integration (the other path skipped). Each node carries its live status.">
+  ![A workflow graph on the canvas](/screenshots/workflow-canvas.png)
+</Frame>
+
 ## The five kinds of node
 
 A workflow is a graph of **nodes** joined by **edges**. Five node types cover every step; only the
@@ -207,6 +211,10 @@ Approving completes the gate step and the walk resumes. Rejecting **fails** the 
 **Awaiting approval** panel with Approve / Reject buttons (and an optional reason). Either way the
 decision is recorded on the gate step; the resume is a synchronous re-walk from the CLI, or a
 `paused → queued` requeue that the workflow daemon picks up for the canvas and `--async`.
+
+<Frame caption="A paused run waiting at a gate — the Awaiting approval panel, with Approve / Reject and an optional reason, sits above the live graph.">
+  ![A workflow paused at an approval gate](/screenshots/workflow-approval.png)
+</Frame>
 
 ## Authoring a workflow
 
