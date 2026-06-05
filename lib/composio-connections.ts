@@ -3,9 +3,10 @@
 
 import { allowedToolsFor } from './composio-catalog';
 import { getProjectIdBySlug } from './queries';
-import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus } from './composio-store';
+import { getToolkitRow, upsertToolkitRow, getConnection, listConnectionsByProject, upsertConnection, setConnectionStatus, upsertRemoteConnection, deleteRemoteConnection } from './composio-store';
 import { createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection, deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent, ComposioApiError } from './composio-api';
 import { buildConnectionMcpServers, type ConnectionMcpRow } from './composio-mcp';
+import { buildRemoteMcpServers, validateRemoteInput, type RemoteMcpRow } from './mcp-remote';
 import { createEvent } from './mutations';
 import type { McpConnection, ConnectionStatus, McpServerConfig } from './db/schema';
 import { NotFoundError } from './validation';
@@ -86,6 +87,27 @@ export async function disconnect(projectSlug: string, toolkitSlug: string): Prom
   return updated ?? conn;
 }
 
+/** Attach a remote-http MCP server to a project (no OAuth). Validates input, then upserts a remote row
+ *  (idempotent on name). The server is immediately active. */
+export async function addRemote(
+  projectSlug: string,
+  input: { name: string; url: string; headers: Record<string, string> },
+): Promise<McpConnection> {
+  const projectId = await getProjectIdBySlug(projectSlug);
+  if (!projectId) throw new NotFoundError('project', projectSlug);
+  const { name, url, headers } = validateRemoteInput(input);
+  return upsertRemoteConnection(projectId, { remoteName: name, remoteUrl: url, remoteHeaders: headers });
+}
+
+/** Detach a remote MCP server by name. NotFoundError if no such remote row. */
+export async function removeRemote(projectSlug: string, name: string): Promise<McpConnection> {
+  const projectId = await getProjectIdBySlug(projectSlug);
+  if (!projectId) throw new NotFoundError('project', projectSlug);
+  const removed = await deleteRemoteConnection(projectId, name);
+  if (!removed) throw new NotFoundError('remote connection', `${projectSlug}/${name}`);
+  return removed;
+}
+
 /** Resolve a project's ACTIVE Composio connections into an mcpServers map for a spawned agent. Lists
  *  the project's connections, keeps only status==='active', joins each toolkit's cached mcpUrl, and
  *  builds the map. An active connection whose toolkit cache row has no mcpUrl is skipped (defensive —
@@ -94,14 +116,22 @@ export async function resolveProjectMcpServers(projectSlug: string): Promise<Rec
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
   const active = (await listConnectionsByProject(projectId)).filter((c) => c.status === 'active');
+  // composio rows → join each toolkit's cached mcpUrl (a row with no cached url, or missing slug/user, is skipped)
   const joined = await Promise.all(
-    active.map(async (c) => {
-      const toolkit = await getToolkitRow(c.toolkitSlug);
-      return toolkit?.mcpUrl ? { toolkitSlug: c.toolkitSlug, userId: c.userId, mcpUrl: toolkit.mcpUrl } : null;
-    }),
+    active
+      .filter((c) => c.source === 'composio')
+      .map(async (c) => {
+        if (!c.toolkitSlug || !c.userId) return null;
+        const toolkit = await getToolkitRow(c.toolkitSlug);
+        return toolkit?.mcpUrl ? { toolkitSlug: c.toolkitSlug, userId: c.userId, mcpUrl: toolkit.mcpUrl } : null;
+      }),
   );
-  const rows: ConnectionMcpRow[] = joined.filter((r): r is ConnectionMcpRow => r !== null);
-  return buildConnectionMcpServers(rows);
+  const composioRows: ConnectionMcpRow[] = joined.filter((r): r is ConnectionMcpRow => r !== null);
+  // remote rows → emit directly (no cache/network); a malformed row missing name/url is skipped
+  const remoteRows: RemoteMcpRow[] = active
+    .filter((c) => c.source === 'remote' && c.remoteName && c.remoteUrl)
+    .map((c) => ({ remoteName: c.remoteName!, remoteUrl: c.remoteUrl!, remoteHeaders: c.remoteHeaders }));
+  return { ...buildConnectionMcpServers(composioRows), ...buildRemoteMcpServers(remoteRows) };
 }
 
 export type ConnectionRefresh = { toolkitSlug: string; from: ConnectionStatus; to: ConnectionStatus; changed: boolean };
@@ -115,7 +145,7 @@ export async function refreshConnections(projectSlug: string): Promise<Connectio
   const conns = await listConnectionsByProject(projectId);
   const results: ConnectionRefresh[] = [];
   for (const conn of conns) {
-    if (!conn.connectedAccountId) continue; // never linked → nothing to poll
+    if (!conn.connectedAccountId || !conn.toolkitSlug) continue; // never-linked or remote rows → nothing to poll
     const from = conn.status;
     let to = from;
     try {
