@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   date,
   integer,
   jsonb,
@@ -407,6 +408,13 @@ export const mcpConnections = pgTable(
     // (remote_name null). Composio uniqueness stays on (project, toolkit_slug) above; toolkit_slug is now
     // nullable, and Postgres treats NULLs as distinct, so remote rows never collide on that index.
     uniqueIndex('mcp_connections_project_remote_uq').on(t.projectId, t.remoteName).where(sql`source = 'remote'`),
+    // Enforce the source↔shape invariant at the DB layer (the columns are nullable to share one table across
+    // both sources): a composio row MUST carry toolkit_slug + user_id; a remote row MUST carry remote_name +
+    // remote_url. Without this, a future caller could insert a malformed row the app-layer writers never would.
+    check(
+      'mcp_connections_source_shape',
+      sql`(source = 'composio' and toolkit_slug is not null and user_id is not null) or (source = 'remote' and remote_name is not null and remote_url is not null)`,
+    ),
   ],
 );
 
