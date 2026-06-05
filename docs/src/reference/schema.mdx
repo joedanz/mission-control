@@ -34,8 +34,8 @@ app/CLI layer** for "churny" sets that do — so adding a status never needs a d
 | Column | Notes |
 |---|---|
 | `project_id` | FK to `projects`, `ON DELETE CASCADE` — delete a project, its tasks go too. |
-| label · notes · kind | `kind` is `custom` or `integration`. |
-| status · integration_status | Custom workflow (`todo→in_progress→done`) vs the tri-state for integration tasks (`needed/pending/done`). |
+| label · notes | The task's title, freeform notes. |
+| status | Custom workflow status: `todo→in_progress→done`. |
 | version | Optimistic-concurrency token, bumped on every status/claim write — the collision signal. |
 | sort_order | Manual board position within a column; lower comes first. Drives the queue head (see `tasks_claimable_idx`) so a board re-order steers what the daemon claims next. |
 | claimed_by_run_id | FK to `runs`, `ON DELETE SET NULL` — a deleted/abandoned run frees the claim. |
@@ -111,7 +111,7 @@ the rest of the schema.
 | skills · allowed_tools · disallowed_tools | `jsonb` string arrays — steered skills and the tool allow/deny lists. |
 | mcp_servers · env | `jsonb` — the `--mcp-config` inner map and an env map. Secrets are `${ENV}` placeholders only; the daemon resolves them at spawn. |
 | append_system_prompt · exec_template | Persona text, and the command template required when `runtime='exec'` (tokens `${MODEL}`/`${PROMPT}`/`${MCP_CONFIG}`/`${FALLBACK_MODEL}`). |
-| match_rules · priority · is_default · enabled | `jsonb` routing rules (`projectSlugs`/`projectCategories`/`taskKinds`/`labelPattern`), the tie-break, the single global default, and an on/off flag. |
+| match_rules · priority · is_default · enabled | `jsonb` routing rules (`projectSlugs`/`projectCategories`/`labelPattern`), the tie-break, the single global default, and an on/off flag. |
 | schedule_enabled · schedule_project_id | Master on/off for scheduled check-ins, and the FK to the project the check-in runs in (`ON DELETE SET NULL`). |
 | schedule_interval_sec · schedule_cron · schedule_timezone | The cadence — an interval in seconds (≥60) **or** a cron expression read in an IANA timezone. Cron wins when both are set. |
 | check_in_prompt | The standing mission handed to the agent on each scheduled wake-up. |

@@ -72,10 +72,10 @@ function buildTaskPrompt(task: Task): string {
 }
 
 /** Ask the resolver (via the CLI, keeping DB scope at the mc boundary) which profile auto-routing picks for
- *  this task. The daemon only claims `custom` tasks, so kind is fixed. A resolve failure is non-fatal: we log
- *  and fall back to the daemon's default spawn rather than block the queue on a transient DB blip. */
+ *  this task. A resolve failure is non-fatal: we log and fall back to the daemon's default spawn rather than
+ *  block the queue on a transient DB blip. */
 async function resolveProfileForTask(task: Task, a: Args): Promise<AgentProfile | null> {
-  const r = await mc(['profile', 'resolve', '--project', a.project, '--label', task.label, '--kind', 'custom']);
+  const r = await mc(['profile', 'resolve', '--project', a.project, '--label', task.label]);
   if (!r.ok) {
     log(`profile resolve failed (${r.error?.code ?? r.code}) — falling back to the default daemon spawn`);
     return null;
