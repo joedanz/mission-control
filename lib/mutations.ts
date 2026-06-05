@@ -284,32 +284,16 @@ export async function importTasks(
  *  The flip is computed by Postgres via a CASE on the live row (single-statement, race-safe on
  *  neon-http) — NOT a read-modify-write. Bumps `version`. */
 export async function toggleTask(taskId: string): Promise<Task | null> {
-  // Only reads integrationType (immutable) to pick the column to flip — not a TOCTOU race.
-  const task = await getTaskById(taskId);
-  if (!task) return null;
-
-  const updated = task.integrationType
-    ? await db
-        .update(tasks)
-        .set({
-          integrationStatus: sql`case when ${tasks.integrationStatus} = 'done' then 'needed' else 'done' end`,
-          completedAt: sql`case when ${tasks.integrationStatus} = 'done' then null else now() end`,
-          version: sql`${tasks.version} + 1`,
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, taskId))
-        .returning()
-    : await db
-        .update(tasks)
-        .set({
-          status: sql`case when ${tasks.status} = 'done' then 'todo' else 'done' end`,
-          completedAt: sql`case when ${tasks.status} = 'done' then null else now() end`,
-          version: sql`${tasks.version} + 1`,
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, taskId))
-        .returning();
-
+  const updated = await db
+    .update(tasks)
+    .set({
+      status: sql`case when ${tasks.status} = 'done' then 'todo' else 'done' end`,
+      completedAt: sql`case when ${tasks.status} = 'done' then null else now() end`,
+      version: sql`${tasks.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(tasks.id, taskId))
+    .returning();
   const row = updated[0];
   if (!row) return null;
   await Promise.all([
@@ -319,7 +303,7 @@ export async function toggleTask(taskId: string): Promise<Task | null> {
       projectId: row.projectId,
       taskId: row.id,
       summary: `Toggled "${row.label}"`,
-      payload: { status: row.status, integrationStatus: row.integrationStatus },
+      payload: { status: row.status },
     }),
   ]);
   return row;
@@ -379,7 +363,6 @@ export type MoveTaskInput = {
 export async function moveTask(taskId: string, input: MoveTaskInput): Promise<Task | null> {
   const current = await getTaskById(taskId);
   if (!current) return null;
-  if (current.kind !== 'custom') return null; // only custom tasks live on the board
   // Live claim = a future claim_expires_at (works for null-run manual claims too). Refuse the move.
   if (current.claimExpiresAt && current.claimExpiresAt.getTime() > Date.now()) return null;
 
@@ -454,7 +437,6 @@ export async function claimTask(
 ): Promise<Task | null> {
   const conditions = [
     eq(tasks.id, taskId),
-    eq(tasks.kind, 'custom'), // only custom tasks are agent work units (integration tasks use integrationStatus)
     eq(tasks.status, 'todo'),
     // claim_expires_at is the single claim-state signal (works for null-run manual claims too):
     // NULL = never claimed, future = held, past = expired → claimable. Do NOT key off
@@ -499,8 +481,7 @@ export async function claimTask(
     const exp = existing.claimExpiresAt;
     const heldNow = !!exp && exp.getTime() > Date.now();
     let reason: string;
-    if (existing.kind !== 'custom') reason = `kind=${existing.kind} — only custom tasks are claimable`;
-    else if (heldNow) reason = `claimed until ${exp!.toISOString()}`;
+    if (heldNow) reason = `claimed until ${exp!.toISOString()}`;
     else if (existing.status !== 'todo') reason = `status=${existing.status}`;
     else reason = `run ${runId?.slice(0, 8)} already holds a live claim on another unfinished task (one in-flight task per run)`;
     throw new ConflictError('task', `Task ${taskId} is not claimable (${reason})`);
@@ -917,7 +898,7 @@ async function terminalizeClaimsForRun(runId: string, status: RunStatus): Promis
       version: sql`${tasks.version} + 1`,
       updatedAt: new Date(),
     })
-    .where(and(eq(tasks.claimedByRunId, runId), eq(tasks.kind, 'custom')))
+    .where(eq(tasks.claimedByRunId, runId))
     .returning();
   if (!completed.length) return;
   // Parallelize across the (usually one) completed tasks, and dedup project touches so a multi-task

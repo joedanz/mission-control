@@ -25,7 +25,6 @@ export type BoardProject = {
   slug: string;
   name: string;
   accent: string;
-  integrations: { done: number; total: number };
   tasks: BoardTask[];
 };
 
@@ -34,12 +33,11 @@ export type BoardData = { projects: BoardProject[]; runs: FeedRun[] };
 // A task's live claimant (the agent on it now), or null. Shared by the card + both boards.
 export type Claimant = { runId: string; agentLabel: string } | null;
 
-/** Project a full ProjectWithTasks into the lean board shape: custom tasks only, integration tasks
- *  collapsed to an N/M readiness count. When `capDone`, keep only the most-recently-completed Done tasks
- *  (overall board); per-project boards pass false and window client-side. */
+/** Project a full ProjectWithTasks into the lean board shape. When `capDone`, keep only the
+ *  most-recently-completed Done tasks (overall board); per-project boards pass false and window
+ *  client-side. */
 export function toBoardProject(p: ProjectWithTasks, capDone: boolean): BoardProject {
-  const custom = p.tasks.filter((t) => !t.integrationType);
-  const integration = p.tasks.filter((t) => t.integrationType);
+  const custom = p.tasks;
   let tasks = custom;
   if (capDone) {
     const done = custom
@@ -52,10 +50,6 @@ export function toBoardProject(p: ProjectWithTasks, capDone: boolean): BoardProj
     slug: p.slug,
     name: p.name,
     accent: p.accent,
-    integrations: {
-      done: integration.filter((t) => t.integrationStatus === 'done').length,
-      total: integration.length,
-    },
     tasks: tasks.map((t) => ({
       id: t.id,
       label: t.label,

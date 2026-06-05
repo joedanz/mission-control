@@ -55,11 +55,9 @@ function applyDoneWindow(done: BoardTask[], win: string): BoardTask[] {
 export function ProjectBoard({
   slug,
   initial,
-  integrations,
 }: {
   slug: string;
   initial: BoardData;
-  integrations: { done: number; total: number };
 }) {
   const { projects, runs, error, applyMove, reload } = useBoard({ projectSlug: slug, initial });
   const project = projects[0];
@@ -139,9 +137,6 @@ export function ProjectBoard({
   return (
     <div className="board">
       <div className="board-toolbar">
-        <a className="board-intg" href="?tab=integrations" title="integration readiness">
-          Integrations {integrations.done}/{integrations.total}
-        </a>
         <label className="board-donewin">
           Done:
           <select value={doneWindow} onChange={(e) => changeDoneWindow(e.target.value)}>

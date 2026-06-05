@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/index';
-import { projects, tasks, events } from '@/lib/db/schema';
+import { projects, events } from '@/lib/db/schema';
 import { createProject, addTask, moveTask, claimTask, recordRunStart } from '@/lib/mutations';
 import { getNextClaimableTask, getTaskById } from '@/lib/queries';
 
@@ -143,16 +143,6 @@ describe('moveTask — claim policy', () => {
     expect(back!.claimedAt).toBeNull();
   });
 
-  it('returns null for a non-custom task', async () => {
-    const p = await freshProject(uniqueName('board-noncustom'));
-    // integration tasks are not on the board
-    const rows = await db
-      .insert(tasks)
-      .values({ projectId: p.id, label: 'sentry setup', kind: 'integration', integrationType: 'sentry', integrationStatus: 'needed' })
-      .returning();
-    const res = await moveTask(rows[0].id, { toStatus: 'done' });
-    expect(res).toBeNull();
-  });
 });
 
 describe('getNextClaimableTask — sortOrder steers the queue', () => {

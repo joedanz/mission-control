@@ -47,9 +47,6 @@ const Lane = memo(function Lane({
         <a className="board-lane-name" href={`/p/${project.slug}`}>
           {project.name}
         </a>
-        <a className="board-intg" href={`/p/${project.slug}?tab=integrations`} title="integration readiness">
-          Integrations {project.integrations.done}/{project.integrations.total}
-        </a>
       </div>
       {BOARD_COLUMNS.map((c) => (
         <BoardColumn

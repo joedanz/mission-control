@@ -307,7 +307,7 @@ function printProjectLine(p: Project): void {
 
 function printTaskLine(t: Task): void {
   const done = isTaskDone(t) ? '✓' : ' ';
-  console.log(`  [${done}] ${taskState(t).padEnd(11)} ${t.label}${t.integrationType ? ` (${t.integrationType})` : ''}`);
+  console.log(`  [${done}] ${taskState(t).padEnd(11)} ${t.label}`);
 }
 
 // ── Static catalogs (no DB) ────────────────────────────────────────────────────
@@ -691,14 +691,11 @@ withFlags(task.command('move'))
       // Read first so a null from moveTask means "couldn't move" (live claim), not "no such task".
       const current = await queries.getTaskById(id);
       if (!current) throw new NotFoundError('task', id);
-      if (current.kind !== 'custom') {
-        throw new ValidationError('id', `Only custom tasks live on the board (task ${id} is ${current.kind})`);
-      }
       const toStatus = opts.status ? assertEnum(String(opts.status), TASK_STATUSES, 'status') : undefined;
       const destStatus = toStatus ?? current.status;
       // Destination column siblings in board order (the query sorts by sortOrder), moved id excluded.
       const columnIds = (await queries.getTasksByProjectId(current.projectId))
-        .filter((t) => t.kind === 'custom' && t.status === destStatus && t.id !== id)
+        .filter((t) => t.status === destStatus && t.id !== id)
         .map((t) => t.id);
       const orderedIds = planMoveOrder(columnIds, id, {
         top: !!opts.top,

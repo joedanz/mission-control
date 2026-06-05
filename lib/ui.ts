@@ -129,12 +129,12 @@ export function runTone(run: { live: boolean; status: string }): 'ok' | 'bad' | 
 }
 
 export function isTaskDone(t: Task): boolean {
-  return t.integrationType ? t.integrationStatus === 'done' : t.status === 'done';
+  return t.status === 'done';
 }
 
-/** The state word shown for a task: its integration status (default 'needed') or its workflow status. */
+/** The state word shown for a task: its workflow status. */
 export function taskState(t: Task): string {
-  return t.integrationType ? (t.integrationStatus ?? 'needed') : t.status;
+  return t.status;
 }
 
 /** Count of incomplete tasks; the row badge hides this when zero. */

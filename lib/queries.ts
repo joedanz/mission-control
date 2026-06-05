@@ -81,7 +81,6 @@ export async function getTaskById(id: string): Promise<Task | null> {
 export async function getNextClaimableTask(opts: { projectId?: string } = {}): Promise<Task | null> {
   const conds = [
     eq(tasks.status, 'todo'),
-    eq(tasks.kind, 'custom'),
     // claimable = never claimed (claim_expires_at NULL) OR the claim has expired (matches claimTask's WHERE)
     sql`(${tasks.claimExpiresAt} is null or ${tasks.claimExpiresAt} < now())`,
   ];

@@ -19,12 +19,10 @@ export function TasksPanel({
   slug,
   projectId,
   initial,
-  integrations,
 }: {
   slug: string;
   projectId: string;
   initial: BoardData;
-  integrations: { done: number; total: number };
 }) {
   const sp = useSearchParams();
   const legacyBoard = sp.get('tab') === 'board';
@@ -73,7 +71,7 @@ export function TasksPanel({
       {view === 'list' ? (
         <TaskListView slug={slug} projectId={projectId} initial={initial} />
       ) : (
-        <ProjectBoard slug={slug} initial={initial} integrations={integrations} />
+        <ProjectBoard slug={slug} initial={initial} />
       )}
     </>
   );
