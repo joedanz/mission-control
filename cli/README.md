@@ -74,7 +74,7 @@ In JSON mode, stdout is **exactly one** JSON document; all logs/warnings go to s
 
 - Mutations return the affected row in `data` (so you get the new `id`).
 - Lists return `{ items, count }` (count = total matching; `items` capped by `--limit`, default 50).
-- `data` keys are camelCase matching the schema (`repoPath`, `lastActivityAt`, `integrationStatus`).
+- `data` keys are camelCase matching the schema (`repoPath`, `lastActivityAt`, `liveUrl`).
 
 **Exit codes:** `0` ok · `1` DB/conflict · `2` validation · `3` not-found · `4` config/credentials.
 
@@ -100,7 +100,7 @@ mc project update <slug> [any add flag; only the flags you pass change]
 mc project rm <slug> --yes            # deletes the project and cascades its tasks
 mc project set-repo <slug> <path> [url]
 
-mc task list <slug> [--status <s>] [--kind custom|integration]
+mc task list <slug> [--status <s>]
 mc task get <id>
 mc task add <slug> <label...>
 mc task set-status <id> <status>      # todo|in_progress|done — idempotent; prefer over toggle
@@ -110,9 +110,6 @@ mc task rm <id> --yes
 mc task next [--project <slug>]                 # peek the next claimable task (custom, todo, unclaimed/claim-expired) — board order (sort_order), then oldest-first
 mc task claim <id> [--run <id>] [--ttl <secs>]  # claim a task for the current run; single-statement, race-safe (loses → CONFLICT exit 1)
 mc task import-issues <slug> [--state open|closed|all] [--label <name>] [--limit <n>] [--dry-run]  # self-source: GitHub issues → custom tasks
-
-mc integration set <slug> <type> <status>   # upsert by (project, type); idempotent
-mc integration list <slug>
 
 # Agentic workflows — node graphs (React Flow {nodes,edges}) that chain agent runs + integrations
 mc workflow list [--project <slug>]
@@ -130,12 +127,12 @@ mc workflow webhook-url <slug>              # print the external webhook URL (/a
 # Agent profiles — capability bundles (skills/MCP/model/tools/persona) + auto-routing rules
 mc profile list [--enabled] [--runtime claude-code|exec] [--schedulable]   # --schedulable = enabled + scheduled check-ins on
 mc profile get <slug>
-mc profile add --slug <s> --name <n> [--runtime claude-code|exec] [--model <m>] [--fallback-model <m>] [--daily-budget-micros <n>] [--provider <p>] [--base-url <u>] [--permission-mode plan|acceptEdits|bypassPermissions|default] [--skills a,b] [--mcp-config <json|@file>] [--allowed-tools <csv>] [--disallowed-tools <csv>] [--append-system-prompt <t>] [--env K=V ...] [--exec-template <cmd>] [--match-project <csv>] [--match-category <csv>] [--match-kind <csv>] [--match-label <regex>] [--priority <n>] [--default] [--disabled] [--schedule-enabled] [--schedule-disabled] [--schedule-project <slug>] [--schedule-interval <sec>] [--schedule-cron <expr>] [--schedule-timezone <tz>] [--check-in-prompt <t|@file>]  # fallback-model = claude --fallback-model + budget-downgrade target; daily-budget-micros caps this profile's same-UTC-day run cost (downgrade once exceeded). SCHEDULED CHECK-INS (≠ liveness heartbeat): enabled needs --schedule-project + exactly one of --schedule-interval/--schedule-cron; the scheduler wakes the profile, runs --check-in-prompt in the project's repo, and the agent self-serves that project's queued tasks. --schedule-interval floors at 60s (each check-in is a paid run); --schedule-cron is evaluated in --schedule-timezone (IANA zone; default = daemon local time, often UTC under launchd). Pass "" to clear a trigger.
+mc profile add --slug <s> --name <n> [--runtime claude-code|exec] [--model <m>] [--fallback-model <m>] [--daily-budget-micros <n>] [--provider <p>] [--base-url <u>] [--permission-mode plan|acceptEdits|bypassPermissions|default] [--skills a,b] [--mcp-config <json|@file>] [--allowed-tools <csv>] [--disallowed-tools <csv>] [--append-system-prompt <t>] [--env K=V ...] [--exec-template <cmd>] [--match-project <csv>] [--match-category <csv>] [--match-label <regex>] [--priority <n>] [--default] [--disabled] [--schedule-enabled] [--schedule-disabled] [--schedule-project <slug>] [--schedule-interval <sec>] [--schedule-cron <expr>] [--schedule-timezone <tz>] [--check-in-prompt <t|@file>]  # fallback-model = claude --fallback-model + budget-downgrade target; daily-budget-micros caps this profile's same-UTC-day run cost (downgrade once exceeded). SCHEDULED CHECK-INS (≠ liveness heartbeat): enabled needs --schedule-project + exactly one of --schedule-interval/--schedule-cron; the scheduler wakes the profile, runs --check-in-prompt in the project's repo, and the agent self-serves that project's queued tasks. --schedule-interval floors at 60s (each check-in is a paid run); --schedule-cron is evaluated in --schedule-timezone (IANA zone; default = daemon local time, often UTC under launchd). Pass "" to clear a trigger.
 mc profile update <slug> [any add flag; only provided change] [--enabled]
 mc profile set-default <slug>                # the single global fallback when no rule matches (idempotent)
 mc profile checked-in <slug> [--status ok|fail]   # scheduler records a check-in: advances last_check_in_at; ok resets / fail increments consecutive_failures (auto-pauses after 3)
 mc profile rm <slug> --yes
-mc profile resolve [--project <slug>] [--task <id>] [--label <text>] [--kind custom|integration]   # preview auto-routing: matchRules → priority → default
+mc profile resolve [--project <slug>] [--task <id>] [--label <text>]   # preview auto-routing: matchRules → priority → default
 
 # Mission Control — runs (agent sessions) + the activity-event log
 mc run start --agent <label> [--project <slug>] [--profile <slug>] [--title <t>] [--source hook|cli|cron|manual] [--model <m>] [--session-id <id>] [--work-dir <dir>] [--id <uuid>]
@@ -192,11 +189,10 @@ This closes the source→dispatch→claim→complete loop: imported tasks are im
 # What needs Sentry?
 mc project list --json | jq '.data.items[] | .slug'
 
-# Create a project, add a task, mark it done, set an integration
+# Create a project, add a task, mark it done
 mc project add --name "Acme" --category client --status testing --tech "Next.js,Neon" --json
 mc task add acme "wire up billing" --json
 mc task set-status <id> done --json
-mc integration set acme sentry done --json
 
 # Inspect, then delete
 mc project get acme --json
