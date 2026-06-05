@@ -43,6 +43,8 @@ yarn-error.log*
 # claude code (machine-local permissions + runtime artifacts; the dir itself stays trackable for shared config)
 .claude/settings.local.json
 .claude/*.lock
+# locally-installed plugin skills (machine-local; not project code — keep them out of the repo)
+.claude/skills/
 
 # typescript
 *.tsbuildinfo
