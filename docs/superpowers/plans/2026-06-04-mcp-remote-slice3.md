@@ -675,4 +675,15 @@ Run: `git diff main --stat` and skim. Confirm the daemon files are untouched (th
 
 ## Review
 
-_(Filled in after implementation.)_
+**Shipped.** 8 commits on `slice/mcp-remote` (1 plan + 5 task commits + 1 docstring polish + 1 review-hardening):
+`37ef1de` schema+migration 0018 · `a21241a` store CRUD · `f4165b8` pure module · `5b06712` orchestration+resolver · `c45b031` docstring · `d9cb85e` CLI+docs · `6d10ab9` review hardening.
+
+**Gates:** tsc clean (only the 4 pre-existing `WorkflowNode` errors filtered); eslint clean across all 12 changed files; every slice-3-touched test file green in isolation (store, pure, resolver-union, orchestration, view = 32 tests). The one full-suite run showed 11 `ECONNRESET`/`fetch failed` failures — transient Neon drops under a 55-min sustained run, NOT regressions (the same files pass in 7s in isolation).
+
+**Live smoke (real DB, project `bodybymike`):** `add-remote` → `list` (source-tagged, shown next to the live `composio-linear`) → `config` (unions BOTH into one `mcpServers` map; `Bearer ${SMOKE_TOKEN}` placeholder preserved) → `remove-remote`; a literal-secret header was rejected with `VALIDATION` (exit 2). Smoke row cleaned up; real connection untouched.
+
+**Final code review (feature-dev:code-reviewer):** zero critical/correctness bugs; all 5 risk areas (idempotency, secret safety, collision precedence, daemon guard, header parse) confirmed sound. Two latent-integrity points this slice introduced were fixed at the root:
+1. **DB CHECK constraint `mcp_connections_source_shape`** (migration 0019) enforces the source↔shape invariant (composio ⇒ toolkit_slug+user_id; remote ⇒ remote_name+remote_url) now that those columns are nullable. Proven end-to-end: direct malformed inserts of both shapes are rejected by Postgres.
+2. **`toolkitViews` now filters to composio-source rows** so remote rows can't pollute the Composio catalog overlay (with a regression test).
+
+**Deviations (as planned):** `disconnect` stays composio-only (`remove-remote` handles remote); `composio-connections.ts`→`mcp-connections.ts` rename deferred. One unplanned-but-correct edit from Task 1: a `if (!conn.userId)` guard in `daemon/workflow-runner.ts:397` (integration-node path) for the now-nullable `userId`, mirroring the adjacent `connectedAccountId` guard.
