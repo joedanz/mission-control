@@ -360,14 +360,18 @@ export const composioToolkits = pgTable('composio_toolkits', {
 // derived values; the connect flow also writes 'initializing'/'disconnected' directly.
 export type ConnectionStatus = 'initializing' | 'active' | 'error' | 'expired' | 'disconnected';
 
-// One connection per (project, toolkit). Holds only Composio resource IDs — never a secret.
-export const composioConnections = pgTable(
-  'composio_connections',
+// One MCP server attached to a project. Holds only Composio resource IDs — never a secret.
+export const mcpConnections = pgTable(
+  'mcp_connections',
   {
     id: text('id').primaryKey().default(sql`gen_random_uuid()`),
     projectId: text('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
+    // Source of this MCP server: 'composio' (a brokered toolkit, the only source today) or, in a
+    // later slice, 'remote' (a directly-supplied remote-http MCP server). Default keeps every
+    // existing row a composio connection — byte-identical behavior.
+    source: text('source').notNull().default('composio'),
     // References a COMPOSIO_CATALOG key (the code catalog is the authority for valid toolkits) —
     // intentionally NOT a FK to composio_toolkits.slug: that table is a lazily-populated resource
     // CACHE, and a connection is "for the linear toolkit" independent of whether the cache row
@@ -388,13 +392,13 @@ export const composioConnections = pgTable(
     // routes by a per-PROJECT user_id (deriveUserId = mc-proj-<projectId>) and the mcpServers key is
     // per-toolkit (composioServerKey), so two same-toolkit accounts can't be independently routed without
     // a per-connection user_id rework. Do NOT drop this index to "allow multiple" without that redesign.
-    uniqueIndex('composio_connections_project_toolkit_uq').on(t.projectId, t.toolkitSlug),
-    index('composio_connections_project_idx').on(t.projectId),
+    uniqueIndex('mcp_connections_project_toolkit_uq').on(t.projectId, t.toolkitSlug),
+    index('mcp_connections_project_idx').on(t.projectId),
   ],
 );
 
 export type ComposioToolkit = typeof composioToolkits.$inferSelect;
-export type ComposioConnection = typeof composioConnections.$inferSelect;
+export type McpConnection = typeof mcpConnections.$inferSelect;
 
 // ── Agentic workflow engine ───────────────────────────────────────────────────────
 // A workflow is a node graph (React Flow's native {nodes, edges}) that chains agent runs, integration

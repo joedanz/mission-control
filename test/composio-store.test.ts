@@ -73,4 +73,10 @@ describe('composio store', () => {
     const p = await freshProject();
     expect(await getConnection(p.id, 'linear')).toBeNull();
   });
+
+  it('defaults source to composio on upsert', async () => {
+    const p = await freshProject();
+    const conn = await upsertConnection(p.id, 'linear', { userId: `mc-proj-${p.id}`, status: 'initializing' });
+    expect(conn.source).toBe('composio');
+  });
 });

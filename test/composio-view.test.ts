@@ -3,15 +3,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { toolkitViews } from '../lib/composio-view';
-import type { ComposioConnection } from '../lib/db/schema';
+import type { McpConnection } from '../lib/db/schema';
 
-function conn(partial: Partial<ComposioConnection>): ComposioConnection {
+function conn(partial: Partial<McpConnection>): McpConnection {
   return {
     id: 'id', projectId: 'p', toolkitSlug: 'linear', userId: 'mc-proj-p',
     connectedAccountId: null, status: 'active', linkUrl: null, error: null,
     createdAt: new Date(), updatedAt: new Date(),
     ...partial,
-  } as ComposioConnection;
+  } as McpConnection;
 }
 
 describe('toolkitViews', () => {

@@ -1,9 +1,9 @@
-// ABOUTME: DB CRUD for composio_toolkits (cached shared resources) + composio_connections (per
+// ABOUTME: DB CRUD for composio_toolkits (cached shared resources) + mcp_connections (per
 // ABOUTME: project+toolkit). No Composio network calls — the DB-testable seam under the orchestration.
 
 import { eq, and } from 'drizzle-orm';
 import { db } from './db/index';
-import { composioToolkits, composioConnections, type ComposioToolkit, type ComposioConnection, type ConnectionStatus } from './db/schema';
+import { composioToolkits, mcpConnections, type ComposioToolkit, type McpConnection, type ConnectionStatus } from './db/schema';
 
 export async function getToolkitRow(slug: string): Promise<ComposioToolkit | null> {
   const rows = await db.select().from(composioToolkits).where(eq(composioToolkits.slug, slug)).limit(1);
@@ -26,17 +26,17 @@ export async function upsertToolkitRow(
   return rows[0];
 }
 
-export async function getConnection(projectId: string, toolkitSlug: string): Promise<ComposioConnection | null> {
+export async function getConnection(projectId: string, toolkitSlug: string): Promise<McpConnection | null> {
   const rows = await db
     .select()
-    .from(composioConnections)
-    .where(and(eq(composioConnections.projectId, projectId), eq(composioConnections.toolkitSlug, toolkitSlug)))
+    .from(mcpConnections)
+    .where(and(eq(mcpConnections.projectId, projectId), eq(mcpConnections.toolkitSlug, toolkitSlug)))
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function listConnectionsByProject(projectId: string): Promise<ComposioConnection[]> {
-  return db.select().from(composioConnections).where(eq(composioConnections.projectId, projectId));
+export async function listConnectionsByProject(projectId: string): Promise<McpConnection[]> {
+  return db.select().from(mcpConnections).where(eq(mcpConnections.projectId, projectId));
 }
 
 /** Create or update the (project, toolkit) connection row. Only provided fields change on conflict. */
@@ -44,12 +44,12 @@ export async function upsertConnection(
   projectId: string,
   toolkitSlug: string,
   patch: { userId: string; connectedAccountId?: string | null; status?: ConnectionStatus; linkUrl?: string | null; error?: string | null },
-): Promise<ComposioConnection> {
+): Promise<McpConnection> {
   const rows = await db
-    .insert(composioConnections)
+    .insert(mcpConnections)
     .values({ projectId, toolkitSlug, ...patch })
     .onConflictDoUpdate({
-      target: [composioConnections.projectId, composioConnections.toolkitSlug],
+      target: [mcpConnections.projectId, mcpConnections.toolkitSlug],
       set: {
         ...(patch.connectedAccountId !== undefined && { connectedAccountId: patch.connectedAccountId }),
         ...(patch.status !== undefined && { status: patch.status }),
@@ -66,11 +66,11 @@ export async function setConnectionStatus(
   id: string,
   status: ConnectionStatus,
   error: string | null = null,
-): Promise<ComposioConnection | null> {
+): Promise<McpConnection | null> {
   const rows = await db
-    .update(composioConnections)
+    .update(mcpConnections)
     .set({ status, error, updatedAt: new Date() })
-    .where(eq(composioConnections.id, id))
+    .where(eq(mcpConnections.id, id))
     .returning();
   return rows[0] ?? null;
 }

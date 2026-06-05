@@ -77,14 +77,14 @@ export async function recordDowngrade(choice: ModelChoice, profile: AgentProfile
  *  failure logs and returns undefined so the run still spawns (just without auto-feed). Returns undefined
  *  when there is nothing to add. Shared by both daemons so the command name + log wording live in one place. */
 export async function fetchComposioMcpServers(projectSlug: string, runId: string, log: Log): Promise<Record<string, McpServerConfig> | undefined> {
-  const cfg = await mc(['composio', 'mcp-config', projectSlug]);
+  const cfg = await mc(['mcp', 'config', projectSlug]);
   if (!cfg.ok) {
-    log(`composio mcp-config for ${projectSlug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
+    log(`mcp config for ${projectSlug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
     return undefined;
   }
   const servers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
   const names = Object.keys(servers ?? {}).map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k));
-  if (names.length) log(`fed ${names.length} composio server(s) [${names.join(', ')}] into run ${runId.slice(0, 8)}`);
+  if (names.length) log(`fed ${names.length} mcp server(s) [${names.join(', ')}] into run ${runId.slice(0, 8)}`);
   return servers;
 }
 
@@ -144,7 +144,7 @@ export type SpawnExecutorOpts = {
   /** Tools granted on top of the profile's allowedTools (claude-code only) — e.g. the scheduler's Bash(mc:*)
    *  so a check-in can self-serve via the mc CLI. See planSpawn. */
   extraAllowedTools?: string[];
-  /** Project-derived Composio MCP servers (from `mc composio mcp-config`), merged UNDER the profile's
+  /** Project-derived Composio MCP servers (from `mc mcp config`), merged UNDER the profile's
    *  own mcpServers (the profile wins a key collision). With no profile they are used as-is (rendered
    *  with --strict-mcp-config, so the profileless agent sees exactly these). */
   extraMcpServers?: Record<string, McpServerConfig>;
