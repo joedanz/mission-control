@@ -27,8 +27,6 @@ import {
   type Accent,
   type Priority,
   type TaskStatus,
-  type IntegrationType,
-  type IntegrationStatus,
   type RunStatus,
   type RunSource,
   type EventType,
@@ -240,7 +238,7 @@ export async function setProjectRepo(
 export async function addTask(projectId: string, label: string): Promise<Task> {
   const rows = await db
     .insert(tasks)
-    .values({ projectId, label, kind: 'custom', status: 'todo' })
+    .values({ projectId, label, status: 'todo' })
     .returning();
   const task = rows[0];
   await Promise.all([
@@ -262,7 +260,7 @@ export async function importTasks(
   if (!items.length) return [];
   const inserted = await db
     .insert(tasks)
-    .values(items.map((i) => ({ projectId, label: i.label, notes: i.notes ?? null, kind: 'custom', status: 'todo' })))
+    .values(items.map((i) => ({ projectId, label: i.label, notes: i.notes ?? null, status: 'todo' as const })))
     .onConflictDoNothing({ target: [tasks.projectId, tasks.label], where: sql`integration_type is null` })
     .returning();
   if (inserted.length) {
@@ -519,47 +517,6 @@ export async function claimTask(
     }),
   ]);
   return row;
-}
-
-/** Create-or-update an integration task by (project, type) — the CLI's idempotent path. */
-export async function upsertIntegration(
-  projectId: string,
-  type: IntegrationType,
-  status: IntegrationStatus,
-): Promise<Task> {
-  const rows = await db
-    .insert(tasks)
-    .values({
-      projectId,
-      label: `${type} setup`,
-      kind: 'integration',
-      integrationType: type,
-      integrationStatus: status,
-      completedAt: status === 'done' ? new Date() : null,
-    })
-    .onConflictDoUpdate({
-      target: [tasks.projectId, tasks.integrationType],
-      targetWhere: sql`integration_type is not null`,
-      set: {
-        integrationStatus: status,
-        completedAt: status === 'done' ? new Date() : null,
-        version: sql`${tasks.version} + 1`,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
-  const task = rows[0];
-  await Promise.all([
-    touchProject(projectId),
-    recordEvent({
-      type: 'integration.upserted',
-      projectId,
-      taskId: task.id,
-      summary: `${type} → ${status}`,
-      payload: { integrationType: type, status },
-    }),
-  ]);
-  return task;
 }
 
 export async function deleteTask(taskId: string): Promise<Task | null> {

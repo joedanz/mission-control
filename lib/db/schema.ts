@@ -50,7 +50,6 @@ export const EVENT_TYPES = [
   'task.status_changed',
   'task.claimed',
   'task.deleted',
-  'integration.upserted',
   'run.started',
   'run.ended',
   'run.abandoned',
