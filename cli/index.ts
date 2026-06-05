@@ -895,7 +895,7 @@ withFlags(mcp.command('catalog'))
       const { COMPOSIO_CATALOG } = await import('../lib/composio-catalog');
       const toolkits = await listToolkits({
         search: opts.search as string | undefined,
-        limit: opts.limit ? Number(opts.limit) : undefined,
+        limit: num(opts.limit),
       });
       const items = toolkits.map((t) => ({ ...t, featured: t.slug in COMPOSIO_CATALOG }));
       return {

@@ -51,7 +51,7 @@ export function transitionEvent(
 ): { level: EventLevel; summary: string } | null {
   if (from === to) return null;
   if (to === 'active') return { level: 'info', summary: `${toolkitSlug} connection recovered — now active` };
-  return { level: 'warn', summary: `${toolkitSlug} connection ${to} — re-auth needed (mc composio connect ${projectSlug} ${toolkitSlug})` };
+  return { level: 'warn', summary: `${toolkitSlug} connection ${to} — re-auth needed (mc mcp connect ${projectSlug} ${toolkitSlug})` };
 }
 
 async function composioFetch(path: string, init?: RequestInit): Promise<unknown> {

@@ -390,7 +390,7 @@ async function runIntegrationNode(
 
   // The action runs on behalf of the project's connection for this toolkit — it must be live.
   const conn = await getConnection(home.id, data.toolkit);
-  const reauth = `re-auth: mc composio connect ${home.slug} ${data.toolkit}`;
+  const reauth = `re-auth: mc mcp connect ${home.slug} ${data.toolkit}`;
   if (!conn) return fail(`no ${data.toolkit} connection for project "${home.slug}" (${reauth})`);
   if (conn.status !== 'active') return fail(`${data.toolkit} connection is ${conn.status}, not active (${reauth})`);
   if (!conn.connectedAccountId) return fail(`${data.toolkit} connection has no connected account (${reauth})`);

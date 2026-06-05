@@ -49,7 +49,7 @@ describe('Composio API pure helpers', () => {
     const expired = transitionEvent('proj', 'linear', 'active', 'expired');
     expect(expired?.level).toBe('warn');
     expect(expired?.summary).toContain('linear connection expired');
-    expect(expired?.summary).toContain('mc composio connect proj linear');
+    expect(expired?.summary).toContain('mc mcp connect proj linear');
     expect(transitionEvent('proj', 'slack', 'active', 'error')?.level).toBe('warn');
   });
 });
