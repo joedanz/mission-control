@@ -108,10 +108,10 @@ export async function removeRemote(projectSlug: string, name: string): Promise<M
   return removed;
 }
 
-/** Resolve a project's ACTIVE Composio connections into an mcpServers map for a spawned agent. Lists
- *  the project's connections, keeps only status==='active', joins each toolkit's cached mcpUrl, and
- *  builds the map. An active connection whose toolkit cache row has no mcpUrl is skipped (defensive —
- *  ensureToolkit populates it before connect). */
+/** Resolve a project's ACTIVE MCP connections into an mcpServers map for a spawned agent. Unions both
+ *  sources: composio rows join each toolkit's cached mcpUrl (an active composio row whose cache row has
+ *  no mcpUrl is skipped — defensive; ensureToolkit populates it before connect), and remote rows emit a
+ *  direct http entry. On a key collision a remote row wins over a composio one (it's spread last). */
 export async function resolveProjectMcpServers(projectSlug: string): Promise<Record<string, McpServerConfig>> {
   const projectId = await getProjectIdBySlug(projectSlug);
   if (!projectId) throw new NotFoundError('project', projectSlug);
