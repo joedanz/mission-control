@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   deriveUserId, mapStatus, orphanedConnectedAccountId, transitionEvent,
   createAuthConfig, createMcpServer, initiateConnection, getConnectionStatus, deleteConnection,
+  listToolkits,
   ComposioApiError,
 } from '../lib/composio-api';
 
@@ -86,5 +87,42 @@ describe('Composio API wrappers (mocked fetch)', () => {
       expect.stringContaining('/connected_accounts/ca_9'),
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+
+  it('listToolkits parses items into summaries', async () => {
+    mockFetch(200, {
+      items: [
+        { slug: 'github', name: 'GitHub', meta: { tools_count: 823, description: 'Git host', categories: [{ id: 'dev', name: 'Developer Tools' }] } },
+        { slug: 'gmail', name: 'Gmail', meta: { tools_count: 61, description: 'Email', categories: [{ id: 'email', name: 'email' }] } },
+      ],
+      total_items: 1043,
+    });
+    const out = await listToolkits();
+    expect(out).toEqual([
+      { slug: 'github', name: 'GitHub', description: 'Git host', toolCount: 823, categories: ['Developer Tools'] },
+      { slug: 'gmail', name: 'Gmail', description: 'Email', toolCount: 61, categories: ['email'] },
+    ]);
+  });
+
+  it('listToolkits tolerates missing meta fields', async () => {
+    mockFetch(200, { items: [{ slug: 'bare', name: 'Bare' }] });
+    expect(await listToolkits()).toEqual([{ slug: 'bare', name: 'Bare', description: '', toolCount: 0, categories: [] }]);
+  });
+
+  it('listToolkits passes search + limit as query params', async () => {
+    mockFetch(200, { items: [] });
+    await listToolkits({ search: 'git', limit: 25 });
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/toolkits?'), expect.anything());
+    const url = (fetch as unknown as { mock: { calls: string[][] } }).mock.calls[0][0];
+    expect(url).toContain('search=git');
+    expect(url).toContain('limit=25');
+  });
+
+  it('listToolkits defaults limit to 50 when omitted', async () => {
+    mockFetch(200, { items: [] });
+    await listToolkits();
+    const url = (fetch as unknown as { mock: { calls: string[][] } }).mock.calls[0][0];
+    expect(url).toContain('limit=50');
+    expect(url).not.toContain('search=');
   });
 });
