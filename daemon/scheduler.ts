@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProfile } from '../lib/db/schema';
-import { chooseModel, type ModelChoice } from './render-profile';
+import { chooseModel, MissingSkillError, type ModelChoice } from './render-profile';
 import { CHECK_IN_MAX_TASKS } from '../lib/constants';
 import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
 import { isDue, buildCheckInPrompt } from './schedule';
@@ -123,8 +123,9 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
     spawned = spawnExecutor({ prompt, runId, repoPath, profile, effectiveModel: choice.model, basePermissionMode: a.permissionMode, extraAllowedTools: CHECK_IN_TOOLS, extraMcpServers });
   } catch (e) {
     const msg = (e as Error).message;
-    log(`spawn render failed for "${profile.slug}": ${msg} — failing run`);
-    await mc(['event', 'add', `check-in render failed: ${msg}`, '--type', 'note', '--level', 'error', '--run', runId, '--project', project.slug]);
+    const skillMiss = e instanceof MissingSkillError;
+    log(`spawn ${skillMiss ? 'skill resolution' : 'render'} failed for "${profile.slug}": ${msg} — failing run`);
+    await mc(['event', 'add', msg, '--type', skillMiss ? 'skill.unresolved' : 'note', '--level', 'error', '--run', runId, '--project', project.slug]);
     await mc(['run', 'end', runId, 'failed']);
     await mc(['profile', 'checked-in', profile.slug, '--status', 'fail']); // count it against the auto-pause budget
     return;

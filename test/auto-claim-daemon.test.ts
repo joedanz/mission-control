@@ -69,6 +69,47 @@ describe('auto-claim daemon — --once orchestration (stub executor)', () => {
   );
 
   it(
+    'hard-fails the run with a skill.unresolved event when the profile declares a missing skill',
+    async () => {
+      const absentSkill = `mc-test-absent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const prof = await createProfile({
+        slug: `vt-skill-prof-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: 'skill-enforcement test profile',
+        matchRules: { projectSlugs: [slug] },
+        priority: 5,
+        skills: [absentSkill], // not present under ~/.claude/skills or /tmp/.claude/skills
+      });
+      profileIds.push(prof.id);
+      await addTask(projectId, 'task whose profile declares a missing skill');
+
+      const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
+      execFileSync(tsxBin, ['daemon/auto-claim.ts', '--project', slug, '--once'], {
+        env: {
+          ...process.env,
+          MC_DAEMON_EXEC: 'exit 0', // even with the stub, resolution runs above it → throws before any spawn
+          MC_ALLOW_DATABASE_URL_FALLBACK: '1',
+          INGEST_TOKEN: '',
+        },
+        encoding: 'utf8',
+        timeout: 55000,
+        stdio: 'pipe',
+      });
+
+      // The run was opened then hard-failed before launch.
+      const projRuns = await db.select().from(runs).where(eq(runs.projectId, projectId));
+      expect(projRuns.length).toBe(1);
+      expect(projRuns[0].status).toBe('failed');
+
+      // A skill.unresolved event row exists, naming the missing skill.
+      const projEvents = await db.select().from(events).where(eq(events.projectId, projectId));
+      const skillEvent = projEvents.find((e) => e.type === 'skill.unresolved');
+      expect(skillEvent).toBeDefined();
+      expect(skillEvent?.summary).toContain(absentSkill);
+    },
+    60000,
+  );
+
+  it(
     'resolves a matching profile and links the run to it (run.agentProfileId)',
     async () => {
       // A profile whose rule matches THIS project — the resolver should pick it for the daemon's task.
