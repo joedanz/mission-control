@@ -2,8 +2,13 @@
 // ABOUTME: --output-format json` result into AUTHORITATIVE run metrics (claude's own total_cost_usd + usage),
 // ABOUTME: which the daemon records to override the hooks' transcript ESTIMATE. No DB / no spawn.
 
-import { describe, it, expect } from 'vitest';
-import { parseResultMetrics } from '../daemon/runner';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseResultMetrics, spawnExecutor } from '../daemon/runner';
+import { MissingSkillError } from '../daemon/render-profile';
+import type { AgentProfile } from '../lib/db/schema';
 
 describe('parseResultMetrics (pure)', () => {
   const result = {
@@ -43,5 +48,62 @@ describe('parseResultMetrics (pure)', () => {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     });
+  });
+});
+
+describe('spawnExecutor — skill enforcement (U3)', () => {
+  // The throw fires ABOVE the MC_DAEMON_EXEC branch, so the stub lets us assert enforcement without
+  // launching real claude; for the no-throw cases the stub returns a harmless `exit 0` child we kill.
+  let prevExec: string | undefined;
+  let repo: string;
+
+  beforeAll(() => {
+    prevExec = process.env.MC_DAEMON_EXEC;
+    process.env.MC_DAEMON_EXEC = 'exit 0';
+  });
+  afterAll(() => {
+    if (prevExec === undefined) delete process.env.MC_DAEMON_EXEC;
+    else process.env.MC_DAEMON_EXEC = prevExec;
+  });
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'mc-runner-skill-'));
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  /** Minimal profile — only `skills` is read before the stub branch returns. */
+  const prof = (skills: string[]): AgentProfile => ({ skills } as unknown as AgentProfile);
+  const base = (profile: AgentProfile | null) => ({
+    prompt: 'x',
+    runId: 'r1',
+    repoPath: repo,
+    profile,
+    effectiveModel: null,
+    basePermissionMode: 'plan',
+  });
+
+  it('throws MissingSkillError when a declared skill is absent from both dirs', () => {
+    expect(() => spawnExecutor(base(prof(['mc-test-absent-skill-zzz'])))).toThrow(MissingSkillError);
+  });
+
+  it('resolves a work-dir skill and does not throw', () => {
+    mkdirSync(join(repo, '.claude', 'skills', 'deploy-helper'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'skills', 'deploy-helper', 'SKILL.md'), '---\nname: deploy-helper\ndescription: d\n---\n');
+    const spawned = spawnExecutor(base(prof(['deploy-helper'])));
+    spawned.child.kill();
+    expect(spawned.child).toBeDefined();
+  });
+
+  it('does no resolution for an empty skills array (no throw)', () => {
+    const spawned = spawnExecutor(base(prof([])));
+    spawned.child.kill();
+    expect(spawned.child).toBeDefined();
+  });
+
+  it('does no resolution for a null profile (no throw)', () => {
+    const spawned = spawnExecutor(base(null));
+    spawned.child.kill();
+    expect(spawned.child).toBeDefined();
   });
 });

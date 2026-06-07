@@ -15,7 +15,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProfile } from '../lib/db/schema';
-import { chooseModel, type ModelChoice } from './render-profile';
+import { chooseModel, MissingSkillError, type ModelChoice } from './render-profile';
 import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
 
 const AGENT_LABEL = process.env.MC_DAEMON_AGENT || 'auto-claim-daemon';
@@ -138,10 +138,12 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
       extraMcpServers,
     });
   } catch (e) {
-    // Render failed (e.g. a profile secret's ${ENV} is unset) — fail the run cleanly, don't spawn broken.
+    // Failed before launch — an unset profile-secret ${ENV}, or a declared skill missing on disk
+    // (MissingSkillError). Fail the run cleanly, don't spawn broken.
     const msg = (e as Error).message;
-    log(`spawn render failed for "${task.label}": ${msg} — failing run`);
-    await mc(['event', 'add', `profile render failed: ${msg}`, '--type', 'note', '--level', 'error', '--run', runId]);
+    const skillMiss = e instanceof MissingSkillError;
+    log(`spawn ${skillMiss ? 'skill resolution' : 'render'} failed for "${task.label}": ${msg} — failing run`);
+    await mc(['event', 'add', msg, '--type', skillMiss ? 'skill.unresolved' : 'note', '--level', 'error', '--run', runId, '--project', a.project]);
     await mc(['run', 'end', runId, 'failed']);
     return 'done';
   }

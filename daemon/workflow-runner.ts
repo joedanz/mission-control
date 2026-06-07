@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { mc, spawnExecutor, monitorAndFinalize, type Log } from './runner';
+import { MissingSkillError } from './render-profile';
 import {
   getWorkflowById,
   getWorkflowRun,
@@ -338,10 +339,16 @@ async function runAgentNode(
       teeStream: process.stderr, // keep stdout clean for the CLI's JSON envelope
     });
   } catch (e) {
-    // MissingEnvError (an unset ${ENV} in the profile) or a bad exec template — close the run, fail the step.
+    // MissingEnvError (an unset ${ENV}), a bad exec template, or a declared skill missing on disk
+    // (MissingSkillError) — close the run, fail the step. Unlike the other spawn callers this catch emitted no
+    // event, so add a skill.unresolved one for the skill-miss case.
+    const msg = (e as Error).message;
+    if (e instanceof MissingSkillError) {
+      await mc(['event', 'add', msg, '--type', 'skill.unresolved', '--level', 'error', '--run', runId, '--project', home.slug]);
+    }
     await mc(['run', 'end', runId, 'failed']);
-    await setStepRunStatus(step.id, 'failed', { error: (e as Error).message });
-    log(`node ${node.id}: spawn failed — ${(e as Error).message}`);
+    await setStepRunStatus(step.id, 'failed', { error: msg });
+    log(`node ${node.id}: spawn failed — ${msg}`);
     return { ok: false, onError };
   }
 

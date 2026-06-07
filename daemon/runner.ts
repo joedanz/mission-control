@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
-import { planSpawn, resolveMcpConfigJson, mergeMcpServers, type ModelChoice } from './render-profile';
+import { planSpawn, resolveMcpConfigJson, mergeMcpServers, MissingSkillError, type ModelChoice } from './render-profile';
+import { resolveSkills, userSkillsDir } from '../lib/skills';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MC_BIN = process.env.MC_BIN || `node ${join(ROOT, 'bin', 'mc.mjs')}`;
@@ -185,6 +186,22 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   delete baseEnv.NODE_OPTIONS;
   const noCleanup = () => {};
 
+  // Enforce the profile's declared skills BEFORE anything spawns — placed above the MC_DAEMON_EXEC stub so the
+  // guard is exercised under test too. Resolve each declared skill against the user dir (~/.claude/skills) and
+  // the work-dir's .claude/skills; an unresolved one fails the run loudly (MissingSkillError) rather than
+  // spawning an agent whose declared capability is silently absent. Only profiles that DECLARE skills are
+  // affected — a null profile or an empty skills array does no resolution and gets NO setting-sources pin, so
+  // skill-free profiles (the default) keep today's spawn behavior and today's project-settings blast radius.
+  let pinSettingSources = false;
+  if (profile && profile.skills.length > 0) {
+    const { missing } = resolveSkills(profile.skills, [
+      { dir: userSkillsDir(), source: 'user' },
+      { dir: join(repoPath, '.claude', 'skills'), source: 'project' },
+    ]);
+    if (missing.length > 0) throw new MissingSkillError(missing);
+    pinSettingSources = true;
+  }
+
   if (process.env.MC_DAEMON_EXEC) {
     // Capture+tee the stub's stdout (was discarded) so a stub can `echo` a claude-style result line — the
     // seam that makes structured-output / {{ref}} data-passing testable at $0. Teeing to teeStream (stderr
@@ -213,7 +230,7 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   }
 
   try {
-    const plan = planSpawn(profile, { prompt, basePermissionMode, mcpConfigPath, hostEnv: process.env, effectiveModel, extraAllowedTools: opts.extraAllowedTools, jsonSchema: opts.jsonSchema });
+    const plan = planSpawn(profile, { prompt, basePermissionMode, mcpConfigPath, hostEnv: process.env, effectiveModel, extraAllowedTools: opts.extraAllowedTools, jsonSchema: opts.jsonSchema, pinSettingSources });
     const env: NodeJS.ProcessEnv = { ...baseEnv, ...plan.extraEnv };
     // Capture stdout for the claude-code runtime so we can read claude's authoritative result JSON
     // (total_cost_usd + usage + structured_output); tee it through so the daemon log is unchanged. The exec

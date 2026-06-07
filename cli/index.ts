@@ -26,6 +26,7 @@ import { parseGitHubRepo, listIssues, GitHubError } from '../lib/github';
 import { statusLabel, isTaskDone, taskState } from '../lib/ui';
 import { withActor } from '../lib/actor-context';
 import { scanForLeakedSecrets, type ProfileInput, type ProfileUpdate, type MatchContext } from '../lib/profiles';
+import { scanSkillDirs, resolveSkills, userSkillsDir, type SkillDir } from '../lib/skills';
 import { ensureDbCredentials, ConfigError } from './env';
 import { ComposioApiError } from '../lib/composio-api';
 import type { ProjectWithTasks } from '../lib/queries';
@@ -372,7 +373,8 @@ const SPEC = [
   { name: 'profile set-default', readonly: false, summary: 'Make a profile the single global default (idempotent)', args: ['<slug>'] },
   { name: 'profile checked-in', readonly: false, summary: 'Record a scheduled check-in (advances clock; --status ok|fail tracks failures/auto-pause)', args: ['<slug>'], options: ['--status'] },
   { name: 'profile rm', readonly: false, summary: 'Delete an agent profile; requires --yes', args: ['<slug>'], required: ['--yes'] },
-  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task', options: ['--project', '--task', '--label'] },
+  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task (+ skill resolution)', options: ['--project', '--task', '--label'] },
+  { name: 'skill list', readonly: true, summary: 'List filesystem skills discoverable to agents (~/.claude/skills + a project work-dir)', options: ['--project'] },
   { name: 'run start', readonly: false, summary: 'Open an agent run (prints runId)', required: ['--agent'], options: ['--project', '--profile', '--title', '--source', '--model', '--session-id', '--work-dir', '--id'] },
   { name: 'run end', readonly: false, summary: 'Close a run with a terminal status', args: ['<id>', '<status>'], options: ['--tokens-in', '--tokens-out', '--cache-read', '--cache-write', '--cost-micros', '--authoritative', '--agent'] },
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
@@ -1476,10 +1478,12 @@ withFlags(profile.command('resolve'))
     emit('profile resolve', opts, async () => {
       const { queries } = await loadDb();
       const ctx: MatchContext = {};
+      let repoPath: string | null = null; // captured for work-dir skill resolution below
       if (opts.project) {
         const p = await resolveProject(queries, String(opts.project));
         ctx.projectSlug = p.slug;
         ctx.projectCategory = p.category;
+        repoPath = p.repoPath ?? null;
       }
       if (opts.task) {
         const t = await queries.getTaskById(String(opts.task));
@@ -1488,14 +1492,54 @@ withFlags(profile.command('resolve'))
       }
       if (opts.label !== undefined) ctx.taskLabel = String(opts.label);
       const resolved = await queries.resolveProfile(ctx);
+
+      // Preflight skill report: which of the resolved profile's declared skills are discoverable (and from
+      // where), and which are missing — the same resolution the daemon enforces at spawn. Lets an operator
+      // catch a misconfigured profile before a (possibly unattended) run hard-fails.
+      const skillDirs: SkillDir[] = [{ dir: userSkillsDir(), source: 'user' }];
+      if (repoPath) skillDirs.push({ dir: join(repoPath, '.claude', 'skills'), source: 'project' });
+      const declared = resolved?.skills ?? [];
+      const { resolved: hits } = resolveSkills(declared, skillDirs);
+      const bySource = new Map(hits.map((h) => [h.name, h.source]));
+      const skills = declared.map((name) => ({ name, source: bySource.get(name) ?? null, present: bySource.has(name) }));
+      const skillsResolved = skills.every((s) => s.present);
+
       return {
-        data: { profile: resolved, context: ctx },
-        human: () =>
+        data: { profile: resolved, context: ctx, skills, skillsResolved },
+        human: () => {
           console.log(
             resolved
               ? `${resolved.slug} (${resolved.isDefault && !ctx.projectSlug ? 'default' : 'matched'})`
               : 'no matching profile and no default',
-          ),
+          );
+          for (const s of skills) console.log(`  skill ${s.present ? '✓' : '✗'} ${s.name}${s.source ? ` (${s.source})` : ''}`);
+        },
+      };
+    }),
+  );
+
+// ── skill (filesystem) ──
+const skill = program.command('skill').description('Inspect the filesystem skills available to agents');
+
+withFlags(skill.command('list'))
+  .description('List skills discoverable under ~/.claude/skills (and optionally a project work-dir)')
+  .option('--project <slug>', "also scan that project's <repoPath>/.claude/skills")
+  .action((opts: LeafOpts) =>
+    emit('skill list', opts, async () => {
+      // Default scan needs no DB; --project resolves a repoPath, which does.
+      const dirs: SkillDir[] = [{ dir: userSkillsDir(), source: 'user' }];
+      if (opts.project) {
+        const { queries } = await loadDb();
+        const p = await resolveProject(queries, String(opts.project));
+        if (p.repoPath) dirs.push({ dir: join(p.repoPath, '.claude', 'skills'), source: 'project' });
+      }
+      const items = scanSkillDirs(dirs);
+      return {
+        data: { items, count: items.length },
+        human: () =>
+          items.length
+            ? items.forEach((s) => console.log(`${s.source.padEnd(8)} ${s.name.padEnd(24)} ${s.description}`))
+            : console.log('no skills found'),
       };
     }),
   );
