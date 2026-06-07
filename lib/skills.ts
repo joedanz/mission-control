@@ -30,9 +30,17 @@ const SKILL_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 const MAX_DESCRIPTION = 1024; // mirrors the Agent Skills frontmatter `description` limit
 
+/** The Claude Code config root (`~/.claude`). `MC_CLAUDE_HOME` overrides it explicitly — read directly
+ *  (NOT via `$HOME`, which `homedir()` doesn't reliably honor on macOS), mirroring the `MC_CLAUDE_BIN` /
+ *  `MC_BIN` precedent. This single seam makes every config-relative path (user skills, plugin settings,
+ *  the install registry) point at a tmp fixture under test. */
+export function claudeHome(): string {
+  return process.env.MC_CLAUDE_HOME || join(homedir(), '.claude');
+}
+
 /** The per-user skills directory Claude Code discovers by default (`~/.claude/skills`). */
 export function userSkillsDir(): string {
-  return join(homedir(), '.claude', 'skills');
+  return join(claudeHome(), 'skills');
 }
 
 /** Reject a declared skill name that could traverse outside the skills tree. Returns the name unchanged when
