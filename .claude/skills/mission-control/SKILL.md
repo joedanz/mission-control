@@ -1,15 +1,6 @@
 ---
 name: mission-control
-description: >-
-  Drive the Mission Control `mc` CLI to read and write projects, tasks, the board, runs, events,
-  spend, workflows, profiles, and MCP connections against Neon. Use whenever the work involves
-  Mission Control or the `mc` command — managing or triaging projects/tasks, moving cards on the
-  board, checking agent spend, authoring or running workflows, configuring profiles, or attaching
-  MCP servers — AND whenever you are an agent that should pick up, work, and complete a Mission
-  Control task (discover → claim → log events → end your run with cost). Reach for this even when
-  the request doesn't literally say "mc": "what should I work on next", "claim that task", "mark it
-  done", "how much did this project cost", "wire up a profile/workflow/integration" in a Mission
-  Control context all belong here.
+description: Drive the Mission Control mc CLI to read and write projects, tasks, the board, runs, events, spend, workflows, profiles, and MCP connections against Neon. Use whenever the work involves Mission Control or the mc command — managing or triaging projects and tasks, moving cards on the board, checking agent spend, authoring or running workflows, configuring profiles, or attaching MCP servers — and whenever an agent should pick up, work, and complete a Mission Control task (discover, claim, log events, end the run with cost). Reach for it even when the request never says mc — next task to work on, claim that task, mark it done, how much a project cost, or wiring up a profile, workflow, or integration in a Mission Control context.
 ---
 
 # Mission Control (`mc`) CLI
