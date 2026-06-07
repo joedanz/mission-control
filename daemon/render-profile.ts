@@ -97,6 +97,11 @@ export type PlanOpts = {
   // this to grant `Bash(mc:*)` so a check-in can self-serve (claim/work tasks) via the mc CLI without the
   // operator having to remember to allow-list it. Applies only to the claude-code runtime.
   extraAllowedTools?: string[];
+  // When set, render `--setting-sources user,project` so the spawned agent discovers BOTH the user skills
+  // dir (~/.claude/skills) and the work-dir's .claude/skills. The daemon sets this only after it has resolved
+  // every declared skill on disk (see runner.ts). `user` is invariant — a value omitting it would BREAK
+  // user-skill discovery (the headless default is `user`-only), so this always emits exactly `user,project`.
+  pinSettingSources?: boolean;
   // A JSON Schema for structured output — rendered as claude's `--json-schema` (claude-code runtime only).
   // The workflow walker passes an agent node's responseSchema here; the result line then carries a schema-
   // validated `structured_output` object (the substrate for {{nodeId.output}} data-passing). exec ignores it.
@@ -187,6 +192,9 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
   if (profile.disallowedTools.length) args.push('--disallowed-tools', profile.disallowedTools.join(','));
   // --strict-mcp-config makes the profile's server set authoritative (no host MCP bleed-in → reproducible).
   if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+  // Make the profile's declared skills discoverable: `user` (always — the headless default, ~/.claude/skills)
+  // plus `project` (the work-dir's .claude/skills). Set only when the runner has confirmed every skill exists.
+  if (opts.pinSettingSources) args.push('--setting-sources', 'user,project');
   args.push(...jsonSchemaArgs);
   return { runtime: 'claude-code', bin: claudeBin, args, extraEnv };
 }

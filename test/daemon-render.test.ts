@@ -228,6 +228,41 @@ describe('planSpawn — claude-code', () => {
   });
 });
 
+describe('planSpawn — setting-sources pin (skill discovery)', () => {
+  it('renders exactly --setting-sources user,project when pinSettingSources is set', () => {
+    const plan = planSpawn(profile({ skills: ['ship'] }), {
+      prompt: PROMPT,
+      basePermissionMode: 'plan',
+      hostEnv: {},
+      pinSettingSources: true,
+    });
+    expect(plan.args[plan.args.indexOf('--setting-sources') + 1]).toBe('user,project');
+  });
+
+  it('omits --setting-sources by default (no pin requested)', () => {
+    const plan = planSpawn(profile({ skills: ['ship'] }), { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {} });
+    expect(plan.args).not.toContain('--setting-sources');
+  });
+
+  it('ignores pinSettingSources on the profileless back-compat branch', () => {
+    const plan = planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {}, pinSettingSources: true });
+    expect(plan.args).not.toContain('--setting-sources');
+  });
+
+  it('still renders skill steering alongside the pin (R9 — discovery and steering are complementary)', () => {
+    const plan = planSpawn(profile({ skills: ['ship', 'review'] }), {
+      prompt: PROMPT,
+      basePermissionMode: 'plan',
+      hostEnv: {},
+      pinSettingSources: true,
+    });
+    const append = plan.args[plan.args.indexOf('--append-system-prompt') + 1];
+    expect(append).toContain('/ship');
+    expect(append).toContain('/review');
+    expect(plan.args).toContain('--setting-sources');
+  });
+});
+
 describe('chooseModel — budget downgrade (pure)', () => {
   it('keeps the primary model when there is no budget cap', () => {
     expect(chooseModel(profile({ model: 'opus', fallbackModel: 'haiku' }), 999_999_999)).toEqual({ model: 'opus', downgraded: false });
