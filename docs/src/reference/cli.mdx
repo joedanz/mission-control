@@ -106,16 +106,26 @@ warns on stderr if a value *looks* like a raw secret.
 
 ## Skills
 
-Read-only inspection of the skills agents can resolve. A profile's `skills` are enforced at spawn;
-these commands resolve against the same locations the daemon does, so you can preflight a profile
-before scheduling it. See [Skills](/profiles#skills) for the concepts.
+Inspect the skills agents can resolve, and discover + install new ones from the
+[skills.sh](https://skills.sh) registry. A profile's `skills` are enforced at spawn; `skill list`
+resolves against the same locations the daemon does, so you can preflight a profile before scheduling
+it. See [Skills](/profiles#skills) for the concepts.
 
 | Command | What it does |
 |---|---|
-| `skill list [--project <slug>]` | Every resolvable skill, source-tagged: user (`~/.claude/skills`), and the enabled+installed plugin skills (`<plugin>:<skill>`, with marketplace). With `--project`, also that project's work-dir skills and project-enabled plugins. |
+| `skill list [--project <slug>]` | Every **resolvable** skill, source-tagged: user (`~/.claude/skills`), and the enabled+installed plugin skills (`<plugin>:<skill>`, with marketplace). With `--project`, also that project's work-dir skills and project-enabled plugins. |
+| `skill search <query…> [--limit <n>]` | Search the skills.sh registry for **installable** skills. Hits the public, unauthenticated `skills.sh/api/search` (the same endpoint `npx skills` uses — no credentials, no DB). Each result carries an `installed` flag (its slug matched against your local resolvable catalog). |
+| `skill add <target> [--force]` | Install a registry skill into `~/.claude/skills/<slug>/`, after which `skill list` and every spawn resolve it. `<target>` is `owner/repo@skill` or a registry id `owner/repo/skill`. Content is fetched from the skill's **public GitHub repo** (no skills.sh auth; an optional `GITHUB_TOKEN` only lifts rate limits). A CLI-local filesystem action — no DB row, no run. Refuses an already-installed skill unless `--force`. |
 
-The catalog and the spawn-time check share one resolver, so anything `skill list` shows resolves at
-spawn — and anything it omits will not.
+`skill list` and `skill search` are two distinct surfaces: **resolvable** (what's on disk now) vs.
+**installable** (what the registry offers). The catalog and the spawn-time check share one resolver,
+so anything `skill list` shows resolves at spawn — and anything it omits will not.
+
+`skill add` is the one place `mc` writes into `~/.claude`. It is safe by construction: the slug is
+name-checked, every fetched file path is traversal-guarded, and the `SKILL.md` frontmatter is
+validated — all before any write, which then lands atomically. `mc` never hosts or distributes skill
+content (it comes from GitHub) and never edits your plugin or settings config. The OIDC-gated
+leaderboard/curated browse is not yet exposed.
 
 ## MCP servers
 
