@@ -12,7 +12,7 @@ mc task next [--project <slug>]                    # the next claimable task (or
 mc task claim <task-id>                            # race-safe; CONFLICT = lost the race
 mc task set-status <task-id> in_progress           # optional — reflects on the board
 … do the work …
-mc event add "<what happened>" --type <type> --run <run-id> --task <task-id>
+mc event add "<what happened>" --type note --run <run-id> --task <task-id>   # 'note' = free-form; no 'progress' type
 mc task set-status <task-id> done
 mc run end <run-id> completed --cost-micros <n> --tokens-in <n> --tokens-out <n>
 ```
@@ -21,6 +21,11 @@ mc run end <run-id> completed --cost-micros <n> --tokens-in <n> --tokens-out <n>
 status changes to, and the cost rollup breaks. `mc run start` prints the `runId` — capture it into
 `MC_RUN_ID` (see Attribution). **Daemon-spawned agents already have `MC_RUN_ID` set and should skip
 `run start`** — they're running inside a run the daemon opened.
+
+**Event `--type` must be a real `eventType`.** For a free-form progress/work note the type is
+**`note`** — there is no `progress`/`update`/`working` type, and guessing one returns a `VALIDATION`
+error. Lifecycle types are specific (`task.status_changed`, `run.ended`, `tool_call`, …); run
+`mc enums --json` for the full set rather than inventing a value.
 
 ## Attribution — group your writes under your run
 

@@ -36,7 +36,9 @@ mc event list [--project <slug>] [--run <id>] [--level <min>] [--limit <n>]
 ```
 
 - `--type` must be an `eventType` enum value — run `mc enums --json` to see the set (e.g.
-  `task.claimed`, `run.started`, `tool_call`, `note`, …). An empty summary is a `VALIDATION` error.
+  `task.claimed`, `task.status_changed`, `run.started`, `run.ended`, `tool_call`, `note`, …). For a
+  free-form agent note use **`note`**: there is **no** generic `progress`/`update`/`working` type, and
+  guessing one returns a `VALIDATION` error. An empty summary is also a `VALIDATION` error.
 - `--level` defaults to `info`. `event list --level warn` filters to `warn` and above.
 - Keep secrets out of summaries — events are stored and surfaced in the dashboard.
 
