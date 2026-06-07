@@ -142,7 +142,11 @@ export function scanSkillDirs(dirs: SkillDir[]): SkillInfo[] {
     let entries: string[];
     try {
       entries = readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
+        // Include symlinks, not just real dirs: a skill installed as a symlink (e.g. a repo-versioned
+        // skill linked into ~/.claude/skills) reports isSymbolicLink(), not isDirectory(). `skillFilePresent`
+        // below (existsSync, follows symlinks — the same predicate resolveSkills uses) is the real gate, so
+        // this keeps the catalog == resolvable invariant instead of silently dropping symlinked skills.
+        .filter((e) => e.isDirectory() || e.isSymbolicLink())
         .map((e) => e.name);
     } catch {
       continue; // dir doesn't exist / unreadable

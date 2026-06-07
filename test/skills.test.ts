@@ -4,7 +4,7 @@
 // ABOUTME: frontmatter edges, and the path-traversal guard.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseSkillFrontmatter, resolveSkills, scanSkillDirs } from '../lib/skills';
@@ -51,6 +51,21 @@ describe('scanSkillDirs', () => {
 
   it('treats a nonexistent dir as empty without throwing', () => {
     expect(scanSkillDirs([{ dir: join(root, 'nope'), source: 'user' }])).toEqual([]);
+  });
+
+  it('lists a skill installed as a symlink to a directory, matching resolveSkills', () => {
+    // A versioned skill lives outside the scan dir and is installed via a symlink — the
+    // pattern the mission-control skill documents (repo source linked into ~/.claude/skills).
+    const realBase = join(root, 'real');
+    plant(realBase, 'mission-control', 'Drive the mc CLI');
+    symlinkSync(join(realBase, 'mission-control'), join(userDir, 'mission-control'), 'dir');
+
+    const names = scanSkillDirs([{ dir: userDir, source: 'user' }]).map((s) => s.name);
+    expect(names).toContain('mission-control');
+
+    // Invariant: the catalog must list exactly what resolveSkills can resolve (lib/skills.ts:128-137).
+    const res = resolveSkills(['mission-control'], { dirs: [{ dir: userDir, source: 'user' }] });
+    expect(res.resolved.map((r) => r.name)).toContain('mission-control');
   });
 
   it('lists a skill whose frontmatter is malformed, with an empty description (stays resolvable)', () => {

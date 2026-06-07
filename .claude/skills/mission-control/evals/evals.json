@@ -60,6 +60,30 @@
         "The agent addressed the project by its slug (`habitcraft`).",
         "If unsure of the `mc mcp add-remote` flags, the agent consulted `mc mcp add-remote --help` or `mc spec --json` rather than guessing."
       ]
+    },
+    {
+      "id": 6,
+      "prompt": "Claim the task with id `<TASK_ID>` in `habitcraft` and start working it. (Setup note for the harness: pre-claim `<TASK_ID>` under a different run first so the claim loses the race — this exercises CONFLICT handling.)",
+      "expected_output": "The agent attempts `mc task claim <TASK_ID>`, recognizes the `CONFLICT` error.code as a lost race (not a fatal/DB error), and recovers by fetching `mc task next` instead of aborting or retrying blindly.",
+      "files": [],
+      "expectations": [
+        "The agent ran `mc task claim <TASK_ID>` plainly (no pipe or redirect).",
+        "On the failure, the agent read `error.code` and identified it as `CONFLICT` (a lost claim race), NOT a generic failure or a DB error.",
+        "The agent did NOT treat exit code 1 alone as the signal — it distinguished CONFLICT from DB/GITHUB/COMPOSIO by the `error.code` field.",
+        "The agent recovered gracefully — e.g. fell back to `mc task next` to get a different claimable task — rather than aborting the run or blindly retrying the same claim."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Get the project `does-not-exist-xyz` and also list tasks for `habitcraft`. One of these will fail — tell me exactly why and whether it's safe to retry.",
+      "expected_output": "The agent runs both commands plainly, reads the failing envelope's `error.code` (`NOT_FOUND` for the bad slug), and explains it's a missing-resource error (not a transient/DB error) — so retrying as-is won't help; the slug must be corrected.",
+      "files": [],
+      "expectations": [
+        "The agent invoked both `mc` commands plainly (no pipe or redirect).",
+        "The agent read the failing command's `error.code` and identified it as `NOT_FOUND` (bad project slug), distinguishing it from a `DB`/transient error.",
+        "The agent explained the failure in terms of the JSON `error` envelope (code/message), not just the exit code.",
+        "The agent concluded a blind retry won't help (the slug is wrong / resource absent) rather than recommending a retry."
+      ]
     }
   ]
 }
