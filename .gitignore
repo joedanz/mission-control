@@ -44,7 +44,10 @@ yarn-error.log*
 .claude/settings.local.json
 .claude/*.lock
 # locally-installed plugin skills (machine-local; not project code — keep them out of the repo)
-.claude/skills/
+# (exclude the contents, not the dir itself, so a tracked skill can be re-included below)
+.claude/skills/*
+# ...except the Mission Control skill, which is project code and versioned here
+!.claude/skills/mission-control/
 
 # typescript
 *.tsbuildinfo

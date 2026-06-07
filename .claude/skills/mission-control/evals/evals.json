@@ -1,0 +1,65 @@
+{
+  "skill_name": "mission-control",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm a worker agent. Pick up the next available task in the `habitcraft` project, complete it, and mark it done — make sure the work is tracked as a run in Mission Control.",
+      "expected_output": "The agent opens a run, fetches the next claimable task, claims it race-safely, does the work, logs at least one event, marks the task done, and ends the run with a cost — all via plain `mc` commands.",
+      "files": [],
+      "expectations": [
+        "The agent invoked every `mc` command plainly, with no `2>&1`, pipe, or shell redirect in the command string.",
+        "The agent ran `mc run start` (or relied on an inherited `MC_RUN_ID`) before claiming a task.",
+        "The agent used `mc task next` to discover the task rather than guessing a task id.",
+        "If `mc task claim` returned `error.code` of `CONFLICT`, the agent treated it as a lost race and re-fetched the next task instead of failing the run.",
+        "The agent completed the task with `mc task set-status <id> done`, not `mc task toggle`.",
+        "The agent ended its run with `mc run end <id> completed` including a `--cost-micros` value."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Add two new tasks to the `habitcraft` project, then move the second one to the top of the queue so it gets picked up next.",
+      "expected_output": "Two tasks are created on habitcraft via `mc task add`, then `mc task move <id> --top` is run on the second task, addressing the project by slug and the task by uuid.",
+      "files": [],
+      "expectations": [
+        "The agent invoked every `mc` command plainly, with no pipe or redirect.",
+        "The agent created tasks with `mc task add habitcraft ...`, addressing the project by its slug.",
+        "The agent captured the new task's uuid from the `mc task add` output and passed that uuid (not a slug) to `mc task move`.",
+        "The agent used `mc task move <id> --top` to make the task next in the queue."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "How much has the `habitcraft` project cost over the last week?",
+      "expected_output": "The agent runs `mc spend` scoped to habitcraft over a time range and reads the rollup from data.totals / data.rows.",
+      "files": [],
+      "expectations": [
+        "The agent invoked `mc spend` plainly, with no pipe or redirect.",
+        "The agent scoped the query to the project (e.g. `--project habitcraft`) and a time range (e.g. `--since`).",
+        "The agent read the cost from `data.totals` / `data.rows`, not from `data.items` or `data.count` (which do not exist on the spend envelope)."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Make the `nightly-checkin` profile use the Mission Control skill, and confirm the skill actually resolves before we rely on it.",
+      "expected_output": "The agent declares the skill on the profile via `mc profile update nightly-checkin --skills mission-control` and verifies with `mc profile resolve`, checking source / skillsResolved.",
+      "files": [],
+      "expectations": [
+        "The agent invoked every `mc` command plainly, with no pipe or redirect.",
+        "The agent wired the skill via `mc profile update nightly-checkin --skills mission-control` (or an equivalent `mc profile` command), not an invented `claude -p --skills` flag.",
+        "The agent verified resolution with `mc profile resolve` and checked that the skill resolved (e.g. `source: user`, `skillsResolved: true`) rather than assuming success."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Attach a remote MCP server called `notes-api` to the `habitcraft` project at https://notes.example.com/mcp, authenticating with our NOTES_TOKEN.",
+      "expected_output": "The agent uses `mc mcp add-remote` for the habitcraft project with an `${ENV}` placeholder for the auth header, never a literal token.",
+      "files": [],
+      "expectations": [
+        "The agent invoked `mc mcp add-remote` plainly, with no pipe or redirect.",
+        "The agent passed the auth credential as an `${ENV}` placeholder (e.g. `--header Authorization='Bearer ${NOTES_TOKEN}'`), never a literal secret value.",
+        "The agent addressed the project by its slug (`habitcraft`).",
+        "If unsure of the `mc mcp add-remote` flags, the agent consulted `mc mcp add-remote --help` or `mc spec --json` rather than guessing."
+      ]
+    }
+  ]
+}
