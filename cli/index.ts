@@ -1478,10 +1478,12 @@ withFlags(profile.command('resolve'))
     emit('profile resolve', opts, async () => {
       const { queries } = await loadDb();
       const ctx: MatchContext = {};
+      let repoPath: string | null = null; // captured for work-dir skill resolution below
       if (opts.project) {
         const p = await resolveProject(queries, String(opts.project));
         ctx.projectSlug = p.slug;
         ctx.projectCategory = p.category;
+        repoPath = p.repoPath ?? null;
       }
       if (opts.task) {
         const t = await queries.getTaskById(String(opts.task));
@@ -1490,14 +1492,28 @@ withFlags(profile.command('resolve'))
       }
       if (opts.label !== undefined) ctx.taskLabel = String(opts.label);
       const resolved = await queries.resolveProfile(ctx);
+
+      // Preflight skill report: which of the resolved profile's declared skills are discoverable (and from
+      // where), and which are missing — the same resolution the daemon enforces at spawn. Lets an operator
+      // catch a misconfigured profile before a (possibly unattended) run hard-fails.
+      const skillDirs: SkillDir[] = [{ dir: userSkillsDir(), source: 'user' }];
+      if (repoPath) skillDirs.push({ dir: join(repoPath, '.claude', 'skills'), source: 'project' });
+      const declared = resolved?.skills ?? [];
+      const { resolved: hits } = resolveSkills(declared, skillDirs);
+      const bySource = new Map(hits.map((h) => [h.name, h.source]));
+      const skills = declared.map((name) => ({ name, source: bySource.get(name) ?? null, present: bySource.has(name) }));
+      const skillsResolved = skills.every((s) => s.present);
+
       return {
-        data: { profile: resolved, context: ctx },
-        human: () =>
+        data: { profile: resolved, context: ctx, skills, skillsResolved },
+        human: () => {
           console.log(
             resolved
               ? `${resolved.slug} (${resolved.isDefault && !ctx.projectSlug ? 'default' : 'matched'})`
               : 'no matching profile and no default',
-          ),
+          );
+          for (const s of skills) console.log(`  skill ${s.present ? '✓' : '✗'} ${s.name}${s.source ? ` (${s.source})` : ''}`);
+        },
       };
     }),
   );
