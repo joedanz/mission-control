@@ -70,8 +70,8 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 /** Run the mc CLI asynchronously (spawn, not spawnSync) so the in-process mock server keeps serving the child.
  *  Returns { stdout, status }; never rejects on a non-zero exit. */
-function runCli(args: string[]): Promise<{ stdout: string; status: number }> {
-  const env = { ...process.env, MC_CLAUDE_HOME: home, SKILLS_API_URL: base, MC_GITHUB_API_URL: base, MC_GITHUB_RAW_URL: `${base}/raw` };
+function runCli(args: string[], extraEnv: Record<string, string> = {}): Promise<{ stdout: string; status: number }> {
+  const env = { ...process.env, MC_CLAUDE_HOME: home, SKILLS_API_URL: base, MC_GITHUB_API_URL: base, MC_GITHUB_RAW_URL: `${base}/raw`, ...extraEnv };
   delete (env as Record<string, string>).AGENT_DATABASE_URL; // prove these commands never gate on the DB
   return new Promise((resolve) => {
     const child = spawn(tsxBin, ['cli/index.ts', ...args], { env });
@@ -104,6 +104,12 @@ describe('mc skill search', () => {
     const env = JSON.parse(stdout);
     expect(env.ok).toBe(false);
     expect(env.error.code).toBe('VALIDATION');
+  }, 60000);
+
+  it('maps a registry HTTP failure to a REGISTRY envelope (not DB)', async () => {
+    const { stdout, status } = await runCli(['skill', 'search', 'react', '--json'], { SKILLS_API_URL: `${base}/nope` });
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).error.code).toBe('REGISTRY');
   }, 60000);
 });
 

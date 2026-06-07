@@ -30,7 +30,13 @@ function mockGitHub(opts: { tree: { path: string; type: string }[]; files: Recor
       const path = u.split(`/${branch}/`)[1];
       const content = opts.files[path];
       if (content === undefined) return { ok: false, status: 404, json: async () => ({}), text: async () => 'not found' };
-      return { ok: true, status: 200, json: async () => ({}), text: async () => content };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        text: async () => content,
+        arrayBuffer: async () => new TextEncoder().encode(content).buffer,
+      };
     }
     return { ok: false, status: 404, json: async () => ({}), text: async () => 'unhandled' };
   });
@@ -139,6 +145,25 @@ describe('installSkill', () => {
       files: { 'skills/one/SKILL.md': SKILL_MD('one'), 'skills/two/SKILL.md': SKILL_MD('two') },
     });
     await expect(installSkill({ source: 'a/b', slug: 'three' })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('excludes a nested sub-skill’s files from the parent skill', async () => {
+    mockGitHub({
+      tree: [
+        { path: 'skills/parent/SKILL.md', type: 'blob' },
+        { path: 'skills/parent/doc.md', type: 'blob' },
+        { path: 'skills/parent/inner/SKILL.md', type: 'blob' },
+        { path: 'skills/parent/inner/extra.md', type: 'blob' },
+      ],
+      files: {
+        'skills/parent/SKILL.md': SKILL_MD('parent'),
+        'skills/parent/doc.md': '# doc\n',
+      },
+    });
+    const res = await installSkill({ source: 'a/b', slug: 'parent' });
+    expect(res.fileCount).toBe(2); // SKILL.md + doc.md, NOT the nested inner skill
+    const dest = join(userSkillsDir(), 'parent');
+    expect(existsSync(join(dest, 'inner'))).toBe(false);
   });
 
   it('refuses to overwrite an existing skill without force, and overwrites with force', async () => {

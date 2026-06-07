@@ -30,6 +30,8 @@ import { scanSkillDirs, resolveSkills, userSkillsDir, type SkillDir } from '../l
 import { scanPluginSkills, loadPluginContext, pluginSkillStatus } from '../lib/plugin-skills';
 import { ensureDbCredentials, ConfigError } from './env';
 import { ComposioApiError } from '../lib/composio-api';
+import { GitHubApiError } from '../lib/github-api';
+import { SkillsRegistryError } from '../lib/skills-registry';
 import type { ProjectWithTasks } from '../lib/queries';
 import type { Category, Project, Task, AgentProfile, WorkflowGraph } from '../lib/db/schema';
 import type { ProjectInput, ProjectUpdate } from '../lib/mutations';
@@ -64,11 +66,14 @@ function classify(err: unknown): ErrInfo {
   if (err instanceof ConflictError) {
     return { code: 'CONFLICT', message: err.message, exit: 1 };
   }
-  if (err instanceof GitHubError) {
+  if (err instanceof GitHubError || err instanceof GitHubApiError) {
     return { code: 'GITHUB', message: redact(err.message), exit: 1 };
   }
   if (err instanceof ComposioApiError) {
     return { code: 'COMPOSIO', message: redact(err.message), exit: 1 };
+  }
+  if (err instanceof SkillsRegistryError) {
+    return { code: 'REGISTRY', message: redact(err.message), exit: 1 };
   }
   // Postgres unique violation (e.g. duplicate slug, duplicate integration row).
   const e = err as { code?: string; sourceError?: { code?: string }; message?: string };

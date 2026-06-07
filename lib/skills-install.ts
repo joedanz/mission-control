@@ -8,11 +8,18 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
 import { ValidationError, ConflictError } from './validation';
+import { GitHubApiError } from './github-api';
 import { assertSafeSkillName, parseSkillFrontmatter, userSkillsDir } from './skills';
 import { parseRegistryId } from './skills-registry';
 
-const GITHUB_API = 'https://api.github.com';
-const GITHUB_RAW = 'https://raw.githubusercontent.com';
+/** GitHub origins, read at call time so MC_GITHUB_API_URL / MC_GITHUB_RAW_URL can redirect them at a local
+ *  mock server under test (mirrors the SKILLS_API_URL seam). Default to the real GitHub. */
+function githubApi(): string {
+  return process.env.MC_GITHUB_API_URL || 'https://api.github.com';
+}
+function githubRaw(): string {
+  return process.env.MC_GITHUB_RAW_URL || 'https://raw.githubusercontent.com';
+}
 
 /** Top-level directories never copied into a skill (relevant only for a root-level skill repo). */
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
@@ -46,23 +53,24 @@ function ghHeaders(): Record<string, string> {
 }
 
 async function ghJson(url: string): Promise<unknown> {
-  let res: { ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> };
+  let res: Response;
   try {
     res = await fetch(url, { headers: ghHeaders() });
   } catch (e) {
-    throw new ValidationError('source', `GitHub request failed: ${(e as Error).message}`);
+    throw new GitHubApiError(`GitHub request failed: ${(e as Error).message}`);
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new ValidationError('source', `GitHub ${res.status} for ${url}: ${body.slice(0, 200)}`);
+    throw new GitHubApiError(`GitHub ${res.status} for ${url}: ${body.slice(0, 200)}`, res.status);
   }
   return res.json();
 }
 
-async function ghRaw(source: string, branch: string, path: string): Promise<string> {
-  const res = await fetch(`${GITHUB_RAW}/${source}/${branch}/${path}`, { headers: ghHeaders() });
-  if (!res.ok) throw new ValidationError('source', `GitHub raw ${res.status} for ${path}`);
-  return res.text();
+/** Fetch a repo file as raw bytes (not decoded text) so binary assets in a skill survive the write intact. */
+async function ghRawBytes(source: string, branch: string, path: string): Promise<Buffer> {
+  const res = await fetch(`${githubRaw()}/${source}/${branch}/${path}`, { headers: ghHeaders() });
+  if (!res.ok) throw new GitHubApiError(`GitHub raw ${res.status} for ${path}`, res.status);
+  return Buffer.from(await res.arrayBuffer());
 }
 
 /** Reject a repo-relative file path that would escape the skill directory; return it unchanged when safe. */
@@ -74,28 +82,34 @@ function assertSafeRelPath(rel: string): string {
   return rel;
 }
 
-/** Pick the SKILL.md whose directory matches `slug`; fall back to the sole SKILL.md in the repo. Returns the
- *  skill's directory prefix ('' for a root skill). Throws ValidationError when nothing usable is found. */
-function resolveSkillDir(tree: TreeEntry[], slug: string): string {
-  const skillMds = tree
+/** Every directory in the repo tree that holds a SKILL.md ('' for a root SKILL.md). */
+function skillDirsOf(tree: TreeEntry[]): string[] {
+  return tree
     .filter((t) => t.type === 'blob' && (t.path === 'SKILL.md' || t.path.endsWith('/SKILL.md')))
     .map((t) => (t.path === 'SKILL.md' ? '' : t.path.slice(0, -'/SKILL.md'.length)));
-  if (skillMds.length === 0) throw new ValidationError('source', 'no SKILL.md found in repository');
-  const byName = skillMds.find((dir) => dir.split('/').pop() === slug);
-  if (byName !== undefined) return byName;
-  if (skillMds.length === 1) return skillMds[0];
-  throw new ValidationError('slug', `no skill "${slug}" in repository (found: ${skillMds.map((d) => d.split('/').pop()).join(', ')})`);
 }
 
-/** Files belonging to the skill at `dir`: blobs under the dir prefix, minus VCS/build dirs (root-skill case). */
-function skillFiles(tree: TreeEntry[], dir: string): string[] {
+/** Pick the skill directory whose basename matches `slug`; fall back to the sole skill in the repo. Returns the
+ *  directory prefix ('' for a root skill). Throws ValidationError when nothing usable is found. */
+function resolveSkillDir(skillDirs: string[], slug: string): string {
+  if (skillDirs.length === 0) throw new ValidationError('source', 'no SKILL.md found in repository');
+  const byName = skillDirs.find((dir) => dir.split('/').pop() === slug);
+  if (byName !== undefined) return byName;
+  if (skillDirs.length === 1) return skillDirs[0];
+  throw new ValidationError('slug', `no skill "${slug}" in repository (found: ${skillDirs.map((d) => d.split('/').pop()).join(', ')})`);
+}
+
+/** Files belonging to the skill at `dir`: blobs under the dir prefix, minus VCS/build dirs and any files that
+ *  belong to a NESTED skill (a deeper directory with its own SKILL.md — that is a separate skill, not ours). */
+function skillFiles(tree: TreeEntry[], dir: string, nestedSkillDirs: string[]): string[] {
   const prefix = dir === '' ? '' : `${dir}/`;
   return tree
     .filter((t) => t.type === 'blob' && t.path.startsWith(prefix))
     .map((t) => t.path)
     .filter((path) => {
       const rel = path.slice(prefix.length);
-      return !SKIP_DIRS.has(rel.split('/')[0]);
+      if (SKIP_DIRS.has(rel.split('/')[0])) return false;
+      return !nestedSkillDirs.some((nested) => path === `${nested}/SKILL.md` || path.startsWith(`${nested}/`));
     });
 }
 
@@ -105,9 +119,9 @@ export async function installSkill(target: InstallTarget, opts?: { force?: boole
   const { source, slug } = target;
   assertSafeSkillName(slug); // throws before any network call
 
-  const meta = (await ghJson(`${GITHUB_API}/repos/${source}`)) as { default_branch?: string };
+  const meta = (await ghJson(`${githubApi()}/repos/${source}`)) as { default_branch?: string };
   const branch = meta.default_branch || 'main';
-  const treeJson = (await ghJson(`${GITHUB_API}/repos/${source}/git/trees/${branch}?recursive=1`)) as {
+  const treeJson = (await ghJson(`${githubApi()}/repos/${source}/git/trees/${branch}?recursive=1`)) as {
     tree?: TreeEntry[];
     truncated?: boolean;
   };
@@ -115,16 +129,19 @@ export async function installSkill(target: InstallTarget, opts?: { force?: boole
     throw new ValidationError('source', `repository tree is too large to enumerate (truncated): ${source}`);
   }
   const tree = treeJson.tree ?? [];
-  const dir = resolveSkillDir(tree, slug);
+  const skillDirs = skillDirsOf(tree);
+  const dir = resolveSkillDir(skillDirs, slug);
   const prefix = dir === '' ? '' : `${dir}/`;
+  // A skill directory nested INSIDE ours is a separate skill — its files must not be folded into this one.
+  const nested = skillDirs.filter((d) => d !== dir && d.startsWith(prefix) && d.length > prefix.length);
 
-  const files = skillFiles(tree, dir);
+  const files = skillFiles(tree, dir, nested);
   const skillMdPath = `${prefix}SKILL.md`;
   if (!files.includes(skillMdPath)) throw new ValidationError('source', 'resolved skill has no SKILL.md');
 
-  // Fetch + validate the SKILL.md before touching disk.
-  const skillMd = await ghRaw(source, branch, skillMdPath);
-  parseSkillFrontmatter(skillMd, `${slug}/SKILL.md`); // throws ValidationError on bad frontmatter
+  // Fetch + validate the SKILL.md before touching disk (bytes preserved so a binary asset survives the write).
+  const skillMdBytes = await ghRawBytes(source, branch, skillMdPath);
+  parseSkillFrontmatter(skillMdBytes.toString('utf8'), `${slug}/SKILL.md`); // throws ValidationError on bad frontmatter
 
   const dest = join(userSkillsDir(), slug);
   if (existsSync(dest) && !opts?.force) {
@@ -139,13 +156,22 @@ export async function installSkill(target: InstallTarget, opts?: { force?: boole
       const rel = assertSafeRelPath(path.slice(prefix.length));
       const abs = join(staging, rel);
       assertWithin(staging, abs);
-      const content = path === skillMdPath ? skillMd : await ghRaw(source, branch, path);
+      const content = path === skillMdPath ? skillMdBytes : await ghRawBytes(source, branch, path);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, content);
     }
-    if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
     mkdirSync(dirname(dest), { recursive: true });
-    renameSync(staging, dest);
+    // Move the existing skill aside FIRST, then swap in the new one — so an interrupt during --force overwrite
+    // can never leave the user with no skill at all; on failure the backup is restored.
+    const backup = existsSync(dest) ? `${dest}.mc-bak.${process.pid}` : null;
+    if (backup) renameSync(dest, backup);
+    try {
+      renameSync(staging, dest);
+    } catch (e) {
+      if (backup) renameSync(backup, dest);
+      throw e;
+    }
+    if (backup) rmSync(backup, { recursive: true, force: true });
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
