@@ -1,0 +1,94 @@
+---
+"$schema": https://holocron.so/frontmatter.json
+rendering: static
+title: Skills
+description: The skills agents can use — how they're discovered on disk, how a profile enforces them, and how to find and install new ones from the skills.sh registry.
+icon: sparkles
+---
+
+# Giving agents new capabilities
+
+A **skill** is a reusable capability an agent can apply — a `SKILL.md` file (plus any supporting
+files) that Claude Code discovers and steers toward when relevant. A profile declares which skills
+its agents must have; Mission Control resolves them on disk at spawn and **fails the run loudly** if
+any is missing, so a worker never launches with a silently-absent capability.
+
+Skills come in two surfaces, and it helps to keep them straight:
+
+- **Resolvable** — what's installed on disk *right now* and will resolve at spawn. Inspect it with
+  `mc skill list`.
+- **Installable** — what the public [skills.sh](https://skills.sh) registry offers that you could
+  add. Search it with `mc skill search`, install with `mc skill add`.
+
+## Where skills live
+
+Mission Control discovers skills the same way Claude Code does, from three locations:
+
+| Source | Example | Resolved from |
+|---|---|---|
+| **user** | `ship` | `~/.claude/skills/<name>/SKILL.md` |
+| **work-dir** | `deploy-helper` | a project repo's `<repo>/.claude/skills/<name>/SKILL.md` |
+| **plugin** | `compound-engineering:ce-work` | an enabled **and** installed plugin's skills |
+
+The available-skills catalog is **derived** — there's no stored list. `mc skill list` live-scans
+these locations, and the spawn-time check shares the same resolver, so anything the catalog shows is
+guaranteed to resolve at spawn, and anything it omits will not.
+
+```bash
+mc skill list                  # every resolvable skill, source-tagged
+mc skill list --project myapp  # also that project's work-dir + project-enabled plugins
+```
+
+<Note>
+For how a profile *declares* and enforces skills (the spawn contract, plugin resolution reasons, and
+the `--setting-sources` it pins), see [Agent profiles → Skills](/profiles#skills).
+</Note>
+
+## Finding and installing skills from skills.sh
+
+When you need a capability you don't have yet, discover it on the [skills.sh](https://skills.sh)
+registry and install it — without leaving the CLI.
+
+<Steps>
+  <Step title="Search the registry">
+    ```bash
+    mc skill search react
+    ```
+    Hits the public, **unauthenticated** `skills.sh/api/search` endpoint — the same one the
+    `npx skills` CLI uses, so no credentials and no database are involved. Each result is tagged
+    `installed: true|false` by matching its slug against your local resolvable catalog.
+  </Step>
+  <Step title="Install one">
+    ```bash
+    mc skill add owner/repo@some-skill   # or a registry id: owner/repo/some-skill
+    ```
+    The skill's files are fetched from its **public GitHub repo** and written into
+    `~/.claude/skills/<slug>/`. No skills.sh credentials are needed for content; an optional
+    `GITHUB_TOKEN` only lifts GitHub's rate limit. Use `--force` to overwrite a skill you already
+    have.
+  </Step>
+  <Step title="Use it">
+    ```bash
+    mc skill list   # the new skill now resolves like any hand-placed one
+    ```
+    Once on disk it flows through the same derived catalog and enforced-at-spawn contract as every
+    other skill — declare it in a profile's `skills` and agents will steer toward it.
+  </Step>
+</Steps>
+
+<Note>
+`mc skill add` is the **one** place Mission Control writes into your `~/.claude` config. It is safe
+by construction: the slug is name-checked, every fetched file path is traversal-guarded, and the
+`SKILL.md` frontmatter is validated — all before any write, which then lands atomically. MC never
+hosts or distributes skill content (it always comes from GitHub) and never edits your plugin or
+settings configuration. The registry is simply *where you install from*.
+</Note>
+
+## Two surfaces, one model
+
+`mc skill list` is the **resolvable** surface (on disk, will resolve at spawn). `mc skill search` is
+the **installable** surface (what the registry offers). `mc skill add` moves a skill from the second
+to the first. They never mix — a registry result is never treated as resolvable until it's actually
+installed.
+
+See the [CLI reference → Skills](/reference/cli#skills) for the full command surface and flags.

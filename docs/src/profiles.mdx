@@ -73,6 +73,12 @@ active connections.
 
 ## Skills
 
+<Note>
+This section covers how a *profile* declares and enforces skills. For the skill subsystem as a whole —
+where skills live, the resolvable catalog, and discovering/installing new ones from the
+[skills.sh](https://skills.sh) registry — see the dedicated [Skills](/skills) page.
+</Note>
+
 A profile's `skills` array is an **enforced contract**, not a hint. At spawn the daemon resolves
 every declared skill on disk; if any one doesn't resolve, the run **fails loudly** (a
 `skill.unresolved` event names the skill and why) rather than launching an agent whose declared

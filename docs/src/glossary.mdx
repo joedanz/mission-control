@@ -19,6 +19,8 @@ Every bit of jargon used above, translated.
 | Auto-routing | Picking a profile for a task by its match rules, breaking ties by priority, falling back to the global default. |
 | Auto-feed | At agent spawn, a project's active MCP servers — Composio toolkits *and* direct remote servers — are automatically injected into the agent's MCP servers (a Composio server is keyed `composio-<toolkit>`, a remote server by its name). The profile's own MCP servers win on a name collision. |
 | MCP server | A Model Context Protocol tool an agent can call — a local `stdio` command or a remote `http`/`sse`/`ws` endpoint. The "powers" a profile grants. |
+| Skill | A reusable capability (a `SKILL.md` plus supporting files) an agent steers toward. Resolved on disk from user, work-dir, or plugin locations; a profile can require them as an enforced spawn contract. Inspect with `mc skill list`. See [Skills](/skills). |
+| Skills registry | The public [skills.sh](https://skills.sh) catalog of installable skills. Search it with `mc skill search` and install into `~/.claude/skills/` with `mc skill add` (content fetched from the skill's GitHub repo). |
 | Fallback model | A cheaper/secondary model a profile drops to when the primary is overloaded, or when its daily budget is spent. |
 | Budget downgrade | When a profile's same-day run cost passes its cap, new runs switch to the fallback model — decided from real measured spend. |
 | Run | One work-session by one agent — from "start" to "finished." Carries its own cost and status. |
