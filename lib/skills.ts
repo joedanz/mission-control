@@ -9,7 +9,11 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ValidationError } from './validation';
 
-export type SkillSource = 'user' | 'project';
+export type SkillSource = 'user' | 'project' | 'plugin';
+
+/** Why a declared skill didn't resolve. `not-found` is the filesystem (user/project) miss; the other three
+ *  are plugin-source reasons (see lib/plugin-skills.ts) and point the operator at the precise fix. */
+export type SkillUnresolvedReason = 'not-found' | 'plugin-disabled' | 'plugin-not-installed' | 'skill-not-found';
 
 /** One discovery location to scan, tagged with the source it represents. Callers pass these in declaration
  *  order; precedence on a name collision follows that order (user first → user wins). */
@@ -19,27 +23,65 @@ export type SkillDir = { dir: string; source: SkillSource };
  *  which location it came from. */
 export type SkillInfo = { name: string; description: string; source: SkillSource };
 
+/** A resolved skill: its declared name, the source it resolved from, and (plugin only) the marketplace. */
+export type ResolvedSkill = { name: string; source: SkillSource; marketplace?: string };
+
 export type SkillResolution = {
-  resolved: { name: string; source: SkillSource }[];
-  missing: string[];
+  resolved: ResolvedSkill[];
+  unresolved: { name: string; reason: SkillUnresolvedReason }[];
 };
 
-/** A skill name is path-joined into `<dir>/<name>/SKILL.md`. `profiles.skills` is free-text from the DB, so a
- *  name with a separator or `..` could escape the skills tree — restrict to a flat, safe token. */
-const SKILL_NAME_RE = /^[A-Za-z0-9_-]+$/;
+/** Injected by callers (daemon/CLI) to resolve a `<plugin>:<skill>` reference — keeps lib/skills.ts free of a
+ *  dependency on the plugin mechanism (lib/plugin-skills.ts), which itself depends on this module. A caller
+ *  wires it as `(p, s) => pluginSkillStatus(p, s, ctx)`; when absent, plugin-shaped names can't resolve. */
+export type PluginResolver = (
+  plugin: string,
+  skill: string,
+) => { resolved: boolean; marketplace?: string; reason?: SkillUnresolvedReason };
+
+/** A declared skill name is path-joined into `<dir>/<name>/SKILL.md` (filesystem) or split into plugin/skill
+ *  segments that are themselves path-joined (plugin). `profiles.skills` is free-text from the DB, so a `/` or
+ *  `..` could escape the tree — restrict to either a flat token (`ship`) or a single-colon plugin reference
+ *  (`compound-engineering:ce-work`), each segment a flat safe token. */
+const SKILL_SEGMENT = '[A-Za-z0-9_-]+';
+const SKILL_NAME_RE = new RegExp(`^${SKILL_SEGMENT}(:${SKILL_SEGMENT})?$`);
+
+/** A declared name is a plugin reference iff it carries the `<plugin>:<skill>` colon (the source switch). */
+export function isPluginSkillName(name: string): boolean {
+  return name.includes(':');
+}
+
+/** Split a validated plugin reference into `[plugin, skill]`. Precondition: `name` already passed
+ *  `assertSafeSkillName` (so it has exactly one colon and two non-empty segments) — this is why the path-join
+ *  in the plugin resolver can trust its segments. */
+export function splitPluginSkill(name: string): [plugin: string, skill: string] {
+  const [plugin, skill] = name.split(':');
+  return [plugin, skill];
+}
 
 const MAX_DESCRIPTION = 1024; // mirrors the Agent Skills frontmatter `description` limit
 
+/** The Claude Code config root (`~/.claude`). `MC_CLAUDE_HOME` overrides it explicitly — read directly
+ *  (NOT via `$HOME`, which `homedir()` doesn't reliably honor on macOS), mirroring the `MC_CLAUDE_BIN` /
+ *  `MC_BIN` precedent. This single seam makes every config-relative path (user skills, plugin settings,
+ *  the install registry) point at a tmp fixture under test. */
+export function claudeHome(): string {
+  return process.env.MC_CLAUDE_HOME || join(homedir(), '.claude');
+}
+
 /** The per-user skills directory Claude Code discovers by default (`~/.claude/skills`). */
 export function userSkillsDir(): string {
-  return join(homedir(), '.claude', 'skills');
+  return join(claudeHome(), 'skills');
 }
 
 /** Reject a declared skill name that could traverse outside the skills tree. Returns the name unchanged when
  *  safe; throws ValidationError otherwise (the CLI maps this to exit code 2). */
 export function assertSafeSkillName(name: string): string {
   if (!SKILL_NAME_RE.test(name)) {
-    throw new ValidationError('skill', `Invalid skill name "${name}". Allowed: letters, digits, hyphen, underscore`);
+    throw new ValidationError(
+      'skill',
+      `Invalid skill name "${name}". Allowed: a flat token (letters, digits, hyphen, underscore) or a single-colon plugin reference like "plugin:skill"`,
+    );
   }
   return name;
 }
@@ -124,17 +166,26 @@ function readDescription(skillPath: string): string {
   }
 }
 
-/** Resolve a profile's declared skill names against `dirs`. Each name is validated (throws ValidationError on
- *  an unsafe name) then checked for `<dir>/<name>/SKILL.md` in declaration order; the first hit wins. Returns
- *  the resolved names (with their source) and any that exist in none of the dirs. */
-export function resolveSkills(declared: string[], dirs: SkillDir[]): SkillResolution {
-  const resolved: { name: string; source: SkillSource }[] = [];
-  const missing: string[] = [];
+/** Resolve a profile's declared skill names. Each name is validated (throws ValidationError on an unsafe
+ *  name) then routed by the colon switch: a plugin reference (`plugin:skill`) goes to the injected
+ *  `resolvePlugin`; a flat name is checked for `<dir>/<name>/SKILL.md` in declaration order (first hit wins).
+ *  Returns the resolved skills (with source + plugin marketplace) and the unresolved ones with a precise
+ *  reason. A plugin-shaped name with no `resolvePlugin` injected can't resolve (`plugin-not-installed`). */
+export function resolveSkills(declared: string[], opts: { dirs: SkillDir[]; resolvePlugin?: PluginResolver }): SkillResolution {
+  const resolved: ResolvedSkill[] = [];
+  const unresolved: { name: string; reason: SkillUnresolvedReason }[] = [];
   for (const name of declared) {
     assertSafeSkillName(name);
-    const hit = dirs.find((d) => skillFilePresent(d.dir, name));
-    if (hit) resolved.push({ name, source: hit.source });
-    else missing.push(name);
+    if (isPluginSkillName(name)) {
+      const [plugin, skill] = splitPluginSkill(name);
+      const status = opts.resolvePlugin?.(plugin, skill);
+      if (status?.resolved) resolved.push({ name, source: 'plugin', marketplace: status.marketplace });
+      else unresolved.push({ name, reason: status?.reason ?? 'plugin-not-installed' });
+    } else {
+      const hit = opts.dirs.find((d) => skillFilePresent(d.dir, name));
+      if (hit) resolved.push({ name, source: hit.source });
+      else unresolved.push({ name, reason: 'not-found' });
+    }
   }
-  return { resolved, missing };
+  return { resolved, unresolved };
 }

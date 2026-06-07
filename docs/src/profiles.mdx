@@ -31,7 +31,7 @@ The right one shows up for the right job, automatically.
 |---|---|
 | **runtime** | How the worker is launched: `claude-code` (rich `claude -p` flags) or `exec` (any command — the door to non-Claude models). |
 | **model** · **permission mode** | Which model answers, and how much it's allowed to do without asking (`plan`, `acceptEdits`, `bypassPermissions`, `default`). |
-| **skills** | Skills to steer the agent toward (surfaced in its system prompt). |
+| **skills** | Skills the agent must have — an enforced contract, not just steering. Resolved on disk at spawn (user, work-dir, and plugin skills); a missing one fails the run loudly. See [Skills](#skills). |
 | **MCP servers** | Model Context Protocol tools the agent can call — by `stdio` command or `http`/`sse`/`ws` URL. The real "powers." |
 | **allowed / disallowed tools** | A tool allow-list and deny-list. |
 | **append system prompt** | A persona or extra standing instructions. |
@@ -71,6 +71,51 @@ file and is never visible in the database, in `ps` output, or on disk in the cle
 See [MCP servers](/mcp) for how to connect a project to a toolkit or a remote server and manage its
 active connections.
 
+## Skills
+
+A profile's `skills` array is an **enforced contract**, not a hint. At spawn the daemon resolves
+every declared skill on disk; if any one doesn't resolve, the run **fails loudly** (a
+`skill.unresolved` event names the skill and why) rather than launching an agent whose declared
+capability is silently absent. The resolved skills still get a steering line in the system prompt —
+discovery and steering are complementary.
+
+A profile can declare three kinds of skill:
+
+| Source | Declared as | Resolves from |
+|---|---|---|
+| **user** | `ship` | `~/.claude/skills/<name>/SKILL.md` |
+| **work-dir** | `deploy-helper` | the project repo's `<repo>/.claude/skills/<name>/SKILL.md` |
+| **plugin** | `compound-engineering:ce-work` | an enabled, installed Claude Code plugin |
+
+The colon is the switch: a bare name (`ship`) resolves against the user and work-dir directories; a
+`plugin:skill` name resolves against plugins only. To make both filesystem locations discoverable,
+a skill-declaring profile spawns with `--setting-sources user,project`.
+
+**Plugin skills** resolve only when the plugin is *both* enabled (in the union of your user and the
+project's `.claude/settings.json` `enabledPlugins`) *and* installed — so a declared plugin skill can
+fail for one of three precise reasons, each pointing at its fix:
+
+| Reason | Meaning | Fix |
+|---|---|---|
+| `plugin-disabled` | The plugin is installed but not enabled. | Enable it in `enabledPlugins`. |
+| `plugin-not-installed` | No install for that plugin. | Install the plugin. |
+| `skill-not-found` | The plugin is enabled and installed but has no such skill. | Check the skill name. |
+
+Plugin skills need **no extra spawn configuration** — enabled plugins are already visible to a
+headless agent through your user settings.
+
+**Preflight before you schedule.** Two read-only commands resolve against the same locations the
+spawn does, so you can catch a misconfigured profile before an (often unattended) run hard-fails:
+
+```bash
+mc skill list                      # every resolvable skill — user, work-dir, and plugin (source-tagged)
+mc skill list --project myapp      # also include that project's work-dir + project-enabled plugins
+mc profile resolve --project myapp # the matched profile's declared skills: resolved (with source) or the reason
+```
+
+Because the catalog and the spawn-time check share one resolver, anything `mc skill list` shows is
+guaranteed to resolve at spawn — and anything it omits will not.
+
 ## How the right profile gets picked
 
 Routing is rule-based and runs every time the daemon claims a task.
@@ -103,8 +148,10 @@ Claude Code is Claude-only — pointing it at a different base URL changes *wher
 *which* model answers. So a profile carries a first-class `runtime` field:
 
 - **`claude-code`** renders rich `claude -p` flags: `--model`, `--permission-mode`,
-  `--append-system-prompt` (persona + steered skills), `--allowedTools` / `--disallowed-tools`,
-  and `--mcp-config` (with `--strict-mcp-config` so the profile's server set is authoritative).
+  `--append-system-prompt` (persona + a steering line for the resolved skills),
+  `--allowedTools` / `--disallowed-tools`, `--mcp-config` (with `--strict-mcp-config` so the
+  profile's server set is authoritative), and — when the profile declares skills —
+  `--setting-sources user,project` so the agent discovers both skill locations (see [Skills](#skills)).
 - **`exec`** renders a command template you supply, with `${MODEL}`, `${PROMPT}`,
   `${MCP_CONFIG}`, and `${FALLBACK_MODEL}` tokens filled in — so a profile can drive a non-Claude
   model through any runner (an OpenAI-compatible gateway, a local model, whatever you script).
@@ -178,7 +225,7 @@ or the **Profiles** tab in the dashboard — both write through the same core, s
 # A claude-code profile that handles deploy tasks with a cautious posture + a cost cap
 mc profile add --slug releaser --name "Release engineer" \
   --model opus --permission-mode acceptEdits \
-  --allowed-tools "Bash,Edit" --skills deploy,canary \
+  --allowed-tools "Bash,Edit" --skills deploy,canary,compound-engineering:ce-work \
   --match-label '^(deploy|release):' --priority 5 \
   --fallback-model claude-sonnet-4-6 --daily-budget-micros 5000000
 

@@ -5,6 +5,7 @@
 // ABOUTME: testable in isolation; the daemon owns the side effects (temp-file write, fork, cleanup).
 
 import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
+import type { SkillUnresolvedReason } from '../lib/skills';
 
 /** A profile carries `${VAR}` placeholders for secrets (MC never stores the secret itself). They are
  *  resolved from the daemon's own environment at spawn; an unset one is fatal — we fail the run with a
@@ -18,15 +19,21 @@ export class MissingEnvError extends Error {
   }
 }
 
-/** Thrown by the daemon runner when a profile declares one or more skills that don't resolve to a
- *  `SKILL.md` on disk (user or work-dir). The run is failed loudly rather than spawning an agent whose
- *  declared capabilities are silently absent. Carries the unresolved names for the event message. */
+/** Thrown by the daemon runner when a profile declares one or more skills that don't resolve — a filesystem
+ *  skill missing on disk, or a plugin skill that's disabled / not installed / has no such skill dir. The run
+ *  is failed loudly rather than spawning an agent whose declared capabilities are silently absent. Carries the
+ *  unresolved skills WITH their reason so the failure event names the precise fix. */
 export class MissingSkillError extends Error {
-  readonly missing: string[];
-  constructor(missing: string[]) {
-    super(`profile declares skill(s) not found on disk: ${missing.join(', ')}`);
+  readonly unresolved: { name: string; reason: SkillUnresolvedReason }[];
+  constructor(unresolved: { name: string; reason: SkillUnresolvedReason }[]) {
+    super(`profile declares skill(s) that did not resolve: ${unresolved.map((u) => `${u.name} (${u.reason})`).join(', ')}`);
     this.name = 'MissingSkillError';
-    this.missing = missing;
+    this.unresolved = unresolved;
+  }
+
+  /** Just the unresolved names, for readers that don't need the reason (back-compat with the prior shape). */
+  get missing(): string[] {
+    return this.unresolved.map((u) => u.name);
   }
 }
 

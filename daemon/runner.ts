@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import { planSpawn, resolveMcpConfigJson, mergeMcpServers, MissingSkillError, type ModelChoice } from './render-profile';
 import { resolveSkills, userSkillsDir } from '../lib/skills';
+import { loadPluginContext, pluginSkillStatus } from '../lib/plugin-skills';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MC_BIN = process.env.MC_BIN || `node ${join(ROOT, 'bin', 'mc.mjs')}`;
@@ -194,11 +195,16 @@ export function spawnExecutor(opts: SpawnExecutorOpts): Spawned {
   // skill-free profiles (the default) keep today's spawn behavior and today's project-settings blast radius.
   let pinSettingSources = false;
   if (profile && profile.skills.length > 0) {
-    const { missing } = resolveSkills(profile.skills, [
-      { dir: userSkillsDir(), source: 'user' },
-      { dir: join(repoPath, '.claude', 'skills'), source: 'project' },
-    ]);
-    if (missing.length > 0) throw new MissingSkillError(missing);
+    // Plugin context = enabledPlugins (user ∪ this work-dir's project settings) + the install registry.
+    const pluginCtx = loadPluginContext(repoPath);
+    const { unresolved } = resolveSkills(profile.skills, {
+      dirs: [
+        { dir: userSkillsDir(), source: 'user' },
+        { dir: join(repoPath, '.claude', 'skills'), source: 'project' },
+      ],
+      resolvePlugin: (plugin, skill) => pluginSkillStatus(plugin, skill, pluginCtx),
+    });
+    if (unresolved.length > 0) throw new MissingSkillError(unresolved);
     pinSettingSources = true;
   }
 
