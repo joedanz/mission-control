@@ -14,7 +14,7 @@ Add **skills.sh** (`https://skills.sh/api/v1/`) as a *source* the `mc` CLI can b
 
 The work mirrors the proven **Composio catalog four-layer template** (`lib/composio-api.ts` → catalog route → `mc mcp catalog` → `McpCatalogBrowser.tsx`), but lands **CLI-first** because `mc` runs on the operator's local machine and install is inherently a local-filesystem action. It introduces two new lib modules — a registry HTTP client and the project's **first filesystem-write-to-`~/.claude` capability** — and three new leaves on the existing `mc skill` command group.
 
-This plan **consciously reverses two stated product boundaries** (see [Problem Frame](#problem-frame)): the prior skill-discovery brainstorms deferred "on-demand fetch/install of a missing skill from a remote" and declared "MC reports, never mutates user config / does not distribute skill content." The reconciliation that keeps us inside the existing model: skills.sh is treated purely as an **install source**, not a stored catalog MC owns. The "filesystem is the registry, catalog is derived, catalog == resolvable" invariants are preserved.
+This plan **implements an item the prior skill brainstorms explicitly deferred** ("on-demand fetch/install of a missing skill from a remote") and stays inside the product's stated identity (see [Problem Frame](#problem-frame)). skills.sh is treated purely as an **install source**, not a stored catalog MC owns. The "filesystem is the registry, catalog is derived, catalog == resolvable" invariants are preserved.
 
 ---
 
@@ -26,10 +26,15 @@ This plan **consciously reverses two stated product boundaries** (see [Problem F
 
 **What this enables:** `mc skill search <q>` / `mc skill catalog` to discover, and `mc skill add <id>` to install — the discovered skill becomes immediately resolvable by the existing catalog and usable in a profile's `skills` list.
 
-### The two boundaries this reverses (call them out explicitly)
+### Where this sits relative to the prior brainstorms (not a hard-rule reversal)
 
-1. **"On-demand fetch/install from a remote" was Deferred** (`docs/brainstorms/2026-06-05-profile-skill-discovery-requirements.md`, `docs/brainstorms/2026-06-06-plugin-skill-resolution-requirements.md`, both Scope Boundaries → Deferred for later). This plan implements exactly that deferred item. That is a legitimate evolution, taken deliberately — the same way the plugin-resolution brainstorm explicitly reversed its own AE4.
-2. **"MC reports, never mutates user config / does not distribute skill content."** `mc skill add` *writes* files into `~/.claude/skills/`. **Reconciliation:** MC still does not *host* or *distribute* content (content is fetched from the skill's public GitHub repo, not served by MC) and does not edit `enabledPlugins`/settings. It performs one narrow, explicit, operator-invoked write: placing fetched skill files on disk. The derived catalog and shared existence predicate then treat the result identically to a hand-placed skill — no new "stored catalog" concept enters the system.
+The two earlier skill brainstorms set three relevant markers — read in context, none of them prohibits this work:
+
+1. **"On-demand fetch/install from a remote" — *Deferred for later*** (`docs/brainstorms/2026-06-05-profile-skill-discovery-requirements.md` Scope Boundaries). "Deferred for later" is a roadmap-ordering call, not a prohibition. This plan simply does the deferred item.
+2. **"MC reports, never mutates"** (`docs/brainstorms/2026-06-06-plugin-skill-resolution-requirements.md` Key Decisions) — scoped to *plugin resolution*: "it never edits `enabledPlugins`, installs a plugin, or otherwise changes user configuration." That decision still holds: `mc skill add` does not touch `enabledPlugins` or `settings.json`. It performs one narrow, explicit, operator-invoked write — placing fetched skill files on disk — which the derived catalog then treats identically to a hand-placed skill.
+3. **"An MC-owned skill store / does not host or distribute content"** (*Outside this product's identity*) — the one firm, principled line, and this plan **honors** it: content is fetched from the skill's public GitHub repo, never served or stored by MC. MC is not a registry; it installs *from* one.
+
+So the only genuinely new capability is writing a skill file to `~/.claude/skills/` — a deliberate, scoped extension consistent with the stated identity, not a reversal of a hard rule.
 
 ---
 
@@ -272,14 +277,14 @@ Modified: `cli/index.ts` (new leaves on the existing `skill` group + `SPEC` entr
 
 ### U5. Docs + surface registration
 
-**Goal:** Update the agent-facing CLI reference and record the boundary reversal.
+**Goal:** Update the agent-facing CLI reference and note the new install capability.
 **Requirements:** all KTDs.
 **Dependencies:** U1–U4.
 **Files:** `AGENTS.md` (the `mc` command block), `cli/README.md`.
 **Approach:**
 - Add `mc skill search`, `mc skill catalog`, `mc skill add` to the `AGENTS.md` command reference with the env-token note (`VERCEL_OIDC_TOKEN` via `vercel env pull`), the "installs to `~/.claude/skills/`, no DB row" note, and the audit-gating behavior. Note that discovery is *installable-but-not-present* and is distinct from `mc skill list` (resolvable).
 - Update `cli/README.md` similarly; document the host-env token + GitHub-content model and the path-traversal/audit safety guards.
-- One sentence recording that this deliberately implements the previously-deferred remote-install boundary.
+- One sentence recording that this deliberately implements the previously-deferred remote-install item.
 **Test scenarios:** `Test expectation: none — documentation only.`
 
 ---
@@ -309,7 +314,7 @@ Modified: `cli/index.ts` (new leaves on the existing `skill` group + `SPEC` entr
 - **GitHub subpath resolution is layout-dependent** (the riskiest piece). *Mitigation:* tree-walk by matching `SKILL.md`→slug rather than assuming `skills/<slug>/`; confirm against the open-source `vercel-labs/skills` resolver; keep the skills.sh detail file-tree as a documented fallback.
 - **Supply-chain risk** writing remote content to disk that later becomes agent steering. *Mitigation:* path-traversal guard, frontmatter validation, audit gating with `--force`, explicit operator invocation, no execution by `mc` itself.
 - **GitHub rate limits** on unauthenticated tree/content reads. *Mitigation:* optional `GITHUB_TOKEN` from env; small per-skill footprint.
-- **Reversing a documented boundary** could surprise. *Mitigation:* explicit Problem Frame call-out + a recorded note in docs; the reconciliation keeps every derived-catalog invariant intact.
+- **A new write capability (`mc skill add` writes to `~/.claude`)** could surprise readers expecting MC to be read-only. *Mitigation:* explicit Problem Frame note + docs; the write is narrow, operator-invoked, and keeps every derived-catalog invariant intact.
 
 ---
 
@@ -335,6 +340,6 @@ Modified: `cli/index.ts` (new leaves on the existing `skill` group + `SPEC` entr
 - skills.sh API reference (`https://skills.sh/docs/api`) — endpoints, auth (Vercel OIDC), response shapes, audit endpoint. Live-probed: all endpoints 401 unauthenticated; `vercel-labs/skills` keeps skills at `skills/<slug>/SKILL.md`.
 - Composio catalog four-layer template — `lib/composio-api.ts`, `app/api/projects/[slug]/composio/catalog/route.ts`, `cli/index.ts` (`mc mcp catalog`), `components/McpCatalogBrowser.tsx`.
 - Existing skill model — `lib/skills.ts`, `lib/plugin-skills.ts`, `daemon/runner.ts`, `daemon/render-profile.ts`; `mc skill list` at `cli/index.ts` ~1541.
-- Reversed boundaries — `docs/brainstorms/2026-06-05-profile-skill-discovery-requirements.md`, `docs/brainstorms/2026-06-06-plugin-skill-resolution-requirements.md` (Scope Boundaries → Deferred for later; "MC reports, never mutates").
+- Prior brainstorm markers (deferred item + scoped decisions, not hard rules) — `docs/brainstorms/2026-06-05-profile-skill-discovery-requirements.md` (Scope Boundaries → Deferred for later; "Outside this product's identity"), `docs/brainstorms/2026-06-06-plugin-skill-resolution-requirements.md` ("MC reports, never mutates" — scoped to plugin config).
 - Test seams — `test/skills.test.ts` (`MC_CLAUDE_HOME` fixture), `test/composio-catalog.test.ts`, `test/skill-list-cli.test.ts`.
 - Repo gates — lint is eslint; tests hit the real Neon dev branch; no `CONTRIBUTING.md` (slice-plan format is the convention); scope `git add` and audit the squash diff.

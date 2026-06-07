@@ -173,9 +173,10 @@ land a chosen skill into `~/.claude/skills/` where the derived catalog picks it 
 the unauthenticated `skills.sh/api/search` endpoint (the documented `/api/v1/*` endpoints require a Vercel
 OIDC token, impractical for a local CLI); install content is fetched from the skill's public GitHub repo, so
 neither path needs skills.sh credentials. `mc skill add` is the **one** place `mc` writes into `~/.claude` —
-a deliberate, narrow reversal of the earlier "mc reports, never mutates user config" boundary. mc still never
-hosts or distributes skill content and never edits other user configuration; the registry is just *where you
-install from*. The OIDC-gated leaderboard/curated browse (`mc skill catalog`) is deferred.
+a deliberate, scoped extension (the earlier brainstorms deferred remote install for later; this does it).
+mc still never hosts or distributes skill content and never edits other user configuration (`enabledPlugins`,
+`settings.json`); the registry is just *where you install from*. The OIDC-gated leaderboard/curated browse
+(`mc skill catalog`) is deferred.
 
 **Attribution.** State writes (`task set-status`, etc.) and `run`/`event` commands attribute their
 audit-log entry to `$MC_AGENT` (default `mc`). Set `MC_AGENT=claude-code` (and `MC_RUN_ID`, written
