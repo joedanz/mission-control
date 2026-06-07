@@ -4,7 +4,7 @@
 // ABOUTME: SKILL.md files + settings/install JSON under a tmp MC_CLAUDE_HOME; no DB, no spawn, no real ~/.claude.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -102,6 +102,17 @@ describe('readInstalledPlugins', () => {
     });
     const installed = readInstalledPlugins(installedPluginsPath());
     expect(installed.has('evil')).toBe(false);
+  });
+
+  it('rejects an installPath that is an in-tree symlink escaping the plugins root (symlink defense)', () => {
+    // Lexically under <home>/plugins, but its realpath points outside — must be rejected by the realpath check.
+    const outside = mkdtempSync(join(tmpdir(), 'mc-outside-'));
+    mkdirSync(join(home, 'plugins', 'cache'), { recursive: true });
+    const link = join(home, 'plugins', 'cache', 'sneaky');
+    symlinkSync(outside, link);
+    writeInstalled({ 'evil@mkt': [{ installPath: link }] });
+    expect(readInstalledPlugins(installedPluginsPath()).has('evil')).toBe(false);
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it('tolerates a missing/malformed file', () => {
