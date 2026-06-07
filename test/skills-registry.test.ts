@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 function mockFetch(status: number, body: unknown) {
-  const fn = vi.fn(async () => ({
+  const fn = vi.fn(async (_url: string, _init?: unknown) => ({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
