@@ -113,7 +113,7 @@ the rest of the schema.
 | runtime · model | `runtime` is `claude-code` or `exec`; `model` is the primary model. |
 | fallback_model · daily_budget_micros | Cost-aware routing: the `--fallback-model` (resilience) and the budget-downgrade target, plus a `bigint` micro-dollar cap on this profile's same-day run cost (`NULL` = no cap). |
 | provider · base_url · permission_mode | Optional provider/gateway hints and the Claude permission posture. |
-| skills · allowed_tools · disallowed_tools | `jsonb` string arrays — steered skills and the tool allow/deny lists. |
+| skills · allowed_tools · disallowed_tools | `jsonb` string arrays — declared skills (resolved + enforced at spawn; filesystem or `plugin:skill`) and the tool allow/deny lists. |
 | mcp_servers · env | `jsonb` — the `--mcp-config` inner map and an env map. Secrets are `${ENV}` placeholders only; the daemon resolves them at spawn. |
 | append_system_prompt · exec_template | Persona text, and the command template required when `runtime='exec'` (tokens `${MODEL}`/`${PROMPT}`/`${MCP_CONFIG}`/`${FALLBACK_MODEL}`). |
 | match_rules · priority · is_default · enabled | `jsonb` routing rules (`projectSlugs`/`projectCategories`/`labelPattern`), the tie-break, the single global default, and an on/off flag. |
@@ -190,7 +190,7 @@ database. The agent role **cannot see the auth tables at all** — see [Access](
 | app/CLI text | task status | `todo · in_progress · done` |
 | app/CLI text | run status / source | `running · completed · failed · abandoned` / `hook · cli · cron · manual` |
 | app/CLI text | event level | `debug · info · warn · error` |
-| app/CLI text | event type (`EVENT_TYPES`) | `project.created · project.updated · project.deleted · task.created · task.status_changed · task.claimed · task.deleted · run.started · run.ended · run.abandoned · run.cancel_requested · workflow.abandoned · profile.created · profile.updated · profile.deleted · tool_call · composio.connection_changed · note` |
+| app/CLI text | event type (`EVENT_TYPES`) | `project.created · project.updated · project.deleted · task.created · task.status_changed · task.claimed · task.deleted · run.started · run.ended · run.abandoned · run.cancel_requested · workflow.abandoned · profile.created · profile.updated · profile.deleted · tool_call · composio.connection_changed · skill.unresolved · note` |
 | app/CLI text | profile runtime | `claude-code · exec` |
 | app/CLI text | permission mode | `plan · acceptEdits · bypassPermissions · default` |
 | app/CLI text | `ConnectionStatus` | `initializing · active · error · expired · disconnected` |

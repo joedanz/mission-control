@@ -93,7 +93,7 @@ the concepts; this is the surface. Profiles are global (not per-project).
 | `profile update <slug> [any add flag] [--enabled]` | Patch — only the flags you pass change. Pass `""` to a schedule trigger to clear it. |
 | `profile set-default <slug>` | Make this the single global default (clears any other default). Idempotent. |
 | `profile checked-in <slug> [--status ok\|fail]` | Record a scheduled check-in's outcome — the scheduler calls this. Bare: advance the check-in clock. `ok` resets the failure counter; `fail` increments it and auto-pauses the schedule after three in a row. |
-| `profile resolve [--project --task --label]` | Preview which profile auto-routing would pick — match rules → priority → default. |
+| `profile resolve [--project --task --label]` | Preview which profile auto-routing would pick — match rules → priority → default — **and** how its declared skills resolve: per skill a `source` (user / project / plugin, with marketplace) or a failure `reason`, plus a `skillsResolved` flag. |
 | `profile rm <slug> --yes` | Delete a profile. Runs that used it keep their row (the link just drops). |
 
 <Note>
@@ -103,6 +103,19 @@ and writes rendered MCP config to a `0600` temp file — so a key never reaches 
 `ps`. A missing variable fails the run instead of launching half-credentialed. `mc profile add`
 warns on stderr if a value *looks* like a raw secret.
 </Note>
+
+## Skills
+
+Read-only inspection of the skills agents can resolve. A profile's `skills` are enforced at spawn;
+these commands resolve against the same locations the daemon does, so you can preflight a profile
+before scheduling it. See [Skills](/profiles#skills) for the concepts.
+
+| Command | What it does |
+|---|---|
+| `skill list [--project <slug>]` | Every resolvable skill, source-tagged: user (`~/.claude/skills`), and the enabled+installed plugin skills (`<plugin>:<skill>`, with marketplace). With `--project`, also that project's work-dir skills and project-enabled plugins. |
+
+The catalog and the spawn-time check share one resolver, so anything `skill list` shows resolves at
+spawn — and anything it omits will not.
 
 ## MCP servers
 
