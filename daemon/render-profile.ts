@@ -18,6 +18,18 @@ export class MissingEnvError extends Error {
   }
 }
 
+/** Thrown by the daemon runner when a profile declares one or more skills that don't resolve to a
+ *  `SKILL.md` on disk (user or work-dir). The run is failed loudly rather than spawning an agent whose
+ *  declared capabilities are silently absent. Carries the unresolved names for the event message. */
+export class MissingSkillError extends Error {
+  readonly missing: string[];
+  constructor(missing: string[]) {
+    super(`profile declares skill(s) not found on disk: ${missing.join(', ')}`);
+    this.name = 'MissingSkillError';
+    this.missing = missing;
+  }
+}
+
 type HostEnv = Record<string, string | undefined>;
 
 const PLACEHOLDER = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
