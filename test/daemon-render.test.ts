@@ -12,6 +12,7 @@ import {
   planSpawn,
   chooseModel,
   MissingEnvError,
+  MissingSkillError,
 } from '../daemon/render-profile';
 
 /** A complete AgentProfile with claude-code defaults; override only what a case exercises. */
@@ -357,5 +358,25 @@ describe('mergeMcpServers (pure)', () => {
 
   it('profile (base) wins a key collision', () => {
     expect(mergeMcpServers({ 'composio-linear': a }, { 'composio-linear': b })).toEqual({ 'composio-linear': a });
+  });
+});
+
+describe('MissingSkillError (U3)', () => {
+  it('names each unresolved skill with its reason in the message', () => {
+    const e = new MissingSkillError([
+      { name: 'compound-engineering:ce-work', reason: 'plugin-disabled' },
+      { name: 'ship', reason: 'not-found' },
+    ]);
+    expect(e.message).toContain('compound-engineering:ce-work (plugin-disabled)');
+    expect(e.message).toContain('ship (not-found)');
+    expect(e.name).toBe('MissingSkillError');
+  });
+
+  it('exposes a .missing names-only accessor (back-compat)', () => {
+    const e = new MissingSkillError([
+      { name: 'a:b', reason: 'skill-not-found' },
+      { name: 'c', reason: 'not-found' },
+    ]);
+    expect(e.missing).toEqual(['a:b', 'c']);
   });
 });

@@ -73,48 +73,79 @@ describe('scanSkillDirs', () => {
 });
 
 describe('resolveSkills', () => {
-  it('resolves all declared skills present in the user dir (AE1)', () => {
+  it('resolves all declared filesystem skills present in the user dir', () => {
     plant(userDir, 'ship');
     plant(userDir, 'review');
-    const r = resolveSkills(['ship', 'review'], [{ dir: userDir, source: 'user' }]);
-    expect(r.missing).toEqual([]);
+    const r = resolveSkills(['ship', 'review'], { dirs: [{ dir: userDir, source: 'user' }] });
+    expect(r.unresolved).toEqual([]);
     expect(r.resolved).toEqual([
       { name: 'ship', source: 'user' },
       { name: 'review', source: 'user' },
     ]);
   });
 
-  it('reports a declared skill absent from every dir as missing (AE2)', () => {
+  it('reports a filesystem skill absent from every dir as unresolved with reason not-found', () => {
     plant(userDir, 'ship');
-    const r = resolveSkills(['ship', 'investigate'], [{ dir: userDir, source: 'user' }]);
-    expect(r.missing).toEqual(['investigate']);
+    const r = resolveSkills(['ship', 'investigate'], { dirs: [{ dir: userDir, source: 'user' }] });
+    expect(r.unresolved).toEqual([{ name: 'investigate', reason: 'not-found' }]);
     expect(r.resolved).toEqual([{ name: 'ship', source: 'user' }]);
   });
 
-  it('resolves a work-dir skill with source=project when the user dir lacks it (AE3)', () => {
+  it('resolves a work-dir skill with source=project when the user dir lacks it', () => {
     plant(projDir, 'deploy-helper');
-    const r = resolveSkills(['deploy-helper'], [
-      { dir: userDir, source: 'user' },
-      { dir: projDir, source: 'project' },
-    ]);
-    expect(r.missing).toEqual([]);
+    const r = resolveSkills(['deploy-helper'], {
+      dirs: [
+        { dir: userDir, source: 'user' },
+        { dir: projDir, source: 'project' },
+      ],
+    });
+    expect(r.unresolved).toEqual([]);
     expect(r.resolved).toEqual([{ name: 'deploy-helper', source: 'project' }]);
   });
 
   it('prefers the user source when a name exists in both', () => {
     plant(userDir, 'shared');
     plant(projDir, 'shared');
-    const r = resolveSkills(['shared'], [
-      { dir: userDir, source: 'user' },
-      { dir: projDir, source: 'project' },
-    ]);
+    const r = resolveSkills(['shared'], {
+      dirs: [
+        { dir: userDir, source: 'user' },
+        { dir: projDir, source: 'project' },
+      ],
+    });
     expect(r.resolved).toEqual([{ name: 'shared', source: 'user' }]);
   });
 
-  it('throws ValidationError on a path-traversal skill name', () => {
-    for (const bad of ['../evil', 'a/b', '..', '/etc/passwd']) {
-      expect(() => resolveSkills([bad], [{ dir: userDir, source: 'user' }])).toThrow(ValidationError);
+  it('throws ValidationError on a path-traversal or malformed name (flat or plugin form)', () => {
+    for (const bad of ['../evil', 'a/b', '..', '/etc/passwd', 'a:b:c', ':foo', 'foo:', 'plugin:../x']) {
+      expect(() => resolveSkills([bad], { dirs: [{ dir: userDir, source: 'user' }] })).toThrow(ValidationError);
     }
+  });
+
+  it('routes a plugin reference to the injected resolvePlugin (source=plugin + marketplace)', () => {
+    const resolvePlugin = (plugin: string, skill: string) =>
+      plugin === 'demo' && skill === 'do-thing'
+        ? { resolved: true, marketplace: 'mkt-a' }
+        : { resolved: false, reason: 'skill-not-found' as const };
+    const r = resolveSkills(['demo:do-thing', 'demo:missing'], { dirs: [], resolvePlugin });
+    expect(r.resolved).toEqual([{ name: 'demo:do-thing', source: 'plugin', marketplace: 'mkt-a' }]);
+    expect(r.unresolved).toEqual([{ name: 'demo:missing', reason: 'skill-not-found' }]);
+  });
+
+  it('routes a flat name and a plugin name independently in one mixed call (AE7)', () => {
+    plant(userDir, 'ship');
+    const resolvePlugin = () => ({ resolved: true, marketplace: 'mkt-a' });
+    const r = resolveSkills(['ship', 'compound-engineering:ce-work'], { dirs: [{ dir: userDir, source: 'user' }], resolvePlugin });
+    expect(r.unresolved).toEqual([]);
+    expect(r.resolved).toEqual([
+      { name: 'ship', source: 'user' },
+      { name: 'compound-engineering:ce-work', source: 'plugin', marketplace: 'mkt-a' },
+    ]);
+  });
+
+  it('reports a plugin reference as plugin-not-installed when no resolver is injected', () => {
+    const r = resolveSkills(['demo:do-thing'], { dirs: [] });
+    expect(r.resolved).toEqual([]);
+    expect(r.unresolved).toEqual([{ name: 'demo:do-thing', reason: 'plugin-not-installed' }]);
   });
 });
 

@@ -107,3 +107,100 @@ describe('spawnExecutor — skill enforcement (U3)', () => {
     expect(spawned.child).toBeDefined();
   });
 });
+
+describe('spawnExecutor — plugin skill enforcement (U4)', () => {
+  // MC_CLAUDE_HOME redirects the user settings + install registry to a tmp fixture; MC_DAEMON_EXEC stubs the
+  // spawn so we assert enforcement (throw / no-throw) without launching real claude.
+  let prevExec: string | undefined;
+  let prevHome: string | undefined;
+  let home: string;
+  let repo: string;
+
+  beforeAll(() => {
+    prevExec = process.env.MC_DAEMON_EXEC;
+    process.env.MC_DAEMON_EXEC = 'exit 0';
+  });
+  afterAll(() => {
+    if (prevExec === undefined) delete process.env.MC_DAEMON_EXEC;
+    else process.env.MC_DAEMON_EXEC = prevExec;
+  });
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'mc-runner-home-'));
+    repo = mkdtempSync(join(tmpdir(), 'mc-runner-plugrepo-'));
+    prevHome = process.env.MC_CLAUDE_HOME;
+    process.env.MC_CLAUDE_HOME = home;
+    mkdirSync(join(home, 'plugins'), { recursive: true });
+  });
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.MC_CLAUDE_HOME;
+    else process.env.MC_CLAUDE_HOME = prevHome;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  /** Plant `<home>/plugins/cache/<mkt>/<plugin>/1.0.0/skills/<skill>/SKILL.md`; return the installPath. */
+  function plantPlugin(marketplace: string, plugin: string, skills: string[]): string {
+    const installPath = join(home, 'plugins', 'cache', marketplace, plugin, '1.0.0');
+    for (const skill of skills) {
+      mkdirSync(join(installPath, 'skills', skill), { recursive: true });
+      writeFileSync(join(installPath, 'skills', skill, 'SKILL.md'), `---\nname: ${skill}\ndescription: d\n---\n`);
+    }
+    return installPath;
+  }
+  function writeUserSettings(enabled: Record<string, boolean>): void {
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ enabledPlugins: enabled }));
+  }
+  function writeInstalled(plugins: Record<string, { installPath: string }[]>): void {
+    writeFileSync(join(home, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins }));
+  }
+
+  const prof = (skills: string[]): AgentProfile => ({ skills } as unknown as AgentProfile);
+  const base = (profile: AgentProfile) => ({
+    prompt: 'x',
+    runId: 'r1',
+    repoPath: repo,
+    profile,
+    effectiveModel: null,
+    basePermissionMode: 'plan',
+  });
+
+  it('resolves an enabled + installed plugin skill and does not throw (AE1)', () => {
+    const ip = plantPlugin('mkt-a', 'demo', ['do-thing']);
+    writeUserSettings({ 'demo@mkt-a': true });
+    writeInstalled({ 'demo@mkt-a': [{ installPath: ip }] });
+    const spawned = spawnExecutor(base(prof(['demo:do-thing'])));
+    spawned.child.kill();
+    expect(spawned.child).toBeDefined();
+  });
+
+  it('throws MissingSkillError (plugin-disabled) when installed but not enabled (AE2)', () => {
+    const ip = plantPlugin('mkt-a', 'demo', ['do-thing']);
+    writeUserSettings({ 'demo@mkt-a': false });
+    writeInstalled({ 'demo@mkt-a': [{ installPath: ip }] });
+    expect(() => spawnExecutor(base(prof(['demo:do-thing'])))).toThrow(/plugin-disabled/);
+  });
+
+  it('throws MissingSkillError (plugin-not-installed) when not installed (AE3)', () => {
+    writeUserSettings({});
+    writeInstalled({});
+    expect(() => spawnExecutor(base(prof(['ghost:foo'])))).toThrow(/plugin-not-installed/);
+  });
+
+  it('throws MissingSkillError (skill-not-found) when enabled+installed but no such skill dir (AE4)', () => {
+    const ip = plantPlugin('mkt-a', 'demo', ['other']);
+    writeUserSettings({ 'demo@mkt-a': true });
+    writeInstalled({ 'demo@mkt-a': [{ installPath: ip }] });
+    expect(() => spawnExecutor(base(prof(['demo:do-thing'])))).toThrow(/skill-not-found/);
+  });
+
+  it('resolves a plugin enabled only in the work-dir project settings (AE5 union)', () => {
+    const ip = plantPlugin('mkt-a', 'demo', ['do-thing']);
+    writeUserSettings({}); // not enabled in user settings
+    writeInstalled({ 'demo@mkt-a': [{ installPath: ip }] });
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'demo@mkt-a': true } }));
+    const spawned = spawnExecutor(base(prof(['demo:do-thing'])));
+    spawned.child.kill();
+    expect(spawned.child).toBeDefined();
+  });
+});

@@ -27,6 +27,7 @@ import { statusLabel, isTaskDone, taskState } from '../lib/ui';
 import { withActor } from '../lib/actor-context';
 import { scanForLeakedSecrets, type ProfileInput, type ProfileUpdate, type MatchContext } from '../lib/profiles';
 import { scanSkillDirs, resolveSkills, userSkillsDir, type SkillDir } from '../lib/skills';
+import { scanPluginSkills, loadPluginContext, pluginSkillStatus } from '../lib/plugin-skills';
 import { ensureDbCredentials, ConfigError } from './env';
 import { ComposioApiError } from '../lib/composio-api';
 import type { ProjectWithTasks } from '../lib/queries';
@@ -373,8 +374,8 @@ const SPEC = [
   { name: 'profile set-default', readonly: false, summary: 'Make a profile the single global default (idempotent)', args: ['<slug>'] },
   { name: 'profile checked-in', readonly: false, summary: 'Record a scheduled check-in (advances clock; --status ok|fail tracks failures/auto-pause)', args: ['<slug>'], options: ['--status'] },
   { name: 'profile rm', readonly: false, summary: 'Delete an agent profile; requires --yes', args: ['<slug>'], required: ['--yes'] },
-  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task (+ skill resolution)', options: ['--project', '--task', '--label'] },
-  { name: 'skill list', readonly: true, summary: 'List filesystem skills discoverable to agents (~/.claude/skills + a project work-dir)', options: ['--project'] },
+  { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task (+ filesystem & plugin skill resolution)', options: ['--project', '--task', '--label'] },
+  { name: 'skill list', readonly: true, summary: 'List skills discoverable to agents: ~/.claude/skills, a project work-dir, and enabled plugins', options: ['--project'] },
   { name: 'run start', readonly: false, summary: 'Open an agent run (prints runId)', required: ['--agent'], options: ['--project', '--profile', '--title', '--source', '--model', '--session-id', '--work-dir', '--id'] },
   { name: 'run end', readonly: false, summary: 'Close a run with a terminal status', args: ['<id>', '<status>'], options: ['--tokens-in', '--tokens-out', '--cache-read', '--cache-write', '--cost-micros', '--authoritative', '--agent'] },
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
@@ -1494,14 +1495,29 @@ withFlags(profile.command('resolve'))
       const resolved = await queries.resolveProfile(ctx);
 
       // Preflight skill report: which of the resolved profile's declared skills are discoverable (and from
-      // where), and which are missing — the same resolution the daemon enforces at spawn. Lets an operator
-      // catch a misconfigured profile before a (possibly unattended) run hard-fails.
+      // where) and which are not (with the precise reason) — the same resolution the daemon enforces at spawn.
+      // Covers filesystem (user/work-dir) AND plugin (<plugin>:<skill>) skills. Lets an operator catch a
+      // misconfigured profile before a (possibly unattended) run hard-fails.
       const skillDirs: SkillDir[] = [{ dir: userSkillsDir(), source: 'user' }];
       if (repoPath) skillDirs.push({ dir: join(repoPath, '.claude', 'skills'), source: 'project' });
       const declared = resolved?.skills ?? [];
-      const { resolved: hits } = resolveSkills(declared, skillDirs);
-      const bySource = new Map(hits.map((h) => [h.name, h.source]));
-      const skills = declared.map((name) => ({ name, source: bySource.get(name) ?? null, present: bySource.has(name) }));
+      const pluginCtx = loadPluginContext(repoPath);
+      const res = resolveSkills(declared, {
+        dirs: skillDirs,
+        resolvePlugin: (plugin, skill) => pluginSkillStatus(plugin, skill, pluginCtx),
+      });
+      const hitByName = new Map(res.resolved.map((h) => [h.name, h]));
+      const reasonByName = new Map(res.unresolved.map((u) => [u.name, u.reason]));
+      const skills = declared.map((name) => {
+        const hit = hitByName.get(name);
+        return {
+          name,
+          source: hit?.source ?? null,
+          marketplace: hit?.marketplace ?? null,
+          present: !!hit,
+          reason: reasonByName.get(name) ?? null,
+        };
+      });
       const skillsResolved = skills.every((s) => s.present);
 
       return {
@@ -1512,7 +1528,10 @@ withFlags(profile.command('resolve'))
               ? `${resolved.slug} (${resolved.isDefault && !ctx.projectSlug ? 'default' : 'matched'})`
               : 'no matching profile and no default',
           );
-          for (const s of skills) console.log(`  skill ${s.present ? '✓' : '✗'} ${s.name}${s.source ? ` (${s.source})` : ''}`);
+          for (const s of skills) {
+            const where = s.source ? ` (${s.source}${s.marketplace ? `:${s.marketplace}` : ''})` : s.reason ? ` (${s.reason})` : '';
+            console.log(`  skill ${s.present ? '✓' : '✗'} ${s.name}${where}`);
+          }
         },
       };
     }),
@@ -1522,23 +1541,30 @@ withFlags(profile.command('resolve'))
 const skill = program.command('skill').description('Inspect the filesystem skills available to agents');
 
 withFlags(skill.command('list'))
-  .description('List skills discoverable under ~/.claude/skills (and optionally a project work-dir)')
-  .option('--project <slug>', "also scan that project's <repoPath>/.claude/skills")
+  .description('List skills discoverable to agents: ~/.claude/skills, a project work-dir, and enabled plugins')
+  .option('--project <slug>', "also scan that project's <repoPath>/.claude/skills + project-enabled plugins")
   .action((opts: LeafOpts) =>
     emit('skill list', opts, async () => {
       // Default scan needs no DB; --project resolves a repoPath, which does.
       const dirs: SkillDir[] = [{ dir: userSkillsDir(), source: 'user' }];
+      let repoPath: string | null = null;
       if (opts.project) {
         const { queries } = await loadDb();
         const p = await resolveProject(queries, String(opts.project));
-        if (p.repoPath) dirs.push({ dir: join(p.repoPath, '.claude', 'skills'), source: 'project' });
+        repoPath = p.repoPath ?? null;
+        if (repoPath) dirs.push({ dir: join(repoPath, '.claude', 'skills'), source: 'project' });
       }
-      const items = scanSkillDirs(dirs);
+      // Filesystem (user/work-dir) skills + every enabled+installed plugin skill — the plugin set equals what
+      // a spawn would resolve (shared predicate), so the catalog never diverges from the resolvable set.
+      const items = [...scanSkillDirs(dirs), ...scanPluginSkills(loadPluginContext(repoPath))];
       return {
         data: { items, count: items.length },
         human: () =>
           items.length
-            ? items.forEach((s) => console.log(`${s.source.padEnd(8)} ${s.name.padEnd(24)} ${s.description}`))
+            ? items.forEach((s) => {
+                const mkt = 'marketplace' in s && s.marketplace ? `[${s.marketplace}] ` : '';
+                console.log(`${s.source.padEnd(8)} ${s.name.padEnd(32)} ${mkt}${s.description}`);
+              })
             : console.log('no skills found'),
       };
     }),
