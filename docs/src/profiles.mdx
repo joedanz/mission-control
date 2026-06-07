@@ -116,6 +116,21 @@ mc profile resolve --project myapp # the matched profile's declared skills: reso
 Because the catalog and the spawn-time check share one resolver, anything `mc skill list` shows is
 guaranteed to resolve at spawn — and anything it omits will not.
 
+**Need a skill you don't have yet?** Discover and install one from the
+[skills.sh](https://skills.sh) registry, then declare it on a profile:
+
+```bash
+mc skill search react              # search the registry (each hit flagged installed or not)
+mc skill add owner/repo@some-skill # fetch it from GitHub into ~/.claude/skills/<slug>/
+mc skill list                      # it now resolves like any hand-placed skill
+```
+
+`mc skill search` reads the public skills.sh registry (no credentials); `mc skill add` fetches the
+skill's files from its public GitHub repo and writes them into `~/.claude/skills/` — the one place
+`mc` mutates your Claude config, guarded by name, path-traversal, and frontmatter checks. Once
+installed, the skill flows through the same derived catalog and enforced-at-spawn contract as every
+other skill. See the [CLI reference](/reference/cli#skills) for the full command surface.
+
 ## How the right profile gets picked
 
 Routing is rule-based and runs every time the daemon claims a task.

@@ -134,6 +134,11 @@ mc profile checked-in <slug> [--status ok|fail]   # scheduler records a check-in
 mc profile rm <slug> --yes
 mc profile resolve [--project <slug>] [--task <id>] [--label <text>]   # preview auto-routing: matchRules → priority → default
 
+# Skills — the derived (resolvable) catalog + the skills.sh registry (installable) source
+mc skill list [--project <slug>]             # skills RESOLVABLE to agents: ~/.claude/skills + a project work-dir + enabled plugins (the derived catalog)
+mc skill search <query...> [--limit <n>]     # search the skills.sh registry for INSTALLABLE skills via the PUBLIC, unauthenticated GET skills.sh/api/search (what `npx skills` uses; the /api/v1/* endpoints need a Vercel OIDC token and are intentionally not used). No DB. Results carry installed=true|false (slug ∈ the local derived catalog). SKILLS_API_URL overrides the origin
+mc skill add <target> [--force]              # install a registry skill into ~/.claude/skills/<slug>/ (then the derived catalog + every spawn discovers it). <target> = owner/repo@skill | owner/repo/skill. Content comes from the skill's PUBLIC GitHub repo (subdir resolved from the repo tree → files fetched from raw.githubusercontent → written atomically); needs no skills.sh auth (optional GITHUB_TOKEN only lifts rate limits). Guards: slug name-safety + per-file path-traversal + SKILL.md frontmatter validation, all before any write. CLI-local filesystem action — no DB row, no run. Refuses an already-installed skill unless --force
+
 # Mission Control — runs (agent sessions) + the activity-event log
 mc run start --agent <label> [--project <slug>] [--profile <slug>] [--title <t>] [--source hook|cli|cron|manual] [--model <m>] [--session-id <id>] [--work-dir <dir>] [--id <uuid>]
 mc run end <id> <status> [--tokens-in <n>] [--tokens-out <n>] [--cache-read <n>] [--cache-write <n>] [--cost-micros <n>] [--agent <label>]
@@ -160,6 +165,18 @@ the single `--default` profile is the fallback. `runtime=claude-code` renders ri
 Secrets are **never stored** — `--env` and `--mcp-config` values use `${ENV_VAR}` placeholders resolved
 from the host at spawn (a raw-secret-looking value triggers a soft warning). The daemon consumes this in a
 later slice; today profiles are definable, routable, and linkable to a run via `mc run start --profile`.
+
+**Skills: two surfaces.** `mc skill list` is the **derived, resolvable** catalog — what a spawn can actually
+discover on disk (the shared existence predicate guarantees catalog == resolvable). `mc skill search` /
+`mc skill add` add the **skills.sh registry** as an **install source**: search the public registry, then
+land a chosen skill into `~/.claude/skills/` where the derived catalog picks it up unchanged. Discovery uses
+the unauthenticated `skills.sh/api/search` endpoint (the documented `/api/v1/*` endpoints require a Vercel
+OIDC token, impractical for a local CLI); install content is fetched from the skill's public GitHub repo, so
+neither path needs skills.sh credentials. `mc skill add` is the **one** place `mc` writes into `~/.claude` —
+a deliberate, scoped extension (the earlier brainstorms deferred remote install for later; this does it).
+mc still never hosts or distributes skill content and never edits other user configuration (`enabledPlugins`,
+`settings.json`); the registry is just *where you install from*. The OIDC-gated leaderboard/curated browse
+(`mc skill catalog`) is deferred.
 
 **Attribution.** State writes (`task set-status`, etc.) and `run`/`event` commands attribute their
 audit-log entry to `$MC_AGENT` (default `mc`). Set `MC_AGENT=claude-code` (and `MC_RUN_ID`, written

@@ -30,6 +30,8 @@ import { scanSkillDirs, resolveSkills, userSkillsDir, type SkillDir } from '../l
 import { scanPluginSkills, loadPluginContext, pluginSkillStatus } from '../lib/plugin-skills';
 import { ensureDbCredentials, ConfigError } from './env';
 import { ComposioApiError } from '../lib/composio-api';
+import { GitHubApiError } from '../lib/github-api';
+import { SkillsRegistryError } from '../lib/skills-registry';
 import type { ProjectWithTasks } from '../lib/queries';
 import type { Category, Project, Task, AgentProfile, WorkflowGraph } from '../lib/db/schema';
 import type { ProjectInput, ProjectUpdate } from '../lib/mutations';
@@ -64,11 +66,14 @@ function classify(err: unknown): ErrInfo {
   if (err instanceof ConflictError) {
     return { code: 'CONFLICT', message: err.message, exit: 1 };
   }
-  if (err instanceof GitHubError) {
+  if (err instanceof GitHubError || err instanceof GitHubApiError) {
     return { code: 'GITHUB', message: redact(err.message), exit: 1 };
   }
   if (err instanceof ComposioApiError) {
     return { code: 'COMPOSIO', message: redact(err.message), exit: 1 };
+  }
+  if (err instanceof SkillsRegistryError) {
+    return { code: 'REGISTRY', message: redact(err.message), exit: 1 };
   }
   // Postgres unique violation (e.g. duplicate slug, duplicate integration row).
   const e = err as { code?: string; sourceError?: { code?: string }; message?: string };
@@ -376,6 +381,8 @@ const SPEC = [
   { name: 'profile rm', readonly: false, summary: 'Delete an agent profile; requires --yes', args: ['<slug>'], required: ['--yes'] },
   { name: 'profile resolve', readonly: true, summary: 'Preview which profile auto-routing picks for a project/task (+ filesystem & plugin skill resolution)', options: ['--project', '--task', '--label'] },
   { name: 'skill list', readonly: true, summary: 'List skills discoverable to agents: ~/.claude/skills, a project work-dir, and enabled plugins', options: ['--project'] },
+  { name: 'skill search', readonly: true, summary: 'Search the skills.sh registry for installable skills (unauthenticated /api/search)', args: ['<query...>'], options: ['--limit'] },
+  { name: 'skill add', readonly: false, summary: 'Install a registry skill into ~/.claude/skills (content fetched from GitHub; --force overwrites)', args: ['<target>'], options: ['--force'] },
   { name: 'run start', readonly: false, summary: 'Open an agent run (prints runId)', required: ['--agent'], options: ['--project', '--profile', '--title', '--source', '--model', '--session-id', '--work-dir', '--id'] },
   { name: 'run end', readonly: false, summary: 'Close a run with a terminal status', args: ['<id>', '<status>'], options: ['--tokens-in', '--tokens-out', '--cache-read', '--cache-write', '--cost-micros', '--authoritative', '--agent'] },
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
@@ -1566,6 +1573,49 @@ withFlags(skill.command('list'))
                 console.log(`${s.source.padEnd(8)} ${s.name.padEnd(32)} ${mkt}${s.description}`);
               })
             : console.log('no skills found'),
+      };
+    }),
+  );
+
+withFlags(skill.command('search'))
+  .description('Search the skills.sh registry for installable skills (unauthenticated /api/search)')
+  .argument('<query...>', 'search text (min 2 chars)')
+  .option('--limit <n>', 'max results to return (default 10)')
+  .action((query: string[], opts: LeafOpts) =>
+    emit('skill search', opts, async () => {
+      const { searchSkills } = await import('../lib/skills-registry');
+      const results = await searchSkills({ q: query.join(' '), limit: num(opts.limit) });
+      // Flag skills already on disk by matching the registry slug against the local derived catalog (no DB) —
+      // the analog of the MCP catalog's `connected` flag. `mc skill list` stays the resolvable-only surface.
+      const installed = new Set(scanSkillDirs([{ dir: userSkillsDir(), source: 'user' }]).map((s) => s.name));
+      const items = results.map((r) => ({ ...r, installed: installed.has(r.slug) }));
+      return {
+        data: { items, count: items.length },
+        human: () =>
+          items.length
+            ? items.forEach((s) =>
+                console.log(`${s.installed ? '✓' : ' '} ${s.id.padEnd(48)} ${s.installs.toLocaleString()} installs`),
+              )
+            : console.log('no skills found'),
+      };
+    }),
+  );
+
+withFlags(skill.command('add'))
+  .description('Install a skill from the skills.sh registry into ~/.claude/skills (content fetched from GitHub)')
+  .argument('<target>', 'owner/repo@skill or a registry id (owner/repo/skill)')
+  .option('--force', 'overwrite an already-installed skill of the same name')
+  .action((target: string, opts: LeafOpts) =>
+    emit('skill add', opts, async () => {
+      const { parseInstallTarget, installSkill } = await import('../lib/skills-install');
+      const parsed = parseInstallTarget(target);
+      if (!parsed) {
+        throw new ValidationError('target', `could not parse "${target}". Use owner/repo@skill or a registry id owner/repo/skill`);
+      }
+      const res = await installSkill(parsed, { force: Boolean(opts.force) });
+      return {
+        data: { ...res, installed: true },
+        human: () => console.log(`installed ${res.slug} (${res.fileCount} file${res.fileCount === 1 ? '' : 's'}) → ${res.path}`),
       };
     }),
   );
