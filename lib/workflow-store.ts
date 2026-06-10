@@ -234,6 +234,22 @@ export async function latestCronRunAt(workflowId: string): Promise<Date | null> 
   return rows[0]?.startedAt ?? null;
 }
 
+/** Latest cron-run start per workflow, for a set of ids — ONE grouped query instead of N calls to
+ *  latestCronRunAt (the daemon's cron scan would otherwise issue one per active workflow every tick). */
+export async function latestCronRunAtByWorkflow(workflowIds: string[]): Promise<Map<string, Date>> {
+  if (!workflowIds.length) return new Map();
+  const rows = await db
+    .select({ workflowId: workflowRuns.workflowId, latest: sql<string | null>`max(${workflowRuns.startedAt})` })
+    .from(workflowRuns)
+    .where(and(inArray(workflowRuns.workflowId, workflowIds), eq(workflowRuns.trigger, 'cron')))
+    .groupBy(workflowRuns.workflowId);
+  const m = new Map<string, Date>();
+  // A raw `max()` SQL expression is NOT run through drizzle's timestamp mapper (unlike a selected column), so
+  // neon-http hands back an ISO string — coerce to Date so callers (isDue) get a real Date, not a string.
+  for (const r of rows) if (r.latest != null) m.set(r.workflowId, new Date(r.latest));
+  return m;
+}
+
 // Terminal = the run is over; only then do we stamp endedAt. 'queued' and 'running' are both in-flight.
 const TERMINAL_RUN_STATUSES: WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 

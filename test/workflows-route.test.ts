@@ -13,7 +13,7 @@ vi.mock('@/lib/authz', () => ({
   UnauthorizedError: FakeUnauthorized,
 }));
 
-const queries = { getProjectBySlug: vi.fn() };
+const queries = { getProjectIdBySlug: vi.fn() };
 vi.mock('@/lib/queries', () => queries);
 
 const store = {
@@ -65,7 +65,7 @@ function post(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   requireAllowedUser.mockResolvedValue({ user: { email: 'joe@ticc.net' } });
-  queries.getProjectBySlug.mockResolvedValue({ id: 'p1', slug: 'demo' });
+  queries.getProjectIdBySlug.mockResolvedValue('p1');
 });
 
 describe('GET list', () => {
@@ -270,7 +270,7 @@ describe('gating', () => {
   });
 
   it('404 when the project does not exist', async () => {
-    queries.getProjectBySlug.mockResolvedValue(null);
+    queries.getProjectIdBySlug.mockResolvedValue(null);
     expect((await get('http://localhost/api/projects/missing/workflows')).status).toBe(404);
   });
 });

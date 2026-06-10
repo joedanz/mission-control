@@ -11,7 +11,7 @@
 
 import { join } from 'node:path';
 import { sleep, acquireLock, lockDir, type Log } from './runner';
-import { listQueuedWorkflowRuns, claimWorkflowRun, listWorkflows, latestCronRunAt } from '../lib/workflow-store';
+import { listQueuedWorkflowRuns, claimWorkflowRun, listWorkflows, latestCronRunAtByWorkflow } from '../lib/workflow-store';
 
 // Test-only scoping: restrict this daemon to ONE project's workflows so a --once test tick can't drain a
 // REAL queued run (completing it with stub output) or consume a real due cron fire against the shared dev
@@ -65,26 +65,35 @@ async function scanCronWorkflows(): Promise<void> {
     return;
   }
   const now = new Date();
+  // Resolve each active workflow's trigger schedule first, keeping only the scheduled ones — so the cron-anchor
+  // lookup is ONE grouped query (latestCronRunAtByWorkflow) instead of N (one latestCronRunAt per workflow each
+  // tick). The full graph is loaded by listWorkflows (the trigger schedule lives in the graph jsonb), which is
+  // inherent; the N+1 anchor query is what's removed.
+  const scheduled: { wf: (typeof active)[number]; schedule: NonNullable<ReturnType<typeof triggerSchedule>> }[] = [];
   for (const wf of active) {
-    if (shuttingDown) break;
     let schedule;
     try {
       schedule = triggerSchedule(wf.graph); // null = a manual / un-scheduled trigger
     } catch {
       continue; // a malformed graph that slipped past create-time validation — never crash the scan
     }
-    if (!schedule) continue;
+    if (schedule) scheduled.push({ wf, schedule });
+  }
+  if (!scheduled.length) return;
 
-    // The ONE unguarded await in this otherwise best-effort scan: a transient Neon failure here would reject
-    // scanCronWorkflows → tick → main → process.exit(1), killing the whole daemon (every in-flight walk loses
-    // its walker). Guard it like every sibling call — log + skip this workflow.
-    let anchor;
-    try {
-      anchor = (await latestCronRunAt(wf.id)) ?? wf.updatedAt;
-    } catch (e) {
-      log(`cron scan: anchor read for ${wf.slug} failed: ${e instanceof Error ? e.message : e} — skipping this workflow`);
-      continue;
-    }
+  // Batched anchor read — the ONE await that could reject the otherwise best-effort scan and (via tick → main)
+  // process.exit(1) the daemon. Guard it: on failure, skip the whole scan this tick (every walk keeps running).
+  let anchors: Map<string, Date>;
+  try {
+    anchors = await latestCronRunAtByWorkflow(scheduled.map((s) => s.wf.id));
+  } catch (e) {
+    log(`cron scan: batch anchor read failed: ${e instanceof Error ? e.message : e} — skipping scan`);
+    return;
+  }
+
+  for (const { wf, schedule } of scheduled) {
+    if (shuttingDown) break;
+    const anchor = anchors.get(wf.id) ?? wf.updatedAt; // before its first cron fire, anchor on updatedAt
     const fields = { scheduleCron: schedule.cron ?? null, scheduleIntervalSec: schedule.intervalSec ?? null, scheduleTimezone: schedule.timezone ?? null, lastCheckInAt: anchor };
     if (!isDue(fields, now)) continue;
 

@@ -38,7 +38,17 @@ export function useBoard(
   const merge = useCallback((server: BoardData) => {
     const pending = pendingRef.current;
     if (pending.size === 0) {
-      setData(server);
+      // Preserve per-project object identity when a lane is unchanged, so OverallBoard's per-lane memo actually
+      // hits. The payload is freshly JSON-parsed each poll, so a blind setData(server) hands every lane a new
+      // identity and re-renders + re-sorts the WHOLE board every 4s even when nothing changed.
+      setData((cur) => {
+        const prev = new Map(cur.projects.map((p) => [p.slug, p]));
+        const projects = server.projects.map((p) => {
+          const before = prev.get(p.slug);
+          return before && JSON.stringify(before) === JSON.stringify(p) ? before : p;
+        });
+        return { projects, runs: server.runs };
+      });
       return;
     }
     const now = Date.now();

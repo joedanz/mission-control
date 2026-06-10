@@ -176,6 +176,13 @@
       "when": 1781100000000,
       "tag": "0024_revoke_events_update_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781104146103,
+      "tag": "0025_simple_gravity",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@
 // ABOUTME: row (plan correction #2). Session-gated, {ok,data} envelope — mirrors /api/board + the composio POST.
 
 import { requireAllowedUser, UnauthorizedError } from '@/lib/authz';
-import { getProjectBySlug } from '@/lib/queries';
+import { getProjectIdBySlug } from '@/lib/queries';
 import { listWorkflows, getWorkflowBySlug, getWorkflowById, getWorkflowRun, requeueWorkflowRun, listWorkflowRuns, listStepRuns } from '@/lib/workflow-store';
 import { enqueueWorkflowRun, decideGate, saveWorkflowGraph, createDraftWorkflow } from '@/lib/workflow-enqueue';
 import { toWorkflowListItem, toWorkflowDetail } from '@/lib/workflow-view';
@@ -36,15 +36,15 @@ export async function GET(
   if (denied) return denied;
 
   const { slug } = await params;
-  const project = await getProjectBySlug(slug);
-  if (!project) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+  const projectId = await getProjectIdBySlug(slug);
+  if (!projectId) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
 
   const wfSlug = new URL(request.url).searchParams.get('workflow') ?? undefined;
 
   // Detail: one workflow's graph + the latest run's per-node step overlay.
   if (wfSlug) {
     const wf = await getWorkflowBySlug(wfSlug);
-    if (!wf || wf.projectId !== project.id) {
+    if (!wf || wf.projectId !== projectId) {
       return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
     }
     const runs = await listWorkflowRuns({ workflowId: wf.id, limit: 1 }); // only the latest run is rendered
@@ -53,7 +53,7 @@ export async function GET(
   }
 
   // List: the project's workflows, each with its latest-run summary (parallel — avoids a serial N+1).
-  const workflows = await listWorkflows({ projectId: project.id });
+  const workflows = await listWorkflows({ projectId: projectId });
   const items = await Promise.all(
     workflows.map(async (wf) => {
       const [latest] = await listWorkflowRuns({ workflowId: wf.id, limit: 1 });
@@ -75,8 +75,8 @@ export async function POST(
   if (denied) return denied;
 
   const { slug } = await params;
-  const project = await getProjectBySlug(slug);
-  if (!project) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+  const projectId = await getProjectIdBySlug(slug);
+  if (!projectId) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
 
   let body: PostBody;
   try {
@@ -97,7 +97,7 @@ export async function POST(
       const run = await getWorkflowRun(runId);
       if (!run) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
       const ownerWf = await getWorkflowById(run.workflowId);
-      if (!ownerWf || ownerWf.projectId !== project.id) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+      if (!ownerWf || ownerWf.projectId !== projectId) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
       await decideGate(run, nodeId, decision, reason);
       const requeued = await requeueWorkflowRun(runId);
       if (!requeued) return Response.json({ ok: false, error: 'conflict', message: `run ${runId} is no longer paused` }, { status: 409 });
@@ -110,7 +110,7 @@ export async function POST(
     if (action === 'create') {
       const { name } = body;
       if (!name || !name.trim()) return Response.json({ ok: false, error: 'validation', message: 'a workflow name is required' }, { status: 422 });
-      const created = await createDraftWorkflow(project.id, name);
+      const created = await createDraftWorkflow(projectId, name);
       return Response.json({ ok: true, data: { workflow: { slug: created.slug, name: created.name, status: created.status } } });
     }
 
@@ -124,7 +124,7 @@ export async function POST(
         return Response.json({ ok: false, error: 'validation', message: 'graph must have nodes and edges arrays' }, { status: 422 });
       }
       const wf = await getWorkflowBySlug(wfSlug);
-      if (!wf || wf.projectId !== project.id) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
+      if (!wf || wf.projectId !== projectId) return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
       const saved = await saveWorkflowGraph(wfSlug, { graph });
       return Response.json({ ok: true, data: { workflow: { slug: saved.slug, version: saved.version, status: saved.status } } });
     }
@@ -138,7 +138,7 @@ export async function POST(
     }
     // Foreign-project guard: the workflow must belong to THIS project (mirrors the GET detail check).
     const wf = await getWorkflowBySlug(wfSlug);
-    if (!wf || wf.projectId !== project.id) {
+    if (!wf || wf.projectId !== projectId) {
       return Response.json({ ok: false, error: 'not_found' }, { status: 404 });
     }
     const run = await enqueueWorkflowRun(wfSlug, { trigger: 'manual' });
