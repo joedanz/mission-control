@@ -28,4 +28,11 @@ describe('allowedToolsFor', () => {
     expect(allowedToolsFor('github')).toEqual([]);
     expect(allowedToolsFor('totally-unknown')).toEqual([]);
   });
+  it('does not leak inherited Object.prototype members (prototype-pollution guard)', () => {
+    // A bare `COMPOSIO_CATALOG[slug]` would return Object's constructor/toString (truthy) and crash callers.
+    expect(getCatalogEntry('constructor')).toBeNull();
+    expect(getCatalogEntry('toString')).toBeNull();
+    expect(getCatalogEntry('hasOwnProperty')).toBeNull();
+    expect(allowedToolsFor('constructor')).toEqual([]);
+  });
 });

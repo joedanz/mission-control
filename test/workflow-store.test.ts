@@ -277,4 +277,27 @@ describe('workflow store — step runs', () => {
     const fetched = await getStepRun(run.id, 'g');
     expect((fetched?.output as { decision?: string })?.decision).toBe('approve');
   });
+
+  it('re-running a failed step into a non-failed state clears the stale error', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    const step = await upsertStepRun(run.id, 'a', { status: 'failed', error: 'boom from attempt 1' });
+    expect(step.error).toBe('boom from attempt 1');
+
+    const rerun = await upsertStepRun(run.id, 'a', { status: 'running', startedAt: new Date() });
+    expect(rerun.error).toBeNull(); // stale error cleared, not preserved
+    const done = await setStepRunStatus(rerun.id, 'completed', { output: { result: 'ok' } });
+    expect(done?.error).toBeNull();
+    expect(done?.status).toBe('completed');
+  });
+
+  it('a failed re-run keeps its existing error when none is supplied', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    await upsertStepRun(run.id, 'a', { status: 'failed', error: 'first error' });
+    const again = await upsertStepRun(run.id, 'a', { status: 'failed' });
+    expect(again.error).toBe('first error');
+  });
 });

@@ -279,6 +279,16 @@ type StepPatch = {
   endedAt?: Date;
 };
 
+/** Resolve the `error` column patch. An explicit error always wins. Otherwise, re-running a step into a
+ *  NON-failed state (running/pending/completed/skipped) clears any stale error from a PRIOR failed attempt —
+ *  without this a step that fails then succeeds keeps displaying its old failure message. An absent status
+ *  (a partial patch, e.g. just runId) or a 'failed' status leaves the column untouched. */
+function errorSet(status: WorkflowStepStatus | undefined, error: string | null | undefined): { error?: string | null } {
+  if (error !== undefined) return { error };
+  if (status !== undefined && status !== 'failed') return { error: null };
+  return {};
+}
+
 /** Idempotent on (workflow_run, node): the unique key makes a re-run reuse the same row, so the walker is
  *  resumable. Only provided fields change on conflict (mirrors composio upsertConnection). */
 export async function upsertStepRun(workflowRunId: string, nodeId: string, patch: StepPatch): Promise<WorkflowStepRun> {
@@ -291,7 +301,7 @@ export async function upsertStepRun(workflowRunId: string, nodeId: string, patch
         ...(patch.status !== undefined && { status: patch.status }),
         ...(patch.runId !== undefined && { runId: patch.runId }),
         ...(patch.output !== undefined && { output: patch.output }),
-        ...(patch.error !== undefined && { error: patch.error }),
+        ...errorSet(patch.status, patch.error),
         ...(patch.startedAt !== undefined && { startedAt: patch.startedAt }),
         ...(patch.endedAt !== undefined && { endedAt: patch.endedAt }),
       },
@@ -309,7 +319,7 @@ export async function setStepRunStatus(id: string, status: WorkflowStepStatus, p
       status,
       ...(patch.runId !== undefined && { runId: patch.runId }),
       ...(patch.output !== undefined && { output: patch.output }),
-      ...(patch.error !== undefined && { error: patch.error }),
+      ...errorSet(status, patch.error),
       ...(patch.startedAt !== undefined && { startedAt: patch.startedAt }),
       ...(endedAt !== undefined && { endedAt }),
     })

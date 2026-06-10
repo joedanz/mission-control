@@ -34,7 +34,7 @@ export async function GET(
     return Response.json({
       ok: true,
       data: {
-        toolkits: toolkits.map((t) => ({ ...t, featured: t.slug in COMPOSIO_CATALOG, connected: connected.has(t.slug) })),
+        toolkits: toolkits.map((t) => ({ ...t, featured: Object.hasOwn(COMPOSIO_CATALOG, t.slug), connected: connected.has(t.slug) })),
       },
     });
   } catch (e) {
