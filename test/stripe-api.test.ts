@@ -85,6 +85,7 @@ describe('listActiveSubscriptions', () => {
         intervalCount: 1,
         quantity: 1,
         monthlyMinor: 1200,
+        metered: false,
         created: 1_700_000_000,
       },
     ]);
@@ -169,5 +170,13 @@ describe('computeMrr', () => {
       { monthlyMinor: 500, currency: 'eur' },
     ] as StripeSubscription[];
     expect(computeMrr(subs)).toEqual({ usd: 2000, eur: 500 });
+  });
+
+  it('excludes metered subscriptions (no fixed unit price) instead of counting them as $0', () => {
+    const subs = [
+      { monthlyMinor: 1200, currency: 'usd', metered: false },
+      { monthlyMinor: 0, currency: 'usd', metered: true }, // metered/tiered — amount lives in tiers
+    ] as StripeSubscription[];
+    expect(computeMrr(subs)).toEqual({ usd: 1200 });
   });
 });

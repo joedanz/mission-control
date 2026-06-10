@@ -24,6 +24,9 @@ export type StripeSubscription = {
   intervalCount: number;
   quantity: number;
   monthlyMinor: number;
+  /** true when the price has no fixed unit_amount (metered/tiered/usage-based) — its amount lives in tiers,
+   *  not unit_amount, so monthlyMinor is 0 and it is EXCLUDED from computed MRR rather than silently $0. */
+  metered: boolean;
   created: number;
 };
 
@@ -75,6 +78,7 @@ export function normalizeToMonthly(amountMinor: number, interval: string, interv
 export function computeMrr(subs: StripeSubscription[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const s of subs) {
+    if (s.metered) continue; // no fixed unit price — monthlyMinor is 0; excluded so it doesn't read as a $0 sub
     out[s.currency] = (out[s.currency] ?? 0) + s.monthlyMinor;
   }
   return out;
@@ -100,6 +104,9 @@ type RawSub = {
 function mapSub(raw: RawSub): StripeSubscription {
   const item = raw.items?.data?.[0];
   const price = item?.price;
+  // Stripe sets unit_amount to null for metered/tiered/usage-based prices (the amount lives in `tiers` /
+  // billing_thresholds). Flag it so MRR EXCLUDES it rather than treating a real subscription as $0.
+  const metered = price?.unit_amount == null;
   const unitAmount = price?.unit_amount ?? 0;
   const quantity = item?.quantity ?? 1;
   const currency = price?.currency ?? 'usd';
@@ -119,6 +126,7 @@ function mapSub(raw: RawSub): StripeSubscription {
     intervalCount,
     quantity,
     monthlyMinor: normalizeToMonthly(amountMinor, interval, intervalCount),
+    metered,
     created: raw.created,
   };
 }
