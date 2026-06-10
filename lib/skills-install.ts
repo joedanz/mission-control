@@ -125,6 +125,12 @@ function skillFiles(tree: TreeEntry[], dir: string, nestedSkillDirs: string[]): 
 export async function installSkill(target: InstallTarget, opts?: { force?: boolean }): Promise<InstallResult> {
   const { source, slug } = target;
   assertSafeSkillName(slug); // throws before any network call
+  // assertSafeSkillName deliberately accepts the `plugin:skill` colon form (it's shared with profile skill
+  // declarations), but an INSTALLED filesystem skill becomes a directory ~/.claude/skills/<slug>/ — a colon
+  // there would make the resolver permanently treat it as a plugin reference (and can't be a real dir name).
+  if (slug.includes(':')) {
+    throw new ValidationError('skill', `a filesystem skill name cannot contain ':' (got "${slug}") — the plugin:skill form is for declarations, not installs`);
+  }
 
   const meta = (await ghJson(`${githubApi()}/repos/${source}`)) as { default_branch?: string };
   const branch = meta.default_branch || 'main';

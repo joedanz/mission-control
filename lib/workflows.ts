@@ -171,16 +171,24 @@ export function canConnect(graph: WorkflowGraph, source: string, target: string)
  *  onError, and every {{nodeId.field}} data-passing ref points at an existing ancestor (data flows along
  *  wired edges). */
 export function validateGraph(graph: WorkflowGraph): void {
+  // Element shape guard: the save route / CLI only check Array.isArray(nodes/edges), so a non-object element
+  // (null/string/number) would otherwise crash the property reads below with a TypeError (HTTP 500) instead
+  // of a clean ValidationError.
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+    throw new ValidationError('graph', 'graph.nodes and graph.edges must be arrays');
+  }
   if (!graph.nodes.length) throw new ValidationError('graph', 'a workflow has no nodes');
 
   const seen = new Set<string>();
   for (const n of graph.nodes) {
+    if (!n || typeof n !== 'object') throw new ValidationError('nodes', 'each node must be an object with an id and type');
     if (seen.has(n.id)) throw new ValidationError('nodes', `duplicate node id "${n.id}"`);
     seen.add(n.id);
     assertWorkflowNodeType(n.type); // unknown type → ValidationError
   }
 
   for (const e of graph.edges) {
+    if (!e || typeof e !== 'object') throw new ValidationError('edges', 'each edge must be an object with source and target');
     if (!seen.has(e.source)) throw new ValidationError('edges', `edge "${e.id}" has an unknown source "${e.source}"`);
     if (!seen.has(e.target)) throw new ValidationError('edges', `edge "${e.id}" has an unknown target "${e.target}"`);
     // A trigger is the single entry node — nothing may point INTO it. This is the whole-graph home of the rule

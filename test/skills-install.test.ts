@@ -127,6 +127,14 @@ describe('installSkill', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it('rejects a colon (plugin:skill) slug before any network call — an install is a filesystem dir', async () => {
+    const fn = mockGitHub({ tree: [], files: {} });
+    // assertSafeSkillName accepts the plugin:skill form for declarations, but ~/.claude/skills/<a:b>/ would be
+    // permanently mis-resolved as a plugin reference.
+    await expect(installSkill({ source: 'a/b', slug: 'plugin:skill' })).rejects.toBeInstanceOf(ValidationError);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   it('refuses a SKILL.md with no valid frontmatter and writes nothing', async () => {
     mockGitHub({
       tree: [{ path: 'skills/bad/SKILL.md', type: 'blob' }],

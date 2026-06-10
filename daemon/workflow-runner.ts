@@ -300,6 +300,10 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
     if (awaiting.size > 0 && !halted) finalStatus = 'paused';
     else if (anyFailed) finalStatus = 'failed';
   }
+  // A cancel requested while the walk was quiescing into 'paused' (an awaiting gate) would otherwise never be
+  // observed — a paused run stops ticking, so the per-tick cancel poll never fires again. Re-check right before
+  // settling so a late `mc workflow cancel` wins instead of stranding the flag on a paused run.
+  if (finalStatus === 'paused' && (await getWorkflowRun(run.id))?.cancelRequested) finalStatus = 'cancelled';
   await setWorkflowRunStatus(run.id, finalStatus);
   const steps = await listStepRuns(run.id);
   log(`workflow ${slug} run ${run.id.slice(0, 8)} → ${finalStatus}`);
@@ -557,7 +561,14 @@ async function runGateNode(wfRunId: string, node: WorkflowNode, log: Log): Promi
   // while the walker heartbeats). It stays non-terminal, so its successors never become decidable and the walk
   // quiesces — walkWorkflowRun then settles the run to 'paused'.
   const output = { kind: 'gate', runStatus: 'awaiting', awaiting: true, message: data.message };
-  await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date(), output });
+  // Do NOT clobber the output of an existing step: a concurrent decideGate may have just written a decision onto
+  // it (a re-walk racing an approval), and a blind upsert would erase it — leaving the gate awaiting forever.
+  // Seed the awaiting output only on FIRST creation; on a re-walk just keep the step non-terminal.
+  if (step) {
+    if (step.status !== 'running') await setStepRunStatus(step.id, 'running', {});
+  } else {
+    await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date(), output });
+  }
   log(`node ${node.id}: gate awaiting approval`);
   return { ok: true, awaiting: true, output, onError };
 }

@@ -158,6 +158,13 @@ describe('workflows — validateGraph', () => {
     const bad = G([trigger('t'), agent('a')], [edge('e1', 't', 'a'), edge('e2', 'a', 't')]);
     expect(() => validateGraph(bad)).toThrow(/no inputs/i);
   });
+
+  it('rejects non-object nodes/edges with a ValidationError (not a TypeError → HTTP 500)', () => {
+    expect(() => validateGraph({ nodes: [null], edges: [] } as never)).toThrow(ValidationError);
+    expect(() => validateGraph({ nodes: ['oops'], edges: [] } as never)).toThrow(ValidationError);
+    expect(() => validateGraph({ nodes: [trigger('t'), agent('a')], edges: [42] } as never)).toThrow(ValidationError);
+    expect(() => validateGraph({ nodes: 'nope', edges: [] } as never)).toThrow(/must be arrays/i);
+  });
 });
 
 describe('workflows — ancestors', () => {

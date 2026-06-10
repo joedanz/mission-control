@@ -23,9 +23,11 @@ export const COMPOSIO_CATALOG: Record<string, CatalogEntry> = {
   },
 };
 
-/** Look up a catalog entry; null for an unknown slug. */
+/** Look up a catalog entry; null for an unknown slug. Object.hasOwn (not a bare `[]`/`in`) so an inherited
+ *  Object.prototype member — getCatalogEntry('constructor') — doesn't leak a truthy function and crash callers
+ *  with a TypeError instead of a clean "unknown toolkit". */
 export function getCatalogEntry(slug: string): CatalogEntry | null {
-  return COMPOSIO_CATALOG[slug] ?? null;
+  return Object.hasOwn(COMPOSIO_CATALOG, slug) ? COMPOSIO_CATALOG[slug] : null;
 }
 
 /** Sorted list of supported toolkit slugs. */

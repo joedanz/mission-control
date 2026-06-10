@@ -6,7 +6,7 @@
 // ABOUTME: fields + a data-JSON escape hatch), Backspace to delete, then Save → POST {action:'save'} (validated by
 // ABOUTME: the SAME validateGraph the CLI/runner use). Reuses the read-only nodeTypes so nodes look identical.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls,
   useNodesState, useEdgesState, addEdge, useReactFlow,
@@ -92,6 +92,25 @@ function EditorInner({ projectSlug, workflowSlug, graph, onSaved, onCancel }: Ed
   const graphSnapshot = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
 
   const select = useCallback((id: string | null) => { setSelectedId(id); setDraft(null); }, []);
+
+  // Reconcile branch edges: when a branch node's `cases` change (rename/remove via the JSON inspector), edges
+  // wired to a now-gone case handle become invisible on the canvas (no matching port) but persist in `edges`,
+  // silently breaking routing and failing the save (validateGraph rejects a stale-handle edge). Prune them so
+  // the editable graph stays self-consistent. Returns the same array reference when nothing changed (no loop).
+  useEffect(() => {
+    setEdges((eds) => {
+      let changed = false;
+      const next = eds.filter((e) => {
+        const src = nodes.find((n) => n.id === e.source);
+        if (src?.type !== 'branch') return true;
+        const valid = new Set<string>(['else', ...(((src.data as { cases?: { name: string }[] }).cases ?? []).map((c) => c.name))]);
+        const handle = e.sourceHandle ?? (typeof e.label === 'string' ? e.label : '') ?? '';
+        if (!valid.has(handle)) { changed = true; return false; }
+        return true;
+      });
+      return changed ? next : eds;
+    });
+  }, [nodes, setEdges]);
 
   // Merge a partial patch into a node's data (typed fields), or replace it wholesale (the JSON hatch).
   const patchData = useCallback((id: string, value: Record<string, unknown>, replace: boolean) => {

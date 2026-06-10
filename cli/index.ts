@@ -1190,7 +1190,12 @@ withFlags(workflow.command('cancel'))
       // cancelRequested, so mark it terminal NOW; only a 'running' walk polls the flag at the next node check.
       const directCancel = run.status === 'queued' || run.status === 'paused';
       await requestWorkflowRunCancel(runId); // sets cancelRequested (also covers a daemon-claim race in this window)
-      const result = directCancel ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? run) : run;
+      // Re-fetch: a run that was 'running' at the snapshot may have quiesced to 'paused' (an awaiting gate) in
+      // this window — a paused run stops ticking and would never observe the flag. If it's now in a non-walking
+      // state (queued/paused), mark it terminal NOW rather than relying on a poll that won't happen.
+      const after = directCancel ? run : await getWorkflowRun(runId);
+      const settleNow = directCancel || after?.status === 'queued' || after?.status === 'paused';
+      const result = settleNow ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? after ?? run) : run;
       // Propagate to EVERY in-flight agent node's run so a fan-out's parallel nodes all abort (kill-switch),
       // not just the first one (the walker runs up to maxParallel concurrently). Guard each: a step that ended
       // between the list and the cancel throws ConflictError, which mustn't abort cancelling its siblings.
@@ -1199,7 +1204,7 @@ withFlags(workflow.command('cancel'))
         if (!s.runId) continue;
         try { await setRunCancelRequested(s.runId); } catch { /* already terminal — nothing to cancel */ }
       }
-      return { data: result, human: () => console.log(`workflow run ${runId} ${directCancel ? `cancelled (was ${run.status})` : 'cancel requested'}`) };
+      return { data: result, human: () => console.log(`workflow run ${runId} ${settleNow ? `cancelled (was ${(after ?? run).status})` : 'cancel requested'}`) };
     }),
   );
 
