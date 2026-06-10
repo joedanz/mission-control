@@ -17,6 +17,7 @@ import {
   runs,
   agentProfiles,
   workflowRuns,
+  workflowStepRuns,
   type Project,
   type Task,
   type Run,
@@ -687,19 +688,18 @@ export async function recordProfileCheckIn(slug: string, status?: CheckInStatus)
   if (!current) return null;
 
   const set: Record<string, unknown> = { lastCheckInAt: new Date(), updatedAt: new Date() };
-  let paused = false;
   if (status === 'ok') {
     set.consecutiveFailures = 0;
   } else if (status === 'fail') {
-    const failures = current.consecutiveFailures + 1;
-    set.consecutiveFailures = failures;
-    if (failures >= SCHEDULE_MAX_FAILURES && current.scheduleEnabled) {
-      set.scheduleEnabled = false; // auto-pause a persistently-broken schedule
-      paused = true;
-    }
+    // Increment and auto-pause IN-DB (single statement) — a JS read-modify-write loses increments when two
+    // schedulers report a fail for the same profile concurrently, and could miss the auto-pause threshold.
+    set.consecutiveFailures = sql`${agentProfiles.consecutiveFailures} + 1`;
+    set.scheduleEnabled = sql`case when ${agentProfiles.scheduleEnabled} and ${agentProfiles.consecutiveFailures} + 1 >= ${SCHEDULE_MAX_FAILURES} then false else ${agentProfiles.scheduleEnabled} end`;
   }
 
   const profile = (await db.update(agentProfiles).set(set).where(eq(agentProfiles.id, current.id)).returning())[0] ?? null;
+  // Emit only on the enabled→disabled transition this call caused (was enabled before, now disabled).
+  const paused = status === 'fail' && current.scheduleEnabled && profile != null && !profile.scheduleEnabled;
   if (profile && paused) {
     await recordEvent({
       type: 'profile.updated',
@@ -712,10 +712,16 @@ export async function recordProfileCheckIn(slug: string, status?: CheckInStatus)
   return profile;
 }
 
-/** Make `id` the single global default (clears every other default first). Two statements because
- *  neon-http has no transactions; the partial unique index tolerates the transient 0-default window and
- *  rejects a concurrent racer with 23505 → ConflictError. Returns the new default, or null if not found. */
+/** Make `id` the single global default. neon-http has no transactions, and the partial unique index on
+ *  is_default is non-deferrable (so a single "swap" UPDATE trips it mid-statement). So: GUARD on existence
+ *  FIRST, then clear every other default, then set the target. The guard is the fix — a non-existent (e.g.
+ *  stale-UI) id now returns null WITHOUT clearing the current default into a permanent zero-default state
+ *  (the prior clear-then-set order's bug). A concurrent racer setting a different default is still rejected
+ *  with 23505 → ConflictError. Returns the new default, or null if `id` is unknown. */
 export async function setDefaultProfile(id: string): Promise<AgentProfile | null> {
+  const exists = (await db.select({ id: agentProfiles.id }).from(agentProfiles).where(eq(agentProfiles.id, id)).limit(1))[0];
+  if (!exists) return null;
+
   await db
     .update(agentProfiles)
     .set({ isDefault: false, updatedAt: new Date() })
@@ -1067,6 +1073,24 @@ export async function reapStaleWorkflowRuns(): Promise<WorkflowRun[]> {
       ),
     )
     .returning();
+  if (rows.length) {
+    // The dead walker's step rows would otherwise stay non-terminal forever (the in-flight step 'running',
+    // undecided successors 'pending'), so `mc workflow status`/the canvas show a perpetually-running step on
+    // a failed run. Settle them: the in-flight step → failed, never-started successors → skipped.
+    await db
+      .update(workflowStepRuns)
+      .set({
+        status: sql`case when ${workflowStepRuns.status} = 'running' then 'failed' else 'skipped' end`,
+        endedAt: sql`now()`,
+        error: sql`case when ${workflowStepRuns.status} = 'running' then coalesce(${workflowStepRuns.error}, 'walker abandoned — workflow run reaped (no heartbeat)') else ${workflowStepRuns.error} end`,
+      })
+      .where(
+        and(
+          inArray(workflowStepRuns.workflowRunId, rows.map((r) => r.id)),
+          inArray(workflowStepRuns.status, ['pending', 'running']),
+        ),
+      );
+  }
   for (const r of rows) {
     await recordEvent({
       type: 'workflow.abandoned',

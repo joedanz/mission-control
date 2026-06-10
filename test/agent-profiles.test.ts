@@ -161,6 +161,18 @@ describe('setDefaultProfile', () => {
     const all = (await getProfiles()).filter((p) => created.includes(p.id));
     expect(all.filter((p) => p.isDefault).map((p) => p.id)).toEqual([b.id]);
   });
+
+  it('a non-existent target is a no-op that preserves the current default (no permanent zero-default)', async () => {
+    const a = await mkProfile(tag());
+    await setDefaultProfile(a.id);
+
+    const missing = await setDefaultProfile('00000000-0000-0000-0000-000000000000');
+    expect(missing).toBeNull();
+
+    // The old clear-then-set order would have wiped a's default before the no-op set → zero defaults.
+    const all = (await getProfiles()).filter((p) => created.includes(p.id));
+    expect(all.filter((p) => p.isDefault).map((p) => p.id)).toEqual([a.id]);
+  });
 });
 
 describe('resolveProfile (auto-routing)', () => {
@@ -310,5 +322,23 @@ describe('recordProfileCheckIn', () => {
 
   it('returns null for an unknown slug', async () => {
     expect(await recordProfileCheckIn(`nope-${tag()}`)).toBeNull();
+  });
+
+  it('counts every concurrent fail report (atomic increment — no lost updates)', async () => {
+    const proj = await mkProject();
+    const p = await mkProfile(tag(), {
+      scheduleEnabled: true,
+      scheduleProjectId: proj.id,
+      scheduleIntervalSec: SCHEDULE_MIN_INTERVAL_SEC,
+      checkInPrompt: 'x',
+    });
+
+    const N = 5;
+    await Promise.all(Array.from({ length: N }, () => recordProfileCheckIn(p.slug, 'fail')));
+
+    // A JS read-modify-write would lose increments under concurrency; the in-DB `+1` cannot.
+    const after = (await getProfileBySlug(p.slug))!;
+    expect(after.consecutiveFailures).toBe(N);
+    expect(after.scheduleEnabled).toBe(false); // crossed the cap atomically too
   });
 });
