@@ -38,9 +38,16 @@ describe('GET /api/cron/reap — CRON_SECRET bearer gate', () => {
     projectId = p.id;
     const r = await recordRunStart({ agentLabel: 'vitest-reap', projectId });
     staleRunId = r.id;
-    // Age the heartbeat past RUN_STALE_THRESHOLD_SEC (120s) so the reaper WOULD abandon it — if it runs.
-    await db.update(runs).set({ lastHeartbeatAt: sql`now() - interval '1 hour'` }).where(eq(runs.id, r.id));
+    // Leave the heartbeat FRESH here: a stale run is a target for the documented always-on `npm run reap`
+    // service (every 60s), which would race this test and abandon it mid-assertion. The unauthorized cases
+    // only need a 'running' run no reaper touches (proving the gate returns 401 before any reaping); the
+    // authorized case ages the heartbeat itself, just before its request, to verify the reaper DOES run.
   });
+
+  /** Age the run's heartbeat past RUN_STALE_THRESHOLD_SEC so a reaper would abandon it. */
+  async function makeStale(id: string) {
+    await db.update(runs).set({ lastHeartbeatAt: sql`now() - interval '1 hour'` }).where(eq(runs.id, id));
+  }
 
   afterEach(async () => {
     if (prevSecret === undefined) delete process.env.CRON_SECRET;
@@ -70,7 +77,8 @@ describe('GET /api/cron/reap — CRON_SECRET bearer gate', () => {
     expect(await statusOf(staleRunId)).toBe('running');
   });
 
-  it('correct bearer → 200 and the stale run flips to abandoned', async () => {
+  it('correct bearer → 200 and a stale run flips to abandoned', async () => {
+    await makeStale(staleRunId); // only now — so the unauthorized cases above never raced the real reaper
     const res = await GET(req(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
     const body = await res.json();

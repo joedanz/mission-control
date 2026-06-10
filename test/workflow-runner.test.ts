@@ -393,6 +393,65 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('skipped');
   }, 60000);
 
+  it('a branch that FAILS under onError:continue routes to no edges (both paths skip) while an independent node drains', async () => {
+    const slug = `vt-wf-br-failcont-${Date.now()}`;
+    // t → a → b(branch, condition refs a MISSING field, onError:continue) → {hi(high), lo(else)}; t → ind (independent)
+    const graph: WorkflowGraph = {
+      nodes: [
+        { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+        { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'score it' } },
+        { id: 'b', type: 'branch', position: { x: 320, y: 0 }, data: { cases: [{ name: 'high', when: { left: '{{a.output.nope}}', op: 'gte', right: 80 } }], onError: 'continue' } },
+        { id: 'hi', type: 'agent', position: { x: 480, y: -60 }, data: { prompt: 'high path' } },
+        { id: 'lo', type: 'agent', position: { x: 480, y: 60 }, data: { prompt: 'low path' } },
+        { id: 'ind', type: 'agent', position: { x: 160, y: 120 }, data: { prompt: 'independent' } },
+      ],
+      edges: [
+        { id: 'e1', source: 't', target: 'a' },
+        { id: 'e2', source: 'a', target: 'b' },
+        { id: 'e3', source: 'b', target: 'hi', sourceHandle: 'high' },
+        { id: 'e4', source: 'b', target: 'lo', sourceHandle: 'else' },
+        { id: 'e5', source: 't', target: 'ind' },
+      ],
+    };
+    await createWorkflow({ projectId, slug, name: slug, graph });
+
+    const res = runWorkflowCli(slug, scoreStub(88));
+    expect(res.data?.status).toBe('failed'); // a failed node ends the run failed, even under onError:continue
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect(steps.find((s) => s.nodeId === 'b')!.status).toBe('failed'); // unresolved condition ref
+    expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('skipped'); // chosen undefined → no edge active
+    expect(steps.find((s) => s.nodeId === 'lo')!.status).toBe('skipped');
+    expect(steps.find((s) => s.nodeId === 'ind')!.status).toBe('completed'); // independent path still drained
+  }, 60000);
+
+  it('routes a branch via the edge label fallback when sourceHandle is absent', async () => {
+    const slug = `vt-wf-br-label-${Date.now()}`;
+    // The branch routes by edge.sourceHandle ?? edge.label — these edges carry only `label`.
+    const graph: WorkflowGraph = {
+      nodes: [
+        { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+        { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'score it' } },
+        { id: 'b', type: 'branch', position: { x: 320, y: 0 }, data: { cases: [{ name: 'hot', when: { left: '{{a.output.score}}', op: 'gte', right: 80 } }] } },
+        { id: 'hi', type: 'agent', position: { x: 480, y: -60 }, data: { prompt: 'hot path' } },
+        { id: 'lo', type: 'agent', position: { x: 480, y: 60 }, data: { prompt: 'else path' } },
+      ],
+      edges: [
+        { id: 'e1', source: 't', target: 'a' },
+        { id: 'e2', source: 'a', target: 'b' },
+        { id: 'e3', source: 'b', target: 'hi', label: 'hot' }, // no sourceHandle — label is the fallback
+        { id: 'e4', source: 'b', target: 'lo', label: 'else' },
+      ],
+    };
+    await createWorkflow({ projectId, slug, name: slug, graph });
+
+    const res = runWorkflowCli(slug, scoreStub(88)); // 88 >= 80 → 'hot'
+    expect(res.data?.status).toBe('completed');
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    expect((steps.find((s) => s.nodeId === 'b')!.output as { chosen?: string }).chosen).toBe('hot');
+    expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('completed'); // matched via label fallback
+    expect(steps.find((s) => s.nodeId === 'lo')!.status).toBe('skipped');
+  }, 60000);
+
   // M35: OR-join reconvergence + multi-hop skip propagation — the edge-routing layer that lives only in the
   // walker (decidableNodes has a unit test, but run-vs-skip routing across an extra hop did not). Graph:
   //   t → a → b(branch high>=80); b --high--> hi → join ; b --else--> lo → lo2 ; lo → join

@@ -87,24 +87,28 @@ describe('spawnExecutor — skill enforcement (U3)', () => {
     expect(() => spawnExecutor(base(prof(['mc-test-absent-skill-zzz'])))).toThrow(MissingSkillError);
   });
 
-  it('resolves a work-dir skill and does not throw', () => {
+  // A live child PID + the full {cleanup, output} contract — `expect(child).toBeDefined()` alone passed even on
+  // a broken spawn (the stub object is always truthy); asserting a real pid proves a process actually launched.
+  function assertReallySpawned(spawned: { child: { pid?: number; kill: () => void }; cleanup: unknown; output: unknown }) {
+    expect(spawned.child.pid).toBeGreaterThan(0);
+    expect(typeof spawned.cleanup).toBe('function');
+    expect(typeof spawned.output).toBe('function');
+    expect(typeof (spawned.output as () => string)()).toBe('string');
+    spawned.child.kill();
+  }
+
+  it('resolves a work-dir skill and spawns a real child', () => {
     mkdirSync(join(repo, '.claude', 'skills', 'deploy-helper'), { recursive: true });
     writeFileSync(join(repo, '.claude', 'skills', 'deploy-helper', 'SKILL.md'), '---\nname: deploy-helper\ndescription: d\n---\n');
-    const spawned = spawnExecutor(base(prof(['deploy-helper'])));
-    spawned.child.kill();
-    expect(spawned.child).toBeDefined();
+    assertReallySpawned(spawnExecutor(base(prof(['deploy-helper']))));
   });
 
-  it('does no resolution for an empty skills array (no throw)', () => {
-    const spawned = spawnExecutor(base(prof([])));
-    spawned.child.kill();
-    expect(spawned.child).toBeDefined();
+  it('does no resolution for an empty skills array (spawns a real child)', () => {
+    assertReallySpawned(spawnExecutor(base(prof([]))));
   });
 
-  it('does no resolution for a null profile (no throw)', () => {
-    const spawned = spawnExecutor(base(null));
-    spawned.child.kill();
-    expect(spawned.child).toBeDefined();
+  it('does no resolution for a null profile (spawns a real child)', () => {
+    assertReallySpawned(spawnExecutor(base(null)));
   });
 });
 
