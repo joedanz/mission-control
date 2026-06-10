@@ -66,9 +66,16 @@ async function ghJson(url: string): Promise<unknown> {
   return res.json();
 }
 
+/** Encode each path segment but keep the `/` separators — a file path / branch / `owner/repo` with a '#',
+ *  '?', '%' or space would otherwise truncate or mis-route the raw.githubusercontent URL (e.g. a '#' is read
+ *  as a URL fragment) and fetch the wrong resource → a spurious 404. */
+function encPath(p: string): string {
+  return p.split('/').map(encodeURIComponent).join('/');
+}
+
 /** Fetch a repo file as raw bytes (not decoded text) so binary assets in a skill survive the write intact. */
 async function ghRawBytes(source: string, branch: string, path: string): Promise<Buffer> {
-  const res = await fetch(`${githubRaw()}/${source}/${branch}/${path}`, { headers: ghHeaders() });
+  const res = await fetch(`${githubRaw()}/${encPath(source)}/${encPath(branch)}/${encPath(path)}`, { headers: ghHeaders() });
   if (!res.ok) throw new GitHubApiError(`GitHub raw ${res.status} for ${path}`, res.status);
   return Buffer.from(await res.arrayBuffer());
 }

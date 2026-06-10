@@ -181,7 +181,9 @@ export async function listCommits(
 }
 
 export async function getCommitDetail(repo: GitHubRepo, sha: string): Promise<GitHubCommitDetail> {
-  const c = await ghFetch(`/repos/${repo.owner}/${repo.repo}/commits/${sha}`) as {
+  // Encode the sha: Next.js URL-decodes dynamic route params, so an unencoded `..%2F..` segment would
+  // otherwise traverse the GITHUB_TOKEN-authed api.github.com path out of /commits/ into another endpoint.
+  const c = await ghFetch(`/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/commits/${encodeURIComponent(sha)}`) as {
     sha: string;
     commit: { message: string; author: { name: string; date: string } | null };
     html_url: string;
