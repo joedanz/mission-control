@@ -105,6 +105,15 @@ describe('POST /api/workflows/[slug]/webhook (slice 8 event trigger)', () => {
     expect((await listWorkflowRuns({ workflowId: wfB.id })).length).toBe(0);
   });
 
+  it('matches the event type via the x-event-type fallback header (not just x-github-event)', async () => {
+    const wf = await activeEventWorkflow(['deploy']);
+    const r = await hook(wf.slug, { ref: 'main' }, { headers: { 'x-event-type': 'deploy' } });
+
+    expect(r.status).toBe(200);
+    expect(r.json.data?.fired).toBe(true);
+    expect((await listWorkflowRuns({ workflowId: wf.id })).length).toBe(1);
+  });
+
   it('a non-matching event type is ignored (200 fired:false) with no run', async () => {
     const wf = await activeEventWorkflow(['issues']);
     const r = await hook(wf.slug, { ref: 'main' }, { headers: { 'x-github-event': 'push' } });

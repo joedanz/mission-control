@@ -13,7 +13,9 @@ import { db } from '../lib/db/index';
 import { projects, runs, events, workflowRuns, type WorkflowGraph } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
 import { reapStaleWorkflowRuns } from '../lib/mutations';
-import { createWorkflow, getWorkflowRun, listStepRuns } from '../lib/workflow-store';
+import { createWorkflow, getWorkflowRun, listStepRuns, createWorkflowRun, upsertStepRun } from '../lib/workflow-store';
+import { decideGate } from '../lib/workflow-enqueue';
+import { ConflictError, NotFoundError, ValidationError } from '../lib/validation';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 
@@ -262,4 +264,61 @@ describe('workflow gate — pause → approve / reject', () => {
     },
     60000,
   );
+});
+
+// decideGate's guards were only exercised through the route/CLI happy paths. These hit the real guards
+// directly against the DB — NO daemon spawn (fast), so they don't drain the shared workflow queue.
+describe('decideGate — guards (DB-only)', () => {
+  let projectId: string;
+  beforeEach(async () => {
+    const p = await createProject({
+      name: `vitest-dg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      category: 'internal',
+      status: 'prelaunch',
+    });
+    projectId = p.id;
+  });
+  afterEach(async () => {
+    await db.delete(projects).where(eq(projects.id, projectId)); // cascades workflows → runs → steps
+  });
+
+  /** A paused run whose gate step 'g' is awaiting (status 'running') — the state decideGate expects. */
+  async function pausedRunWithAwaitingGate() {
+    const slug = `vt-dg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const wf = await createWorkflow({ projectId, slug, name: slug, graph: gateGraph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'paused' });
+    await upsertStepRun(run.id, 'g', { status: 'running', startedAt: new Date() });
+    return run;
+  }
+
+  it('rejects a run that is not paused (ConflictError)', async () => {
+    const run = await pausedRunWithAwaitingGate();
+    await expect(decideGate({ ...run, status: 'running' }, 'g', 'approve')).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('rejects an unknown node id (NotFoundError)', async () => {
+    const run = await pausedRunWithAwaitingGate();
+    await expect(decideGate(run, 'no-such-node', 'approve')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rejects a node that is not a gate (ValidationError)', async () => {
+    const run = await pausedRunWithAwaitingGate();
+    await expect(decideGate(run, 'a', 'approve')).rejects.toBeInstanceOf(ValidationError); // 'a' is an agent
+  });
+
+  it('rejects a gate whose step is not awaiting (ConflictError)', async () => {
+    const slug = `vt-dg-nostep-${Date.now()}`;
+    const wf = await createWorkflow({ projectId, slug, name: slug, graph: gateGraph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'paused' });
+    // No gate step seeded → "not awaiting approval".
+    await expect(decideGate(run, 'g', 'approve')).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('records the decision on the gate step output on the happy path', async () => {
+    const run = await pausedRunWithAwaitingGate();
+    await decideGate(run, 'g', 'approve', 'ship it');
+    const step = (await listStepRuns(run.id)).find((s) => s.nodeId === 'g');
+    expect((step?.output as { decision?: string; reason?: string })?.decision).toBe('approve');
+    expect((step?.output as { reason?: string })?.reason).toBe('ship it');
+  });
 });
