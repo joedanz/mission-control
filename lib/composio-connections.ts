@@ -151,9 +151,17 @@ export async function refreshConnections(projectSlug: string): Promise<Connectio
     try {
       to = mapStatus(await getConnectionStatus(conn.connectedAccountId));
     } catch (e) {
-      console.warn(`composio refresh: poll failed for ${conn.toolkitSlug} (${conn.connectedAccountId}): ${e instanceof Error ? e.message : e}`);
-      results.push({ toolkitSlug: conn.toolkitSlug, from, to: from, changed: false });
-      continue;
+      // A 404 is DEFINITIVE — the connected account was revoked/deleted at Composio (disconnect() treats it
+      // the same). Demote to 'disconnected' (falling through to the shared persist + event below) so the row
+      // stops being fed into spawned agents, instead of staying 'active' forever. Only transport/5xx blips
+      // skip — a transient Composio outage must not clobber a known-good status. (M19)
+      if (e instanceof ComposioApiError && e.status === 404) {
+        to = 'disconnected';
+      } else {
+        console.warn(`composio refresh: poll failed for ${conn.toolkitSlug} (${conn.connectedAccountId}): ${e instanceof Error ? e.message : e}`);
+        results.push({ toolkitSlug: conn.toolkitSlug, from, to: from, changed: false });
+        continue;
+      }
     }
     if (to !== from) {
       await setConnectionStatus(conn.id, to);
