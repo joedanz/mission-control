@@ -394,6 +394,13 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** Directory for daemon lockfiles. Honors MC_LOCK_DIR so a test-spawned daemon can take a throwaway lock in a
+ *  mkdtemp dir instead of contending with a long-running production daemon on the shared per-user $TMPDIR
+ *  lock — the collision that made `npm test` fail whenever the always-on scheduler service was running (M22). */
+export function lockDir(): string {
+  return process.env.MC_LOCK_DIR || tmpdir();
+}
+
 /** Single-instance lock at `lockPath`. A stale lock (dead holder pid) is taken over; a live holder makes us
  *  refuse to start (exit 1) with `descr` in the message. Returns a release fn. Used per-repo by auto-claim and
  *  globally by the scheduler. */

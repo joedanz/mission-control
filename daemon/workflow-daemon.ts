@@ -9,10 +9,15 @@
 // Stop:  SIGINT/SIGTERM (stops claiming, lets in-flight walks finish, then exits).
 // Single instance globally (tmpdir lockfile). Crash recovery of a dead walk is the existing reaper.
 
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sleep, acquireLock, type Log } from './runner';
+import { sleep, acquireLock, lockDir, type Log } from './runner';
 import { listQueuedWorkflowRuns, claimWorkflowRun, listWorkflows, latestCronRunAt } from '../lib/workflow-store';
+
+// Test-only scoping: restrict this daemon to ONE project's workflows so a --once test tick can't drain a
+// REAL queued run (completing it with stub output) or consume a real due cron fire against the shared dev
+// DB (M23). Unset in production (processes all projects). The test ALSO blanks COMPOSIO_API_KEY in the
+// spawned env so even a stray drained run can't take a live external action.
+const ONLY_PROJECT = process.env.MC_WORKFLOW_DAEMON_ONLY_PROJECT || undefined;
 import { walkWorkflowRun } from './workflow-runner';
 import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
 import { triggerSchedule } from '../lib/workflows';
@@ -54,7 +59,7 @@ const inFlight = new Map<string, Promise<void>>();
 async function scanCronWorkflows(): Promise<void> {
   let active;
   try {
-    active = await listWorkflows({ status: 'active' });
+    active = await listWorkflows({ status: 'active', projectId: ONLY_PROJECT });
   } catch (e) {
     log(`cron scan: list active workflows failed: ${e instanceof Error ? e.message : e} — skipping scan`);
     return;
@@ -99,7 +104,7 @@ async function tick(a: Args): Promise<void> {
   await scanCronWorkflows(); // enqueue this tick's due cron runs; the drain loop below claims + walks them
   let queued;
   try {
-    queued = await listQueuedWorkflowRuns();
+    queued = await listQueuedWorkflowRuns(20, ONLY_PROJECT);
   } catch (e) {
     log(`list queued failed: ${e instanceof Error ? e.message : e} — skipping this tick`);
     return;
@@ -144,7 +149,7 @@ async function main() {
     });
   }
 
-  const releaseLock = acquireLock(join(tmpdir(), 'mc-workflow-daemon.lock'), 'the workflow daemon'); // one instance globally
+  const releaseLock = acquireLock(join(lockDir(), 'mc-workflow-daemon.lock'), 'the workflow daemon'); // one instance globally (MC_LOCK_DIR isolates tests)
   process.on('exit', releaseLock);
 
   log(`started — mode=${a.once ? 'once' : `poll ${a.pollSec}s`} timeout=${a.timeoutSec}s`);

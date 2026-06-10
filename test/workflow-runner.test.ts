@@ -393,6 +393,48 @@ describe('workflow runner — mc workflow run (stub executor)', () => {
     expect(steps.find((s) => s.nodeId === 'hi')!.status).toBe('skipped');
   }, 60000);
 
+  // M35: OR-join reconvergence + multi-hop skip propagation — the edge-routing layer that lives only in the
+  // walker (decidableNodes has a unit test, but run-vs-skip routing across an extra hop did not). Graph:
+  //   t → a → b(branch high>=80); b --high--> hi → join ; b --else--> lo → lo2 ; lo → join
+  // With score 88 → 'high': hi runs; lo is skipped (else edge inactive); lo2 is skipped TOO (solely behind lo —
+  // multi-hop skip); join still runs because hi's edge is active (an OR-join, NOT skipped despite lo's dead edge).
+  const orJoinGraph = (): WorkflowGraph => ({
+    nodes: [
+      { id: 't', type: 'trigger', position: { x: 0, y: 0 }, data: { trigger: 'manual' } },
+      { id: 'a', type: 'agent', position: { x: 160, y: 0 }, data: { prompt: 'score it' } },
+      { id: 'b', type: 'branch', position: { x: 320, y: 0 }, data: { cases: [{ name: 'high', when: { left: '{{a.output.score}}', op: 'gte', right: 80 } }] } },
+      { id: 'hi', type: 'agent', position: { x: 480, y: -60 }, data: { prompt: 'hi path' } },
+      { id: 'lo', type: 'agent', position: { x: 480, y: 60 }, data: { prompt: 'lo path' } },
+      { id: 'lo2', type: 'agent', position: { x: 640, y: 60 }, data: { prompt: 'behind lo' } },
+      { id: 'join', type: 'agent', position: { x: 800, y: 0 }, data: { prompt: 'join' } },
+    ],
+    edges: [
+      { id: 'e1', source: 't', target: 'a' },
+      { id: 'e2', source: 'a', target: 'b' },
+      { id: 'e3', source: 'b', target: 'hi', sourceHandle: 'high' },
+      { id: 'e4', source: 'b', target: 'lo', sourceHandle: 'else' },
+      { id: 'e5', source: 'hi', target: 'join' },
+      { id: 'e6', source: 'lo', target: 'join' },
+      { id: 'e7', source: 'lo', target: 'lo2' },
+    ],
+  });
+
+  it('OR-join runs on one active incoming edge while the other branch (and the node behind it) skip', async () => {
+    const slug = `vt-wf-orjoin-${Date.now()}`;
+    await createWorkflow({ projectId, slug, name: slug, graph: orJoinGraph() });
+
+    const res = runWorkflowCli(slug, scoreStub(88)); // 'high' → hi path taken, lo path skipped
+    expect(res.ok).toBe(true);
+    expect(res.data?.status).toBe('completed');
+
+    const steps = await listStepRuns(res.data!.workflowRunId);
+    const byId = (id: string) => steps.find((s) => s.nodeId === id)!;
+    expect(byId('hi').status).toBe('completed'); // taken path
+    expect(byId('lo').status).toBe('skipped'); // not-taken branch
+    expect(byId('lo2').status).toBe('skipped'); // multi-hop: solely behind lo, skip propagates
+    expect(byId('join').status).toBe('completed'); // OR-join: runs on hi's active edge despite lo's dead edge
+  }, 60000);
+
   it('hard-fails a branch whose condition ref is missing (halt stops the run, no path runs)', async () => {
     const slug = `vt-wf-br-miss-${Date.now()}`;
     await createWorkflow({
