@@ -13,7 +13,7 @@ import { projects, runs, events, workflowRuns, type WorkflowGraph } from '../lib
 import { createProject } from '../lib/mutations';
 import { reapStaleWorkflowRuns } from '../lib/mutations';
 import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
-import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, listStepRuns, setWorkflowStatus } from '../lib/workflow-store';
+import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, listStepRuns, setWorkflowStatus, upsertStepRun } from '../lib/workflow-store';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
 // Scope the spawned daemon to THIS test's project so a --once tick can't drain another (real) project's
@@ -204,5 +204,27 @@ describe('workflow daemon — drains queued runs', () => {
     const evt = await db.select().from(events).where(eq(events.idempotencyKey, `workflow.abandoned:${run.id}`));
     expect(evt.length).toBe(1);
     expect(evt[0].type).toBe('workflow.abandoned');
+  });
+
+  it('reaping a stale run also settles its non-terminal step rows (running→failed, pending→skipped)', async () => {
+    const slug = `vt-wfd-stalesteps-${Date.now()}`;
+    const wf = await createWorkflow({ projectId, slug, name: slug, graph: graph() });
+    const run = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' });
+    abandonedKeys.push(`workflow.abandoned:${run.id}`);
+
+    // The dead walker left one step in-flight and a successor never started.
+    await upsertStepRun(run.id, 'a', { status: 'running', startedAt: new Date() });
+    await upsertStepRun(run.id, 'b', { status: 'pending' });
+    await db.update(workflowRuns).set({ lastHeartbeatAt: new Date('2000-01-01T00:00:00Z') }).where(eq(workflowRuns.id, run.id));
+
+    await reapStaleWorkflowRuns();
+
+    const steps = await listStepRuns(run.id);
+    const byNode = Object.fromEntries(steps.map((s) => [s.nodeId, s]));
+    expect(byNode.a.status).toBe('failed'); // the in-flight step
+    expect(byNode.a.endedAt).toBeInstanceOf(Date);
+    expect(byNode.a.error).toContain('abandoned');
+    expect(byNode.b.status).toBe('skipped'); // never-started successor
+    expect(byNode.b.endedAt).toBeInstanceOf(Date);
   });
 });
