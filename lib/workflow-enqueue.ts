@@ -32,7 +32,7 @@ export async function prepareWorkflowRun(slug: string, opts: EnqueueOpts = {}): 
  *  so the web route imports + calls it directly (the daemon owns execution). */
 export async function enqueueWorkflowRun(slug: string, opts: EnqueueOpts = {}): Promise<WorkflowRun> {
   const wf = await prepareWorkflowRun(slug, opts);
-  return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued', context: opts.context });
+  return createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'queued', context: opts.context, allowConcurrent: opts.allowConcurrent });
 }
 
 /** Save an edited workflow graph (slice 9b authoring) — lib-tier, NO spawn, so BOTH the web `save` route and

@@ -1,0 +1,2 @@
+ALTER TABLE "workflow_runs" ADD COLUMN "single_flight_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "workflow_runs_single_flight_uq" ON "workflow_runs" USING btree ("single_flight_key") WHERE status in ('queued','running','paused');

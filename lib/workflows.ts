@@ -209,8 +209,21 @@ export function validateGraph(graph: WorkflowGraph): void {
       refText = JSON.stringify(readIntegrationNodeData(n).arguments ?? {}); // validates toolkit + action + onError
       field = 'node.data.arguments';
     } else if (n.type === 'branch') {
-      refText = JSON.stringify(readBranchNodeData(n).cases); // validates cases; refs live in when.left/right
+      const cases = readBranchNodeData(n).cases; // validates cases; refs live in when.left/right
+      refText = JSON.stringify(cases);
       field = 'node.data.cases';
+      // Cross-check outgoing-edge handles against the case names (M17). Branch routing matches an edge's
+      // sourceHandle (fallback: label) against the winning case name; if the user renames/removes a case after
+      // edges were drawn, the stale-handle edge is invisible on the canvas but persists in `edges`, so at run
+      // time the winning case routes to no edge and the downstream node is silently skipped. Catch it on save.
+      const validHandles = new Set<string>([...cases.map((c) => c.name), 'else']);
+      for (const e of graph.edges) {
+        if (e.source !== n.id) continue;
+        const handle = e.sourceHandle ?? e.label ?? '';
+        if (!validHandles.has(handle)) {
+          throw new ValidationError('edges', `branch "${n.id}" has an outgoing edge "${e.id}" on handle "${handle}" that matches no case name or 'else' (valid: ${[...validHandles].join(', ')})`);
+        }
+      }
     } else if (n.type === 'trigger') {
       readTriggerNodeData(n); // validates the optional cron/interval schedule (slice 7); carries no refs
       continue;
@@ -242,7 +255,13 @@ export function readAgentNodeData(node: WorkflowNode): AgentNodeData {
   const out: AgentNodeData = { prompt };
   if (data.profileSlug !== undefined) out.profileSlug = String(data.profileSlug);
   if (data.projectSlug !== undefined) out.projectSlug = String(data.projectSlug);
-  if (data.responseSchema !== undefined) out.responseSchema = data.responseSchema as Record<string, unknown>;
+  if (data.responseSchema !== undefined) {
+    // Shape-check at authoring instead of blind-casting (M31): a non-object responseSchema (e.g. the string
+    // "oops" via the canvas JSON escape hatch) would otherwise pass validation and fail late — claude renders
+    // `--json-schema '"oops"'` and errors AFTER a paid run row was opened.
+    if (!isObject(data.responseSchema)) throw new ValidationError('node.data.responseSchema', `agent node "${node.id}" responseSchema must be a JSON Schema object`);
+    out.responseSchema = data.responseSchema;
+  }
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }
@@ -262,7 +281,12 @@ export function readIntegrationNodeData(node: WorkflowNode): IntegrationNodeData
     throw new ValidationError('node.data.action', `integration node "${node.id}" action "${action}" is not allowed for ${toolkit} (allowed: ${entry.allowedTools.join(', ')})`);
   }
   const out: IntegrationNodeData = { toolkit, action };
-  if (data.arguments !== undefined) out.arguments = data.arguments as Record<string, unknown>;
+  if (data.arguments !== undefined) {
+    // Shape-check at authoring instead of blind-casting (M31): a non-object arguments (e.g. [1,2]) would
+    // otherwise pass validation and be sent to Composio as { arguments: [...] } → an opaque 400 at run time.
+    if (!isObject(data.arguments)) throw new ValidationError('node.data.arguments', `integration node "${node.id}" arguments must be an object`);
+    out.arguments = data.arguments;
+  }
   if (data.onError !== undefined) out.onError = assertWorkflowOnError(String(data.onError)); // halt | continue
   return out;
 }

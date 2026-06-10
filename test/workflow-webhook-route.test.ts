@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { inArray } from 'drizzle-orm';
 import { createHmac } from 'node:crypto';
 import { POST } from '../app/api/workflows/[slug]/webhook/route';
+import { deriveWorkflowWebhookSecret } from '../lib/webhook-signature';
 import { db } from '../lib/db/index';
 import { projects, type WorkflowGraph } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
@@ -54,13 +55,13 @@ async function activeEventWorkflow(types?: string[]) {
 }
 
 type HookOpts = { secret?: string | null; headers?: Record<string, string>; rawBody?: string };
-/** POST a JSON payload to the real webhook handler. Signs with SECRET by default; `secret:null` omits the
- *  header, `secret:'x'` signs with the wrong key. `rawBody` sends bytes verbatim (to sign + tamper). */
+/** POST a JSON payload to the real webhook handler. Signs with the slug's PER-WORKFLOW secret by default (M7);
+ *  `secret:null` omits the header, `secret:'x'` signs with the wrong key. `rawBody` sends bytes verbatim. */
 async function hook(slug: string, payload: unknown, opts: HookOpts = {}) {
   const raw = opts.rawBody ?? JSON.stringify(payload);
   const headers: Record<string, string> = { 'content-type': 'application/json', ...opts.headers };
   if (opts.secret !== null) {
-    const s = opts.secret ?? SECRET;
+    const s = opts.secret ?? deriveWorkflowWebhookSecret(SECRET, slug); // default = the correct per-workflow key
     headers['x-hub-signature-256'] = `sha256=${createHmac('sha256', s).update(raw).digest('hex')}`;
   }
   const req = new Request(ENDPOINT(slug), { method: 'POST', headers, body: raw });
@@ -89,6 +90,19 @@ describe('POST /api/workflows/[slug]/webhook (slice 8 event trigger)', () => {
     expect(r.status).toBe(401);
     expect(r.json.error?.code).toBe('UNAUTHORIZED');
     expect((await listWorkflowRuns({ workflowId: wf.id })).length).toBe(0);
+  });
+
+  it('a delivery signed for one workflow cannot be re-aimed at another (M7 — per-workflow secret)', async () => {
+    const [wfA, wfB] = [await activeEventWorkflow(), await activeEventWorkflow()];
+    const payload = { action: 'opened' };
+    const raw = JSON.stringify(payload);
+    // Sign with workflow A's per-workflow secret, then POST to workflow B's endpoint.
+    const sigForA = `sha256=${createHmac('sha256', deriveWorkflowWebhookSecret(SECRET, wfA.slug)).update(raw).digest('hex')}`;
+    const req = new Request(ENDPOINT(wfB.slug), { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sigForA }, body: raw });
+    const res = await POST(req, { params: Promise.resolve({ slug: wfB.slug }) });
+
+    expect(res.status).toBe(401); // B verifies against ITS own derived secret → the A-signature fails
+    expect((await listWorkflowRuns({ workflowId: wfB.id })).length).toBe(0);
   });
 
   it('a non-matching event type is ignored (200 fired:false) with no run', async () => {

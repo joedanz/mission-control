@@ -557,13 +557,20 @@ export const workflowRuns = pgTable(
     graphSnapshot: jsonb('graph_snapshot').$type<WorkflowGraph>().notNull(),
     context: jsonb('context'), // trigger payload / inputs
     cancelRequested: boolean('cancel_requested').notNull().default(false), // mc workflow cancel
+    // Single-flight key: the workflow_id for a normal run, NULL for an --allow-concurrent run. The partial
+    // unique index below makes "at most one pending run per workflow" a DB constraint (the old count-then-insert
+    // guard raced: two webhook redeliveries both read 0 pending and both inserted → duplicate paid runs). NULLs
+    // don't collide, so --allow-concurrent runs coexist freely.
+    singleFlightKey: text('single_flight_key'),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
     lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('workflow_runs_workflow_status_idx').on(t.workflowId, t.status), // single-flight guard
+    index('workflow_runs_workflow_status_idx').on(t.workflowId, t.status), // single-flight guard (fast pre-check)
     index('workflow_runs_status_heartbeat_idx').on(t.status, t.lastHeartbeatAt), // reaper sweep
+    // The HARD single-flight constraint: at most one NON-terminal run per single_flight_key.
+    uniqueIndex('workflow_runs_single_flight_uq').on(t.singleFlightKey).where(sql`status in ('queued','running','paused')`),
   ],
 );
 
