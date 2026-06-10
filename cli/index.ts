@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import {
   CATEGORIES,
   STATUSES,
@@ -656,13 +656,16 @@ const task = program.command('task').description('Manage tasks');
 withFlags(task.command('list'))
   .description("List a project's tasks")
   .argument('<slug>')
-  .option('--status <status>', 'filter custom-task status')
+  .option('--status <status>', `filter by task status: ${TASK_STATUSES.join(' | ')}`)
   .action((slug: string, opts: LeafOpts) =>
     emit('task list', opts, async () => {
+      // Validate BEFORE the DB read so a typo ('inprogress') is a VALIDATION error (exit 2) listing the
+      // valid values — not a silent {items:[],count:0} that reads as "this project has no such tasks".
+      const status = opts.status ? assertEnum(String(opts.status), TASK_STATUSES, 'status') : undefined;
       const { queries } = await loadDb();
       const p = await resolveProject(queries, slug);
       let items = p.tasks;
-      if (opts.status) items = items.filter((t) => t.status === opts.status);
+      if (status) items = items.filter((t) => t.status === status);
       return {
         data: { items, count: items.length },
         human: () => {
@@ -1124,8 +1127,8 @@ withFlags(workflow.command('update'))
 withFlags(workflow.command('run'))
   .description('Run a workflow now — synchronous by default (short prompts); --async enqueues for the workflow-daemon')
   .argument('<slug>')
-  .option('--timeout <sec>', 'per-agent-node timeout (sync only)', (v) => parseInt(v, 10))
-  .option('--max-parallel <n>', 'max nodes run concurrently (sync only; default 4)', (v) => parseInt(v, 10))
+  .option('--timeout <sec>', 'per-agent-node timeout (sync only)', positiveIntOption('--timeout'))
+  .option('--max-parallel <n>', 'max nodes run concurrently (sync only; default 4)', positiveIntOption('--max-parallel'))
   .option('--allow-concurrent', 'bypass the single-flight guard')
   .option('--async', 'enqueue a queued run for the workflow-daemon and return immediately (no inline walk)')
   .action((slug: string, opts: LeafOpts) =>
@@ -1315,6 +1318,35 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** Strict non-negative-integer metric parser for run-end (cost/tokens/cache). Unlike num()'s lenient
+ *  parseInt — which silently TRUNCATES a float/scientific value ('1.5e6' -> 1) and silently OMITS the
+ *  metric on garbage (NaN -> undefined, run closes with $0 and exit 0) — this rejects anything that
+ *  isn't a whole non-negative number with a VALIDATION error (exit 2). '1.5e6' is read as its real
+ *  integer value (1500000), not 1. */
+function metricNum(v: unknown, field: string): number | undefined {
+  if (v === undefined) return undefined;
+  const s = String(v).trim();
+  const n = Number(s);
+  if (s === '' || !Number.isInteger(n) || n < 0) {
+    throw new ValidationError(field, `must be a non-negative integer (got "${s}")`);
+  }
+  return n;
+}
+
+/** Commander coercion for a flag that must be a positive integer (>=1). Throws InvalidArgumentError so
+ *  exitOverride routes it through the JSON envelope as VALIDATION (exit 2) — instead of bare parseInt,
+ *  which yields NaN that downstream `typeof === 'number'` checks happily accept, silently disabling the
+ *  cap/timeout. */
+function positiveIntOption(label: string): (v: string) => number {
+  return (v: string): number => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new InvalidArgumentError(`${label} must be a positive integer (got "${v}")`);
+    }
+    return n;
+  };
+}
+
 /** Parse an ISO date/datetime flag → Date, throwing VALIDATION (exit 2) with an actionable message
  *  on garbage. A zoneless date/datetime is read as UTC (the dashboard's canonical zone, matching the
  *  UTC day buckets) rather than the host's local time, so `--since`/`--until` windows are reproducible. */
@@ -1336,11 +1368,11 @@ function usdMicros(m: number): string {
 
 function metricsFrom(opts: LeafOpts) {
   return {
-    tokensIn: num(opts.tokensIn),
-    tokensOut: num(opts.tokensOut),
-    cacheReadTokens: num(opts.cacheRead),
-    cacheWriteTokens: num(opts.cacheWrite),
-    costMicros: num(opts.costMicros),
+    tokensIn: metricNum(opts.tokensIn, 'tokens-in'),
+    tokensOut: metricNum(opts.tokensOut, 'tokens-out'),
+    cacheReadTokens: metricNum(opts.cacheRead, 'cache-read'),
+    cacheWriteTokens: metricNum(opts.cacheWrite, 'cache-write'),
+    costMicros: metricNum(opts.costMicros, 'cost-micros'),
   };
 }
 
@@ -1716,9 +1748,10 @@ withFlags(run.command('end'))
       // 'running'). `run end <id> running` would otherwise stamp endedAt, leave status non-terminal (a zombie),
       // and RELEASE the live run's task claims back to the queue — letting another agent duplicate the work.
       const s = assertEnum(status, RUN_STATUSES.filter((x) => x !== 'running'), 'status');
+      const metrics = metricsFrom(opts); // parse/validate BEFORE opening a DB connection — garbage fails fast as VALIDATION
       const { mutations } = await loadDb();
       const row = await withActor({ label: actorLabel(opts), kind: 'agent', runId: id }, () =>
-        mutations.recordRunEnd(id, s, metricsFrom(opts), Boolean(opts.authoritative)),
+        mutations.recordRunEnd(id, s, metrics, Boolean(opts.authoritative)),
       );
       if (!row) throw new NotFoundError('run', id);
       return { data: row, human: () => console.log(`run ${id} → ${s}`) };
