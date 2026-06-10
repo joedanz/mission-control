@@ -27,7 +27,7 @@
     <!-- launchd does not inherit your shell PATH — give it node/npm explicitly. -->
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <!-- Absolute path to the working `claude` (see comment above + INSTALL.md Prerequisite 4). -->
-    <key>MC_CLAUDE_BIN</key><string>~/.local/bin/claude</string>
+    <key>MC_CLAUDE_BIN</key><string>/ABS/PATH/TO/claude</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

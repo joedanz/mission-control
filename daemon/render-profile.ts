@@ -4,8 +4,19 @@
 // ABOUTME: env + MCP config from the host environment at spawn. No fs / no spawn / no DB, so it's unit-
 // ABOUTME: testable in isolation; the daemon owns the side effects (temp-file write, fork, cleanup).
 
+import { homedir } from 'node:os';
 import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import type { SkillUnresolvedReason } from '../lib/skills';
+
+/** Expand a leading `~`/`~/` to the home dir. launchd passes EnvironmentVariables values literally and the
+ *  daemon spawns the binary WITHOUT a shell, so a tilde in MC_CLAUDE_BIN (a plausible-looking value, and what
+ *  the shipped plists used to contain) would otherwise be used verbatim → ENOENT → every check-in fails and
+ *  the profile auto-pauses (M25). */
+function expandTilde(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return homedir() + p.slice(1);
+  return p;
+}
 
 /** A profile carries `${VAR}` placeholders for secrets (MC never stores the secret itself). They are
  *  resolved from the daemon's own environment at spawn; an unset one is fatal — we fail the run with a
@@ -171,7 +182,7 @@ export function planSpawn(profile: AgentProfile | null, opts: PlanOpts): SpawnPl
   // Which `claude` to launch. Bare 'claude' is resolved off PATH — but a daemon started via `npm run` gets the
   // node_modules/.bin walk prepended, which can shadow the real install with a stale/broken one. MC_CLAUDE_BIN
   // lets the deployment pin an absolute path (mirrors MC_BIN for the mc CLI). See INSTALL.md.
-  const claudeBin = hostEnv.MC_CLAUDE_BIN || 'claude';
+  const claudeBin = hostEnv.MC_CLAUDE_BIN ? expandTilde(hostEnv.MC_CLAUDE_BIN) : 'claude';
   // Structured-output request (claude-code only) — appended to whichever claude-code branch renders below.
   const jsonSchemaArgs = opts.jsonSchema ? ['--json-schema', JSON.stringify(opts.jsonSchema)] : [];
 

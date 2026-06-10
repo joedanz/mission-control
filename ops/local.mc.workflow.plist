@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job that runs the Mission Control workflow daemon (`npm run workflow-daemon`) as a long-running
+  service. It is the ONLY executor for `mc workflow run --async`, the canvas Run button, cron-triggered
+  workflows, and HMAC webhook runs — without it, `queued` workflow runs sit forever (the canvas Run button
+  appears to hang, activated cron workflows never fire). Like the scheduler it owns its own poll loop, so this
+  is RunAtLoad + KeepAlive (NOT a StartInterval one-shot). UNLIKE the scheduler/auto-claim daemons (which reach
+  the DB only through `mc`), this daemon imports lib/db directly, so `npm run workflow-daemon` loads
+  .env.local for DATABASE_URL — run it from the repo. NOTE: the cd path and PATH are machine-specific.
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.mc.workflow</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-lc</string>
+    <string>cd /path/to/mission &amp;&amp; npm run workflow-daemon</string>
+  </array>
+  <!-- Explicit PATH so launchd (which does not inherit your shell PATH) finds node/npm. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Pin the executor binary (absolute path; see the other plists + INSTALL.md). MACHINE-SPECIFIC. -->
+    <key>MC_CLAUDE_BIN</key><string>/ABS/PATH/TO/claude</string>
+    <!-- Pin the zone so cron-triggered workflows fire when you expect (launchd defaults to UTC). -->
+    <key>TZ</key><string>America/New_York</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/mc-workflow-daemon.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mc-workflow-daemon.log</string>
+</dict></plist>

@@ -22,7 +22,7 @@
     "smoke:composio": "tsx --env-file=.env.local scripts/smoke-composio-linear.ts",
     "daemon": "tsx daemon/auto-claim.ts",
     "scheduler": "tsx daemon/scheduler.ts",
-    "workflow-daemon": "tsx daemon/workflow-daemon.ts",
+    "workflow-daemon": "tsx --env-file=.env.local daemon/workflow-daemon.ts",
     "cli": "tsx --env-file=.env.local cli/index.ts",
     "test": "vitest run",
     "docs": "npm --prefix docs run dev",
