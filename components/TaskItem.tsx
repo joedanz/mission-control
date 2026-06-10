@@ -21,7 +21,15 @@ export function TaskItem({ id, label, notes, done, onChanged }: Props) {
   function onToggle() {
     setOptimisticDone((d) => !d);
     startTransition(() => {
-      void toggleTask(id).then(() => onChanged?.());
+      // Revert the optimistic flip if the write rejects (network drop, expired session, DB error) — otherwise
+      // the row shows the wrong state forever: the parent remounts rows keyed on the SERVER value, which never
+      // changed because the write failed, so nothing resyncs until a full reload (M18).
+      void toggleTask(id)
+        .then(() => onChanged?.())
+        .catch(() => {
+          setOptimisticDone((d) => !d);
+          onChanged?.(); // pull server truth so the row reflects reality
+        });
     });
   }
 

@@ -59,7 +59,7 @@ export function ProjectBoard({
   slug: string;
   initial: BoardData;
 }) {
-  const { projects, runs, error, applyMove, reload } = useBoard({ projectSlug: slug, initial });
+  const { projects, runs, error, applyMove, reload, clearPending } = useBoard({ projectSlug: slug, initial });
   const project = projects[0];
   const tasks = useMemo(() => project?.tasks ?? [], [project]);
 
@@ -128,7 +128,10 @@ export function ProjectBoard({
       orderedIds: plan.orderedIds,
       expectedVersion: plan.statusChanged ? plan.version : undefined,
     });
-    if (!res.ok) reload(); // version conflict or live-claim refusal → resync from the server
+    if (!res.ok) {
+      clearPending(activeId); // drop the optimistic hold first so reload() accepts server truth now, not in 8s
+      reload(); // version conflict or live-claim refusal → resync from the server
+    }
   }
 
   const doneTotal = tasks.filter((t) => t.status === 'done').length;
