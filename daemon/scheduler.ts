@@ -96,12 +96,18 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
 
   const startArgs = ['run', 'start', '--id', runId, '--agent', AGENT_LABEL, '--source', 'cron', '--profile', profile.slug, '--project', project.slug, '--work-dir', repoPath, '--title', `check-in: ${profile.slug}`];
   if (choice.model) startArgs.push('--model', choice.model);
-  await mc(startArgs);
+  // M2: check the run-start envelope. The old code fire-and-forgot it, then advanced the clock + claimed +
+  // spawned anyway — so a failed start left a paid `claude` run pointing at a nonexistent run row (invisible,
+  // un-killable) while the schedule still recorded `ok`. On failure, record a fail (counts toward the 3-strike
+  // auto-pause) and return without claiming or spawning.
+  const started = await mc(startArgs);
+  if (!started.ok) {
+    log(`run start for check-in "${profile.slug}" failed (${started.error?.code ?? started.code}) — recording fail, not spawning`);
+    await mc(['profile', 'checked-in', profile.slug, '--status', 'fail']);
+    return;
+  }
 
   // Advance the clock NOW (at spawn), so the next tick sees it as not-due and we don't double-fire while it runs.
-  // (Ordered AFTER run start: a swallowed transient `run start` failure then leaves the clock un-advanced so the
-  // next tick retries, rather than silently consuming the slot. The remaining crash-between-these-two-calls window
-  // is narrow and bounded — task claims are race-safe, so a restart re-fire wastes a spawn but does no double work.)
   await mc(['profile', 'checked-in', profile.slug]);
 
   // Pre-claim the next queued task to THIS run (like auto-claim) so tracking doesn't hinge on the agent calling
