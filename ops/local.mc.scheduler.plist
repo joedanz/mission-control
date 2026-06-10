@@ -21,7 +21,7 @@
     <!-- Pin the executor binary. `npm run` prepends the node_modules/.bin walk to PATH, which can shadow the
          real `claude` with a stale npm-global install that crashes on newer Node. Point this at the absolute
          path of your working install (`command -v claude` in a clean shell). MACHINE-SPECIFIC. See INSTALL.md. -->
-    <key>MC_CLAUDE_BIN</key><string>~/.local/bin/claude</string>
+    <key>MC_CLAUDE_BIN</key><string>/ABS/PATH/TO/claude</string>
     <!-- launchd jobs do NOT inherit your login TZ; an unset TZ defaults to UTC, so a profile's `0 9 * * *`
          cron would fire at 9am UTC, not 9am local. Pin the daemon's zone so cron check-ins fire when you
          expect. A profile's own scheduleTimezone (set via `mc profile … --schedule-timezone`) overrides

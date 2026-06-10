@@ -3,6 +3,7 @@
 // ABOUTME: No DB / no spawn / no fs — this is the testable core the daemon calls before it forks a child.
 
 import { describe, it, expect } from 'vitest';
+import { homedir } from 'node:os';
 import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import {
   resolvePlaceholders,
@@ -159,6 +160,10 @@ describe('planSpawn — executor binary override (MC_CLAUDE_BIN)', () => {
   });
   it('defaults to bare `claude` when the override is unset', () => {
     expect(planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: {} }).bin).toBe('claude');
+  });
+  it('expands a leading ~ in MC_CLAUDE_BIN (launchd passes it literally; the daemon spawns w/o a shell) (M25)', () => {
+    const plan = planSpawn(null, { prompt: PROMPT, basePermissionMode: 'plan', hostEnv: { MC_CLAUDE_BIN: '~/.local/bin/claude' } });
+    expect(plan.bin).toBe(`${homedir()}/.local/bin/claude`); // not the literal '~/...' that would ENOENT
   });
   it('does not apply to the exec runtime (that always runs via sh -c)', () => {
     const plan = planSpawn(profile({ runtime: 'exec', execTemplate: 'run ${PROMPT}' }), {

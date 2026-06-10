@@ -8,10 +8,17 @@ hosted cron (see [`LAUNCH.md`](LAUNCH.md) §4):
 | **reaper** (`npm run reap`) | flips `running` runs with no heartbeat (120s) to `abandoned` and frees their task claims | one-shot every 60s | `ops/local.mc.reap.plist` |
 | **scheduler** (`npm run scheduler`) | wakes agent profiles whose scheduled **check-in** is due and spawns one run per profile in its bound project's repo | long-running poll loop (60s) | `ops/local.mc.scheduler.plist` |
 | **auto-claim** (`npm run daemon -- --project <slug>`) | pulls tasks from **one** project's queue and runs each as a `claude -p` child in its repo | long-running, **per-project** | `ops/local.mc.daemon.plist` (template) |
+| **workflow** (`npm run workflow-daemon`) | the ONLY executor for `mc workflow run --async`, the canvas Run button, cron-triggered workflows, and HMAC webhook runs — claims `queued` workflow runs and walks them off-process | long-running poll loop (5s) | `ops/local.mc.workflow.plist` |
 
 > Both the **scheduler** and **auto-claim** spawn `claude` and so need the `MC_CLAUDE_BIN` pin (Prerequisite
 > 4). auto-claim is per-project (one daemon per repo) — its install is in [`ops/README.md`](ops/README.md);
 > this guide walks through the scheduler in detail and they install the same way.
+
+> Without the **workflow** daemon running, `queued` workflow runs are never claimed: the canvas Run button
+> appears to hang, activated cron workflows never fire, and webhook deliveries enqueue runs that sit forever
+> (a `queued` run deliberately survives restarts and is reaper-excluded). Unlike the others it reaches the DB
+> directly (imports `lib/db`), so `npm run workflow-daemon` loads `.env.local` for `DATABASE_URL` — run it
+> from the repo. Install `ops/local.mc.workflow.plist` the same way as the scheduler below.
 
 > "check-in" = a **scheduled wake-up** (configure with `mc profile … --schedule-enabled`). It is distinct
 > from the liveness *heartbeat* (`runs.last_heartbeat_at`) the reaper watches.
