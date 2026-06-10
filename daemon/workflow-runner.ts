@@ -31,6 +31,7 @@ import { decidableNodes, nodeById, readAgentNodeData, readIntegrationNodeData, r
 import { chooseBranch } from '../lib/workflow-branch';
 import { normalizeStepOutput, interpolate, interpolateValue, isObject, type RefView } from '../lib/workflow-refs';
 import { getProjectById, getProfileBySlug, resolveProfile } from '../lib/queries';
+import { setRunCancelRequested } from '../lib/mutations';
 import { getConnection } from '../lib/composio-store';
 import { executeAction } from '../lib/composio-api';
 import { ConflictError, NotFoundError, ValidationError } from '../lib/validation';
@@ -113,7 +114,7 @@ const branchChoice = (output: unknown): string | undefined => {
 export async function runWorkflow(slug: string, opts: RunWorkflowOpts = {}): Promise<RunWorkflowResult> {
   const wf = await prepareWorkflowRun(slug, opts); // shared validate + single-flight guard (lib-tier)
   const log = opts.log ?? (() => {});
-  const run = await createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'running' });
+  const run = await createWorkflowRun({ workflowId: wf.id, trigger: opts.trigger ?? 'manual', graphSnapshot: wf.graph, status: 'running', allowConcurrent: opts.allowConcurrent });
   log(`workflow ${slug} run ${run.id.slice(0, 8)} started (${wf.graph.nodes.length} nodes)`);
   return walkWorkflowRun(run, opts);
 }
@@ -150,13 +151,33 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   const activate = (node: WorkflowNode, chosen?: string) => {
     for (const id of activeOutEdges(snapshot, node, chosen)) selectedEdges.add(id);
   };
+  // Resume substrate: seed from persisted TERMINAL steps so a resume (after a gate approval) does NOT
+  // re-execute work that already ran (M10). Before, only 'completed' steps were seeded, so a failed
+  // onError:'continue' step was re-decided on resume — a second paid agent spawn / duplicate integration
+  // side effect, and (since anyFailed reset to false) a run that should end 'failed' could flip to 'completed'.
+  let seededFailure = false;
   for (const s of await listStepRuns(run.id)) {
-    if (s.status !== 'completed') continue;
-    views.set(s.nodeId, normalizeStepOutput(s.output));
-    terminal.add(s.nodeId);
-    started.add(s.nodeId);
-    const n = nodeById(snapshot, s.nodeId);
-    if (n) activate(n, branchChoice(s.output));
+    if (s.status === 'completed') {
+      views.set(s.nodeId, normalizeStepOutput(s.output));
+      terminal.add(s.nodeId);
+      started.add(s.nodeId);
+      const n = nodeById(snapshot, s.nodeId);
+      if (n) activate(n, branchChoice(s.output));
+    } else if (s.status === 'failed') {
+      // A failed step in a RESUMABLE (paused) run had onError='continue' (halt fails the run outright, so it
+      // could never have paused). Seed it terminal so it isn't re-run, re-activate its out-edges (the continue
+      // contract — successors stay reached; a failed branch has no `chosen` so it routes none), and remember
+      // the failure so the run still ends 'failed' per the onError=continue contract.
+      terminal.add(s.nodeId);
+      started.add(s.nodeId);
+      seededFailure = true;
+      const n = nodeById(snapshot, s.nodeId);
+      if (n) activate(n, branchChoice(s.output));
+    } else if (s.status === 'skipped') {
+      terminal.add(s.nodeId); // an already-skipped node stays terminal; it seeds no views and routes no edges
+      started.add(s.nodeId);
+    }
+    // 'running'/'pending' (incl. an awaiting gate) steps are left non-terminal — re-decided on resume.
   }
 
   // Execute ONE node to its terminal result. The per-node bodies are unchanged from the sequential walker —
@@ -179,7 +200,7 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   };
 
   let finalStatus: WorkflowRunStatus = 'completed';
-  let anyFailed = false; // a node failed but onError='continue' kept the walk going → run ends 'failed'
+  let anyFailed = seededFailure; // a node failed (onError='continue') — this walk OR a pre-pause one → run ends 'failed'
   let halted = false;    // an onError='halt' failure: stop launching NEW nodes, let in-flight ones drain
   const maxParallel = Math.max(1, opts.maxParallel ?? DEFAULT_MAX_PARALLEL);
   const inflight = new Map<string, Promise<{ nodeId: string } & NodeResult & { chosen?: string }>>();
@@ -194,8 +215,19 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
     // nodes (a fan-out's branches) run concurrently; a merge waits because it isn't decidable until all its
     // branches are terminal. A sequential chain still serializes — a node's sole predecessor must finish first.
     while (true) {
-      // Cancellation is checked each tick; in-flight agent nodes are independently cancelled via their runs row.
-      if ((await getWorkflowRun(run.id))?.cancelRequested) { finalStatus = 'cancelled'; break; }
+      // Cancellation is checked each tick. On cancel, propagate to EVERY in-flight agent node's run (not just
+      // the one the CLI happened to find) so a fan-out's parallel children all abort via their kill-switch
+      // rather than burning tokens to timeout on an already-cancelled run; then break (in-flight promises drain).
+      if ((await getWorkflowRun(run.id))?.cancelRequested) {
+        finalStatus = 'cancelled';
+        if (inflight.size) {
+          const running = (await listStepRuns(run.id)).filter((s) => inflight.has(s.nodeId) && s.status === 'running' && s.runId);
+          for (const s of running) {
+            if (s.runId) { try { await setRunCancelRequested(s.runId); } catch { /* already terminal */ } }
+          }
+        }
+        break;
+      }
       await touchWorkflowRun(run.id); // liveness heartbeat for the reaper
 
       if (!halted) {

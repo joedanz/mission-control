@@ -146,6 +146,28 @@ describe('workflow store — runs', () => {
     expect(await countPendingWorkflowRuns(wf.id)).toBe(0); // terminal → not pending
   });
 
+  it('the partial unique index refuses a second PENDING run per workflow (hard single-flight — M1)', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' });
+    // A racing second enqueue that slipped past the count pre-check hits the DB constraint → ConflictError.
+    await expect(createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' })).rejects.toThrow(ConflictError);
+    expect((await listWorkflowRuns({ workflowId: wf.id })).length).toBe(1); // exactly one row persisted
+  });
+
+  it('--allow-concurrent runs (NULL single_flight_key) coexist; a terminal run frees the key', async () => {
+    const p = await freshProject();
+    const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running', allowConcurrent: true });
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running', allowConcurrent: true });
+    expect((await listWorkflowRuns({ workflowId: wf.id })).length).toBe(2); // NULL keys don't collide
+    // And once a normal run is terminal, its key is free for the next pending run.
+    const a = await createWorkflow({ projectId: p.id, slug: tag(), name: 'B', graph: graph() });
+    const r = await createWorkflowRun({ workflowId: a.id, trigger: 'manual', graphSnapshot: a.graph, status: 'running' });
+    await setWorkflowRunStatus(r.id, 'completed');
+    await expect(createWorkflowRun({ workflowId: a.id, trigger: 'manual', graphSnapshot: a.graph, status: 'running' })).resolves.toBeTruthy();
+  });
+
   it('claimWorkflowRun flips queued→running exactly once (race-safe — the loser gets null)', async () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
@@ -180,10 +202,11 @@ describe('workflow store — runs', () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
     expect(await latestCronRunAt(wf.id)).toBeNull(); // never cron-fired
-    // A manual run does NOT count as a cron fire (it must not reset the schedule clock).
-    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph });
+    // A manual run does NOT count as a cron fire (it must not reset the schedule clock). allowConcurrent so
+    // these deliberately-coexisting runs (this test exercises the query, not single-flight) bypass the index.
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, allowConcurrent: true });
     expect(await latestCronRunAt(wf.id)).toBeNull();
-    const cron = await createWorkflowRun({ workflowId: wf.id, trigger: 'cron', graphSnapshot: wf.graph });
+    const cron = await createWorkflowRun({ workflowId: wf.id, trigger: 'cron', graphSnapshot: wf.graph, allowConcurrent: true });
     const at = await latestCronRunAt(wf.id);
     expect(at?.getTime()).toBe(cron.startedAt.getTime());
   });
@@ -191,8 +214,9 @@ describe('workflow store — runs', () => {
   it('listQueuedWorkflowRuns returns queued runs only (the daemon poll)', async () => {
     const p = await freshProject();
     const wf = await createWorkflow({ projectId: p.id, slug: tag(), name: 'A', graph: graph() });
-    const queuedRun = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued' });
-    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running' }); // not queued
+    // allowConcurrent so the two coexisting runs bypass the single-flight index (this test exercises the poll).
+    const queuedRun = await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'queued', allowConcurrent: true });
+    await createWorkflowRun({ workflowId: wf.id, trigger: 'manual', graphSnapshot: wf.graph, status: 'running', allowConcurrent: true }); // not queued
     const queued = await listQueuedWorkflowRuns();
     expect(queued.map((r) => r.id)).toContain(queuedRun.id);
     expect(queued.every((r) => r.status === 'queued')).toBe(true); // robust to other projects' queued runs

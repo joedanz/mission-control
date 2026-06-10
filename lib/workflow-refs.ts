@@ -55,6 +55,17 @@ export function resolveRef(view: RefView, path: string): { found: boolean; value
   else return { found: false, value: undefined };
 
   for (const key of rest) {
+    // A numeric segment against an array is an index lookup, so event-payload refs that step through arrays
+    // resolve — e.g. {{trigger.output.commits.0.message}} on a GitHub webhook body (commits/labels/assignees
+    // are array-heavy). isObject deliberately excludes arrays, so without this an array hop reports not-found
+    // and the consuming node hard-fails even though the data is present.
+    if (Array.isArray(cur)) {
+      if (!/^\d+$/.test(key)) return { found: false, value: undefined };
+      const idx = Number(key);
+      if (idx >= cur.length) return { found: false, value: undefined };
+      cur = cur[idx];
+      continue;
+    }
     if (!isObject(cur) || !(key in cur)) return { found: false, value: undefined };
     cur = cur[key];
   }

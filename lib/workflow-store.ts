@@ -8,6 +8,18 @@ import {
   type Workflow, type WorkflowRun, type WorkflowStepRun,
   type WorkflowGraph, type WorkflowStatus, type WorkflowRunStatus, type WorkflowTrigger, type WorkflowStepStatus,
 } from './db/schema';
+import { ConflictError } from './validation';
+
+/** True if `err` is a Postgres unique-violation (23505) on the given constraint. neon-http nests the driver
+ *  error: drizzle throws a DrizzleQueryError whose `.cause` is the NeonDbError carrying `.code`/`.constraint`,
+ *  so a top-level check misses it — walk the cause chain (mirrors lib/mutations.ts uniqueViolationHint). */
+function isUniqueViolationOn(err: unknown, constraint: string): boolean {
+  for (let e: unknown = err; e != null; e = (e as { cause?: unknown }).cause) {
+    const c = e as { code?: string; constraint?: string };
+    if (c.code === '23505' && c.constraint === constraint) return true;
+  }
+  return false;
+}
 
 // ── Workflows ────────────────────────────────────────────────────────────────────────
 export async function createWorkflow(input: {
@@ -92,18 +104,32 @@ export async function createWorkflowRun(input: {
   // 'running' = the synchronous CLI path (owns its process, walks inline). 'queued' = the async/web path
   // (the workflow-daemon claims it). Defaults to the column default ('running') for the slice-1 behaviour.
   status?: WorkflowRunStatus;
+  // false (default) → single_flight_key = workflowId, so the partial unique index refuses a second pending run
+  // for this workflow (race-safe, closing the count-then-insert gap). true → key NULL, so concurrent runs coexist.
+  allowConcurrent?: boolean;
 }): Promise<WorkflowRun> {
-  const rows = await db
-    .insert(workflowRuns)
-    .values({
-      workflowId: input.workflowId,
-      trigger: input.trigger,
-      graphSnapshot: input.graphSnapshot,
-      ...(input.context !== undefined && { context: input.context }),
-      ...(input.status !== undefined && { status: input.status }),
-    })
-    .returning();
-  return rows[0];
+  try {
+    const rows = await db
+      .insert(workflowRuns)
+      .values({
+        workflowId: input.workflowId,
+        trigger: input.trigger,
+        graphSnapshot: input.graphSnapshot,
+        singleFlightKey: input.allowConcurrent ? null : input.workflowId,
+        ...(input.context !== undefined && { context: input.context }),
+        ...(input.status !== undefined && { status: input.status }),
+      })
+      .returning();
+    return rows[0];
+  } catch (e) {
+    // The hard single-flight guarantee: a concurrent enqueue that the count pre-check missed (two webhook
+    // redeliveries racing) hits the partial unique index → 23505. Surface it as the same ConflictError the
+    // pre-check throws, so the route/CLI map it identically (200 fired:false / exit CONFLICT) — no duplicate run.
+    if (isUniqueViolationOn(e, 'workflow_runs_single_flight_uq')) {
+      throw new ConflictError('workflow', 'a run is already queued or in progress');
+    }
+    throw e;
+  }
 }
 
 /** Race-safe claim of a queued run for the workflow-daemon: flip queued→running and stamp a heartbeat in

@@ -1160,9 +1160,14 @@ withFlags(workflow.command('cancel'))
       const directCancel = run.status === 'queued' || run.status === 'paused';
       await requestWorkflowRunCancel(runId); // sets cancelRequested (also covers a daemon-claim race in this window)
       const result = directCancel ? ((await setWorkflowRunStatus(runId, 'cancelled')) ?? run) : run;
-      // Propagate to the in-flight agent node's run so a long node aborts (kill-switch), not just the next gap.
-      const active = (await listStepRuns(runId)).find((s) => s.status === 'running' && s.runId);
-      if (active?.runId) await setRunCancelRequested(active.runId);
+      // Propagate to EVERY in-flight agent node's run so a fan-out's parallel nodes all abort (kill-switch),
+      // not just the first one (the walker runs up to maxParallel concurrently). Guard each: a step that ended
+      // between the list and the cancel throws ConflictError, which mustn't abort cancelling its siblings.
+      const activeSteps = (await listStepRuns(runId)).filter((s) => s.status === 'running' && s.runId);
+      for (const s of activeSteps) {
+        if (!s.runId) continue;
+        try { await setRunCancelRequested(s.runId); } catch { /* already terminal — nothing to cancel */ }
+      }
       return { data: result, human: () => console.log(`workflow run ${runId} ${directCancel ? `cancelled (was ${run.status})` : 'cancel requested'}`) };
     }),
   );
@@ -1232,12 +1237,17 @@ withFlags(workflow.command('webhook-url'))
       ensureDbCredentials();
       const { getWorkflowBySlug } = await import('../lib/workflow-store');
       const { triggerEvent } = await import('../lib/workflows');
+      const { deriveWorkflowWebhookSecret } = await import('../lib/webhook-signature');
       const wf = await getWorkflowBySlug(slug);
       if (!wf) throw new NotFoundError('workflow', slug, "run 'mc workflow list'");
       const event = triggerEvent(wf.graph); // null if the trigger node has no event config
       const path = `/api/workflows/${wf.slug}/webhook`;
       const base = process.env.MC_PUBLIC_BASE_URL?.replace(/\/$/, '');
       const url = base ? `${base}${path}` : null;
+      // The sender signs with the PER-WORKFLOW secret (M7) — HMAC(WORKFLOW_WEBHOOK_SECRET, slug) — so a signed
+      // delivery can't be re-aimed at another workflow. Print it only when the env secret is present locally.
+      const globalSecret = process.env.WORKFLOW_WEBHOOK_SECRET;
+      const signingSecret = globalSecret ? deriveWorkflowWebhookSecret(globalSecret, wf.slug) : null;
       const data = {
         slug: wf.slug,
         status: wf.status,
@@ -1247,12 +1257,15 @@ withFlags(workflow.command('webhook-url'))
         url,
         signatureHeader: 'X-Hub-Signature-256',
         secretEnv: 'WORKFLOW_WEBHOOK_SECRET',
+        signingSecret, // per-workflow; configure this as the sender's webhook secret
       };
       return {
         data,
         human: () => {
           console.log(url ?? `${path}  (set MC_PUBLIC_BASE_URL for the full URL)`);
-          console.log('  sign the RAW body: X-Hub-Signature-256: sha256=HMAC-SHA256(WORKFLOW_WEBHOOK_SECRET, body)');
+          console.log('  sign the RAW body: X-Hub-Signature-256: sha256=HMAC-SHA256(<per-workflow secret>, body)');
+          if (signingSecret) console.log(`  per-workflow secret = HMAC-SHA256(WORKFLOW_WEBHOOK_SECRET, "${wf.slug}") = ${signingSecret}`);
+          else console.log('  set WORKFLOW_WEBHOOK_SECRET locally to print this workflow\'s signing secret');
           if (!event) console.log(`  ⚠ "${wf.slug}" is not an event-triggered workflow (its trigger node has no event config)`);
           else if (wf.status !== 'active') console.log(`  ⚠ "${wf.slug}" is ${wf.status} — activate it (mc workflow activate) to accept webhooks`);
           else if (event.types?.length) console.log(`  fires only on event types: ${event.types.join(', ')} (matched against X-GitHub-Event)`);

@@ -9,7 +9,7 @@
 import { getWorkflowBySlug } from '@/lib/workflow-store';
 import { triggerEvent } from '@/lib/workflows';
 import { enqueueWorkflowRun } from '@/lib/workflow-enqueue';
-import { verifyWebhookSignature } from '@/lib/webhook-signature';
+import { verifyWebhookSignature, deriveWorkflowWebhookSecret } from '@/lib/webhook-signature';
 import { ConflictError, ValidationError } from '@/lib/validation';
 
 export const runtime = 'nodejs'; // node:crypto + lib/db — never edge
@@ -29,9 +29,13 @@ export async function POST(
     return json({ ok: false, error: { code: 'NOT_CONFIGURED', message: 'WORKFLOW_WEBHOOK_SECRET is not set' } }, 503);
   }
 
+  const { slug } = await params;
   // The RAW body — HMAC must see the exact bytes the sender signed (a parse + re-serialize would change them).
   const raw = await request.text();
-  if (!verifyWebhookSignature(raw, request.headers.get('x-hub-signature-256'), secret)) {
+  // Verify against the PER-WORKFLOW secret (derived from the slug) so a signed delivery can't be re-aimed at a
+  // different workflow by swapping the URL slug (M7). The slug is part of the key, not the signed message.
+  const perWorkflowSecret = deriveWorkflowWebhookSecret(secret, slug);
+  if (!verifyWebhookSignature(raw, request.headers.get('x-hub-signature-256'), perWorkflowSecret)) {
     return json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'bad or missing webhook signature' } }, 401);
   }
 
@@ -42,7 +46,6 @@ export async function POST(
     return json({ ok: false, error: { code: 'BAD_REQUEST', message: 'invalid JSON body' } }, 400);
   }
 
-  const { slug } = await params;
   const wf = await getWorkflowBySlug(slug);
   if (!wf) return json({ ok: false, error: { code: 'NOT_FOUND', message: `no workflow "${slug}"` } }, 404);
 
