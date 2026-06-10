@@ -85,6 +85,29 @@ function classify(err: unknown): ErrInfo {
   return { code: 'DB', message: redact(msg), exit: 1 };
 }
 
+/** JSON mode inferred from raw argv — for errors thrown BEFORE a command's opts are parsed (commander usage
+ *  errors, credential resolution). Mirrors isJson(): explicit --json, else default-on when stdout is piped. */
+function wantsJsonFromArgv(): boolean {
+  if (process.argv.includes('--json')) return true;
+  if (process.argv.includes('--human')) return false;
+  return !process.stdout.isTTY;
+}
+
+/** Write a top-level error through the SAME {ok:false} envelope + exit-code contract as emit(), for failures
+ *  that escape a command body (commander parse errors via exitOverride, credential resolution). `command` is a
+ *  best-effort reconstruction from the leading non-flag argv tokens. */
+function writeTopLevelError(info: ErrInfo): void {
+  if (wantsJsonFromArgv()) {
+    const command = process.argv.slice(2).filter((a) => !a.startsWith('-')).slice(0, 2).join(' ') || 'mc';
+    const error: Record<string, unknown> = { code: info.code, message: info.message };
+    if (info.field) error.field = info.field;
+    process.stdout.write(JSON.stringify({ ok: false, command, error }) + '\n');
+  } else {
+    process.stderr.write(`Error [${info.code}] ${info.message}\n`);
+  }
+  process.exitCode = info.exit;
+}
+
 /** Run a command body, emitting a consistent envelope (stdout) or human text. */
 async function emit(
   command: string,
@@ -417,7 +440,12 @@ const program = new Command();
 program
   .name('mc')
   .description('Mission Control CLI — agent-friendly access to projects + tasks')
-  .version(getVersion());
+  .version(getVersion())
+  // Throw a CommanderError instead of process.exit(1) on a usage error (missing arg/option, unknown
+  // command). Inherited by subcommands. The top-level catch then routes it through the SAME {ok:false}
+  // envelope + exit-code contract (VALIDATION → exit 2) the rest of the CLI guarantees, instead of a bare
+  // stderr line + exit 1 that an agent piping `mc` can't parse or distinguish from a DB error (M3).
+  .exitOverride();
 
 // ── meta (no DB) ──
 withFlags(program.command('spec'))
@@ -1684,7 +1712,10 @@ withFlags(run.command('end'))
   .option('--agent <label>')
   .action((id: string, status: string, opts: LeafOpts) =>
     emit('run end', opts, async () => {
-      const s = assertEnum(status, RUN_STATUSES, 'status');
+      // Validate against the same TERMINAL set the help text shows (NOT the full RUN_STATUSES which includes
+      // 'running'). `run end <id> running` would otherwise stamp endedAt, leave status non-terminal (a zombie),
+      // and RELEASE the live run's task claims back to the queue — letting another agent duplicate the work.
+      const s = assertEnum(status, RUN_STATUSES.filter((x) => x !== 'running'), 'status');
       const { mutations } = await loadDb();
       const row = await withActor({ label: actorLabel(opts), kind: 'agent', runId: id }, () =>
         mutations.recordRunEnd(id, s, metricsFrom(opts), Boolean(opts.authoritative)),
@@ -1702,13 +1733,15 @@ withFlags(run.command('list'))
   .action((opts: LeafOpts) =>
     emit('run list', opts, async () => {
       const { queries } = await loadDb();
-      let items = await queries.getRecentRuns({
+      const limit = parseInt(String(opts.limit), 10) || 50;
+      const items = await queries.getRecentRuns({
         active: !!opts.active,
-        limit: parseInt(String(opts.limit), 10) || 50,
+        limit,
+        agent: opts.agent ? String(opts.agent) : undefined, // filtered in SQL, before the limit (M5)
       });
-      if (opts.agent) items = items.filter((r) => r.agentLabel === String(opts.agent));
       return {
-        data: { items, count: items.length },
+        // count = rows returned (capped by --limit); `truncated` signals there may be more matching runs.
+        data: { items, count: items.length, truncated: items.length >= limit },
         human: () => {
           items.forEach((r) =>
             console.log(
@@ -1881,14 +1914,16 @@ withFlags(event.command('list'))
       const { queries } = await loadDb();
       const projectId = opts.project ? await resolveProjectId(queries, String(opts.project)) : undefined;
       const minLevel = opts.level ? assertEnum(String(opts.level), EVENT_LEVELS, 'level') : undefined;
+      const limit = parseInt(String(opts.limit), 10) || 50;
       const items = await queries.getEvents({
         projectId,
         runId: opts.run ? String(opts.run) : undefined,
         minLevel,
-        limit: parseInt(String(opts.limit), 10) || 50,
+        limit,
       });
       return {
-        data: { items, count: items.length },
+        // count = rows returned (capped by --limit); `truncated` signals there may be older matching events (M5).
+        data: { items, count: items.length, truncated: items.length >= limit },
         human: () => {
           items.forEach((e) =>
             console.log(
@@ -1932,9 +1967,18 @@ if (isEntrypoint()) {
     { label: process.env.MC_AGENT ?? 'mc', kind: 'agent', runId: resolveRunId() },
     () => program.parseAsync(process.argv),
   ).catch((err) => {
-    const info = classify(err);
-    process.stderr.write(`Error [${info.code}] ${info.message}\n`);
-    process.exitCode = info.exit;
+    // A CommanderError from exitOverride(): --help/--version are a clean exit 0 (commander already printed to
+    // stdout); a usage error is VALIDATION (exit 2). Everything else goes through classify().
+    const ce = err as { code?: string; exitCode?: number; message?: string } | null;
+    if (ce && typeof ce.code === 'string' && ce.code.startsWith('commander.')) {
+      if (ce.code === 'commander.helpDisplayed' || ce.code === 'commander.version' || ce.code === 'commander.help') {
+        process.exitCode = 0;
+        return;
+      }
+      writeTopLevelError({ code: 'VALIDATION', message: (ce.message ?? 'usage error').replace(/^error:\s*/i, ''), exit: 2 });
+      return;
+    }
+    writeTopLevelError(classify(err));
   });
 }
 

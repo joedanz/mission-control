@@ -74,6 +74,9 @@ In JSON mode, stdout is **exactly one** JSON document; all logs/warnings go to s
 
 - Mutations return the affected row in `data` (so you get the new `id`).
 - Lists return `{ items, count }` (count = total matching; `items` capped by `--limit`, default 50).
+  Two high-volume lists — `run list` and `event list` — instead return `count` = rows returned plus a
+  `truncated` boolean (true when the page hit `--limit`, i.e. there may be more); they don't pay for a full
+  count on every poll. `run list --agent` filters in SQL (before the limit), so it never silently drops matches.
 - `data` keys are camelCase matching the schema (`repoPath`, `lastActivityAt`, `liveUrl`).
 
 **Exit codes:** `0` ok · `1` DB/conflict · `2` validation · `3` not-found · `4` config/credentials.

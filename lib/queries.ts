@@ -264,11 +264,20 @@ const RUN_FEED_COLUMNS = {
 /** Recent runs, newest heartbeat first. `active: true` → only `running` runs (the reaper keeps
  *  this honest by flipping stale ones to 'abandoned'). Lean rows only (the fleet feed + `cc run list`);
  *  use getRunById for the full row a single-run drill-in needs. */
-export async function getRecentRuns(opts: { active?: boolean; limit?: number } = {}): Promise<FleetRunRow[]> {
+export async function getRecentRuns(opts: { active?: boolean; limit?: number; agent?: string } = {}): Promise<FleetRunRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-  const rows = opts.active
-    ? await db.select(RUN_FEED_COLUMNS).from(runs).where(eq(runs.status, 'running')).orderBy(desc(runs.lastHeartbeatAt)).limit(limit)
-    : await db.select(RUN_FEED_COLUMNS).from(runs).orderBy(desc(runs.lastHeartbeatAt)).limit(limit);
+  // Filter in SQL so the limit applies AFTER the filters — previously `--agent` filtered the newest-N window
+  // client-side, silently dropping matching older runs from both items AND count (M5).
+  const conds = [
+    ...(opts.active ? [eq(runs.status, 'running')] : []),
+    ...(opts.agent ? [eq(runs.agentLabel, opts.agent)] : []),
+  ];
+  const rows = await db
+    .select(RUN_FEED_COLUMNS)
+    .from(runs)
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(desc(runs.lastHeartbeatAt))
+    .limit(limit);
   // Attach each run's currently-claimed task (one extra read; claims exist for only a handful of runs).
   // claimedByRunId is cleared on run-end, so this resolves the "run → task" link for in-flight runs.
   const runIds = rows.map((r) => r.id);
