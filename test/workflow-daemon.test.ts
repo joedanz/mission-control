@@ -16,12 +16,26 @@ import { enqueueWorkflowRun } from '../lib/workflow-enqueue';
 import { createWorkflow, createWorkflowRun, getWorkflowRun, listWorkflowRuns, listStepRuns, setWorkflowStatus } from '../lib/workflow-store';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
+// Scope the spawned daemon to THIS test's project so a --once tick can't drain another (real) project's
+// queued run or fire its due cron against the shared dev DB (M23). Set by beforeEach. Plus its own lock dir
+// (M22-style) and a BLANKED COMPOSIO_API_KEY so even a stray drained run's integration node can't take a
+// live external action.
+let scopeProjectId: string | undefined;
+const wfdLockDir = mkdtempSync(join(tmpdir(), 'mc-wfd-test-'));
 
-/** Run the workflow-daemon for a single tick (claims all queued runs, walks them, drains, exits). The stub
- *  executor stands in for `claude` so each agent node "runs" at $0. */
+/** Run the workflow-daemon for a single tick (claims the test project's queued runs, walks them, drains,
+ *  exits). The stub executor stands in for `claude` so each agent node "runs" at $0. */
 function runDaemonOnce(exec: string): void {
   execFileSync(tsxBin, ['daemon/workflow-daemon.ts', '--once'], {
-    env: { ...process.env, MC_DAEMON_EXEC: exec, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '' },
+    env: {
+      ...process.env,
+      MC_DAEMON_EXEC: exec,
+      MC_ALLOW_DATABASE_URL_FALLBACK: '1',
+      INGEST_TOKEN: '',
+      MC_LOCK_DIR: wfdLockDir,
+      COMPOSIO_API_KEY: '', // M23: no live external actions from a drained run
+      ...(scopeProjectId ? { MC_WORKFLOW_DAEMON_ONLY_PROJECT: scopeProjectId } : {}),
+    },
     encoding: 'utf8',
     timeout: 55000,
   });
@@ -59,6 +73,7 @@ describe('workflow daemon — drains queued runs', () => {
       repoPath,
     });
     projectId = p.id;
+    scopeProjectId = projectId; // scope the spawned daemon to this project (M23)
   });
 
   afterEach(async () => {

@@ -38,10 +38,23 @@ function mcWorkflow(args: string[], exec: string): Envelope {
   return JSON.parse(out.trim());
 }
 
-/** Run the workflow-daemon for one tick (claims + walks all queued runs) — the off-process resume path. */
+// Scope the spawned daemon to this test's project (M23) + its own lock dir + a blanked COMPOSIO_API_KEY, so a
+// resume tick can't drain another (real) project's queued run or take a live external action in the shared DB.
+let scopeProjectId: string | undefined;
+const gateLockDir = mkdtempSync(join(tmpdir(), 'mc-gate-test-'));
+
+/** Run the workflow-daemon for one tick (claims + walks the test project's queued runs) — the resume path. */
 function runDaemonOnce(exec: string): void {
   execFileSync(tsxBin, ['daemon/workflow-daemon.ts', '--once'], {
-    env: { ...process.env, MC_DAEMON_EXEC: exec, MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '' },
+    env: {
+      ...process.env,
+      MC_DAEMON_EXEC: exec,
+      MC_ALLOW_DATABASE_URL_FALLBACK: '1',
+      INGEST_TOKEN: '',
+      MC_LOCK_DIR: gateLockDir,
+      COMPOSIO_API_KEY: '',
+      ...(scopeProjectId ? { MC_WORKFLOW_DAEMON_ONLY_PROJECT: scopeProjectId } : {}),
+    },
     encoding: 'utf8',
     timeout: 55000,
   });
@@ -82,6 +95,7 @@ describe('workflow gate — pause → approve / reject', () => {
       repoPath,
     });
     projectId = p.id;
+    scopeProjectId = projectId; // scope the spawned daemon to this project (M23)
   });
 
   afterEach(async () => {
@@ -146,6 +160,44 @@ describe('workflow gate — pause → approve / reject', () => {
       expect(s.g.status).toBe('failed');
       expect(s.a).toBeUndefined(); // halt: the agent was never launched
       expect(existsSync(join(repoPath, 'should-not-exist.txt'))).toBe(false);
+    },
+    60000,
+  );
+
+  // M33: the workflow-cancel surface (previously only the bare store primitive was tested).
+  it(
+    'cancels a PAUSED gate run outright (directCancel) → status cancelled',
+    async () => {
+      const slug = `vt-wfg-cancel-paused-${Date.now()}`;
+      await createWorkflow({ projectId, slug, name: slug, graph: gateGraph() });
+
+      const run = mcWorkflow(['run', slug], 'true');
+      expect(run.data?.status).toBe('paused');
+      const runId = run.data!.workflowRunId!;
+
+      const cancelled = mcWorkflow(['cancel', runId], 'true');
+      expect(cancelled.ok).toBe(true);
+      expect((await getWorkflowRun(runId))?.status).toBe('cancelled'); // paused → cancelled (won't observe the flag otherwise)
+      // single-flight is freed: a new run of the same workflow is now accepted.
+      expect(mcWorkflow(['run', slug], 'true').ok).toBe(true);
+    },
+    60000,
+  );
+
+  it(
+    'cancels a QUEUED (--async, never-claimed) run outright → status cancelled, no steps walked',
+    async () => {
+      const slug = `vt-wfg-cancel-queued-${Date.now()}`;
+      await createWorkflow({ projectId, slug, name: slug, graph: gateGraph() });
+
+      const queued = mcWorkflow(['run', slug, '--async'], 'true'); // enqueue only; no daemon claims it in-test
+      expect(queued.data?.status).toBe('queued');
+      const runId = queued.data!.workflowRunId!;
+
+      const cancelled = mcWorkflow(['cancel', runId], 'true');
+      expect(cancelled.ok).toBe(true);
+      expect((await getWorkflowRun(runId))?.status).toBe('cancelled');
+      expect((await listStepRuns(runId)).length).toBe(0); // never walked
     },
     60000,
   );

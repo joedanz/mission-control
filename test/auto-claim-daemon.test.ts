@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import { join } from 'node:path';
 import { db } from '../lib/db/index';
 import { projects, runs, events, agentProfiles } from '../lib/db/schema';
-import { createProject, addTask, createProfile } from '../lib/mutations';
+import { createProject, addTask, createProfile, recordRunStart, recordRunEnd } from '../lib/mutations';
 import { getTaskById } from '../lib/queries';
 
 describe('auto-claim daemon — --once orchestration (stub executor)', () => {
@@ -36,6 +36,45 @@ describe('auto-claim daemon — --once orchestration (stub executor)', () => {
       await db.delete(agentProfiles).where(eq(agentProfiles.id, profileIds.pop()!));
     }
   });
+
+  it(
+    'downgrades to the fallback model once the profile is over its daily budget (M34)',
+    async () => {
+      const pslug = `vt-budget-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const profile = await createProfile({
+        slug: pslug,
+        name: pslug,
+        model: 'claude-opus-4-8',
+        fallbackModel: 'claude-haiku-4-5-20251001',
+        dailyBudgetMicros: 1000,
+        matchRules: { projectSlugs: [slug] }, // route this project's tasks to THIS profile
+        priority: 100,
+      });
+      profileIds.push(profile.id);
+      // Seed a prior run TODAY for this profile that already blew the budget (5000 µ$ > the 1000 µ$ cap).
+      const prior = await recordRunStart({ agentLabel: 'seed', projectId, agentProfileId: profile.id });
+      await recordRunEnd(prior.id, 'completed', { costMicros: 5000 });
+      await addTask(projectId, 'over-budget task');
+
+      const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
+      execFileSync(tsxBin, ['daemon/auto-claim.ts', '--project', slug, '--once'], {
+        env: { ...process.env, MC_DAEMON_EXEC: 'exit 0', MC_ALLOW_DATABASE_URL_FALLBACK: '1', INGEST_TOKEN: '' },
+        encoding: 'utf8',
+        timeout: 55000,
+        stdio: 'pipe',
+      });
+
+      // The NEW (daemon) run rendered the FALLBACK model, not the primary — the budget pipeline
+      // (profileSpendTodayMicros → chooseModel → --model) fired end-to-end.
+      const projRuns = await db.select().from(runs).where(eq(runs.projectId, projectId));
+      const newRun = projRuns.find((r) => r.agentLabel === 'auto-claim-daemon');
+      expect(newRun?.model).toBe('claude-haiku-4-5-20251001');
+      // …and the downgrade is on the audit log.
+      const evs = await db.select().from(events).where(eq(events.projectId, projectId));
+      expect(evs.some((e) => e.type === 'note' && /downgrad/i.test(e.summary))).toBe(true);
+    },
+    60000,
+  );
 
   it(
     'claims the queued task, runs the (stub) executor, and marks it done with a daemon-attributed run',

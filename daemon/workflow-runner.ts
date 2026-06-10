@@ -12,8 +12,8 @@
 // ABOUTME: existing run and is shared by the sync path and the workflow-daemon (which claims queued runs).
 
 import { randomUUID } from 'node:crypto';
-import { mc, spawnExecutor, monitorAndFinalize, type Log } from './runner';
-import { MissingSkillError } from './render-profile';
+import { mc, spawnExecutor, monitorAndFinalize, profileSpendTodayMicros, recordDowngrade, type Log } from './runner';
+import { MissingSkillError, chooseModel } from './render-profile';
 import {
   getWorkflowById,
   getWorkflowRun,
@@ -373,13 +373,20 @@ async function runAgentNode(
 
   const runId = randomUUID();
 
+  // Cost-aware model pick — same daily-budget downgrade as the auto-claim + scheduler daemons (M34). Without
+  // this a profile's dailyBudgetMicros constrained those daemons but NOT workflow runs, including unattended
+  // cron-fired ones (the most likely place for runaway spend). Computed once so --model and the spawn agree.
+  const spentToday = profile ? await profileSpendTodayMicros(profile, log) : 0;
+  const choice = chooseModel(profile, spentToday);
+
   // Open the run through the mc CLI FIRST (run-only visibility: this row drives cost/heartbeat/feed/cancel).
   // It must exist before the step links it — workflow_step_runs.run_id is an FK to runs.id.
   const startArgs = ['run', 'start', '--id', runId, '--agent', AGENT_LABEL, '--project', home.slug, '--source', 'manual', '--title', `workflow:${slug} node:${node.id}`];
   if (profile) startArgs.push('--profile', profile.slug);
-  if (profile?.model) startArgs.push('--model', profile.model);
+  if (choice.model) startArgs.push('--model', choice.model);
   const started = await mc(startArgs);
   if (!started.ok) return fail(`mc run start failed (${started.error?.code ?? started.code})`);
+  if (choice.downgraded && profile) await recordDowngrade(choice, profile, spentToday, runId, home.slug, log);
   const step = await upsertStepRun(wfRunId, node.id, { status: 'running', startedAt: new Date(), runId });
 
   let spawned;
@@ -389,7 +396,7 @@ async function runAgentNode(
       runId,
       repoPath: home.repoPath,
       profile,
-      effectiveModel: profile?.model ?? null,
+      effectiveModel: choice.model,
       basePermissionMode: opts.basePermissionMode ?? DEFAULT_PERMISSION_MODE,
       jsonSchema: data.responseSchema, // structured output → captured as result.structured_output
       teeStream: process.stderr, // keep stdout clean for the CLI's JSON envelope

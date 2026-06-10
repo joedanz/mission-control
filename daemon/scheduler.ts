@@ -12,12 +12,11 @@
 // Single instance globally (tmpdir lockfile). Liveness/crash recovery of spawned runs is the existing reaper.
 
 import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProfile } from '../lib/db/schema';
 import { chooseModel, MissingSkillError, type ModelChoice } from './render-profile';
 import { CHECK_IN_MAX_TASKS } from '../lib/constants';
-import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, fetchComposioMcpServers, type Spawned } from './runner';
+import { mc, sleep, profileSpendTodayMicros, spawnExecutor, monitorAndFinalize, recordDowngrade, acquireLock, lockDir, fetchComposioMcpServers, type Spawned } from './runner';
 import { isDue, buildCheckInPrompt } from './schedule';
 
 const AGENT_LABEL = process.env.MC_SCHEDULER_AGENT || 'mc-scheduler';
@@ -153,7 +152,12 @@ async function tick(a: Args): Promise<void> {
     return;
   }
   const now = new Date();
+  // Test-only scoping: when MC_SCHEDULER_ONLY_PROFILE is set, this scheduler can fire ONLY that profile —
+  // so a --once test tick can't pick up a REAL due profile and consume its check-in slot / mark its real
+  // queued task done against the shared dev DB (M21). Unset in production (the default — fires all profiles).
+  const onlyProfile = process.env.MC_SCHEDULER_ONLY_PROFILE;
   const due = ((profsR.data as { items: AgentProfile[] }).items ?? []).filter((profile) => {
+    if (onlyProfile && profile.slug !== onlyProfile) return false;
     if (inFlight.has(profile.slug)) return false; // its previous check-in is still running → skip this tick
     // mc serializes timestamps to ISO strings; rehydrate lastCheckInAt for the date math.
     const lastCheckInAt = profile.lastCheckInAt ? new Date(profile.lastCheckInAt as unknown as string) : null;
@@ -204,7 +208,7 @@ async function main() {
     });
   }
 
-  const releaseLock = acquireLock(join(tmpdir(), 'mc-scheduler.lock'), 'the scheduler'); // one instance globally
+  const releaseLock = acquireLock(join(lockDir(), 'mc-scheduler.lock'), 'the scheduler'); // one instance globally (MC_LOCK_DIR isolates tests)
   process.on('exit', releaseLock);
 
   log(`started — mode=${a.once ? 'once' : `poll ${a.pollSec}s`} permission=${a.permissionMode}`);

@@ -145,8 +145,20 @@ export async function claimWorkflowRun(id: string): Promise<WorkflowRun | null> 
   return rows[0] ?? null;
 }
 
-/** The workflow-daemon's poll query: queued runs awaiting a claim, oldest-first (FIFO). */
-export async function listQueuedWorkflowRuns(limit = 20): Promise<WorkflowRun[]> {
+/** The workflow-daemon's poll query: queued runs awaiting a claim, oldest-first (FIFO). An optional projectId
+ *  scopes to one project's workflows (joins workflow_runs → workflows) — the daemon uses it under
+ *  MC_WORKFLOW_DAEMON_ONLY_PROJECT so a test tick can't drain another project's real queued runs (M23). */
+export async function listQueuedWorkflowRuns(limit = 20, projectId?: string): Promise<WorkflowRun[]> {
+  if (projectId) {
+    const rows = await db
+      .select({ run: workflowRuns })
+      .from(workflowRuns)
+      .innerJoin(workflows, eq(workflowRuns.workflowId, workflows.id))
+      .where(and(eq(workflowRuns.status, 'queued'), eq(workflows.projectId, projectId)))
+      .orderBy(asc(workflowRuns.startedAt))
+      .limit(limit);
+    return rows.map((r) => r.run);
+  }
   return db
     .select()
     .from(workflowRuns)

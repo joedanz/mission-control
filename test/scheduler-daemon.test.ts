@@ -7,19 +7,28 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { eq } from 'drizzle-orm';
 import { join } from 'node:path';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { db } from '../lib/db/index';
 import { projects, runs, events, agentProfiles, tasks } from '../lib/db/schema';
 import { createProject, createProfile, addTask } from '../lib/mutations';
 import { getProfileBySlug } from '../lib/queries';
 
 const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
-const runOnce = () =>
+// Isolate the test scheduler from the always-on production scheduler (M22): its own lock dir, so the two
+// never contend on the shared $TMPDIR lockfile (which used to make `npm test` fail whenever the launchd
+// scheduler service was running). `onlyProfile` scopes the tick to THIS test's fixture profile (M21) so a
+// --once tick can't fire a real due profile and corrupt its check-in slot / queued task in the shared dev DB.
+const lockDir = mkdtempSync(join(tmpdir(), 'mc-sched-test-'));
+const runOnce = (onlyProfile: string) =>
   execFileSync(tsxBin, ['daemon/scheduler.ts', '--once'], {
     env: {
       ...process.env,
       MC_DAEMON_EXEC: 'exit 0', // stub: a clean child with no hooks → daemon owns the run.end
       MC_ALLOW_DATABASE_URL_FALLBACK: '1', // let the daemon's `mc` use DATABASE_URL (no mc_agent file in test)
       INGEST_TOKEN: '', // no telemetry posts from the test
+      MC_LOCK_DIR: lockDir, // M22: don't contend with the live scheduler's lock
+      MC_SCHEDULER_ONLY_PROFILE: onlyProfile, // M21: fire ONLY the fixture profile
     },
     encoding: 'utf8',
     timeout: 55000,
@@ -63,7 +72,7 @@ describe('scheduler daemon — --once tick (stub executor)', () => {
       expect(profile.lastCheckInAt).toBeNull();
 
       // First tick: profile has never checked in → due → one run spawned.
-      runOnce();
+      runOnce(slug);
 
       const after1 = await getProfileBySlug(slug);
       expect(after1?.lastCheckInAt).not.toBeNull(); // clock advanced
@@ -76,7 +85,7 @@ describe('scheduler daemon — --once tick (stub executor)', () => {
       expect(runs1[0].agentProfileId).toBe(profile.id);
 
       // Second immediate tick: now − lastCheckInAt ≪ 3600s → NOT due → no new run.
-      runOnce();
+      runOnce(slug);
       const runs2 = await db.select().from(runs).where(eq(runs.projectId, projectId));
       expect(runs2.length).toBe(1);
     },
@@ -99,7 +108,7 @@ describe('scheduler daemon — --once tick (stub executor)', () => {
       const task = await addTask(projectId, 'pre-claim me');
       expect(task.status).toBe('todo');
 
-      runOnce(); // due → run start → checked-in → claim task → spawn stub (exit 0) → clean completion
+      runOnce(slug); // due → run start → checked-in → claim task → spawn stub (exit 0) → clean completion
 
       // terminalizeClaimsForRun closes the loop: a completed run auto-marks its claimed custom tasks done
       // and clears the claim. Without the scheduler's pre-claim the task would still be 'todo' (the bug).
