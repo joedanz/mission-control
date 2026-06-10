@@ -2,6 +2,7 @@
 // ABOUTME: INGEST_TOKEN; writes go THROUGH lib/mutations (no inline Drizzle) so the single-writer holds.
 
 import { withActor } from '@/lib/actor-context';
+import { bearerMatches } from '@/lib/bearer-auth';
 import * as mutations from '@/lib/mutations';
 import * as queries from '@/lib/queries';
 import { RUN_STATUSES, RUN_SOURCES, EVENT_TYPES, EVENT_LEVELS } from '@/lib/db/schema';
@@ -30,8 +31,7 @@ function metricsFrom(b: Body) {
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
 export async function POST(request: Request): Promise<Response> {
-  const token = process.env.INGEST_TOKEN;
-  if (!token || request.headers.get('authorization') !== `Bearer ${token}`) {
+  if (!bearerMatches(request.headers.get('authorization'), process.env.INGEST_TOKEN)) {
     return json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'bad or missing bearer token' } }, 401);
   }
 
@@ -105,6 +105,9 @@ export async function POST(request: Request): Promise<Response> {
         return json({ ok: false, error: { code: 'BAD_REQUEST', message: `unknown type "${type}"` } }, 400);
     }
   } catch (err) {
-    return json({ ok: false, error: { code: 'DB', message: err instanceof Error ? err.message : String(err) } }, 500);
+    // Don't echo raw DB diagnostics (constraint/column/table names, FK details) to an unauthenticated-shaped
+    // caller — log server-side, return a generic message.
+    console.error('[ingest] write failed:', err);
+    return json({ ok: false, error: { code: 'DB', message: 'internal error processing ingest' } }, 500);
   }
 }
