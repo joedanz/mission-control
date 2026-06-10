@@ -176,11 +176,13 @@ The trigger node decides how a workflow fires. All three land on the same execut
   <Step title="Event — from an external webhook">
     Give the trigger an `event` of `{ source?, types? }` and an **active** workflow fires from
     `POST /api/workflows/<slug>/webhook`. The request is authenticated by an HMAC over the raw body
-    (`X-Hub-Signature-256`, GitHub-compatible), keyed by a single global `WORKFLOW_WEBHOOK_SECRET` — no
-    secret is ever stored in the database. The JSON body lands in the run's context and reaches the
-    graph as `{{trigger.output.*}}`. An optional `types` allowlist is matched against the
-    `X-GitHub-Event` header. Run `mc workflow webhook-url <slug>` for the exact URL and signing
-    details.
+    (`X-Hub-Signature-256`, GitHub-compatible), keyed by a **per-workflow** secret derived as
+    `HMAC-SHA256(WORKFLOW_WEBHOOK_SECRET, slug)` — the single global secret stays on the server and
+    seeds each workflow's key, so a delivery signed for one workflow can't be re-aimed at another by
+    swapping the URL slug, and nothing is ever stored in the database. The JSON body lands in the
+    run's context and reaches the graph as `{{trigger.output.*}}`. An optional `types` allowlist is
+    matched against the `X-GitHub-Event` header. Run `mc workflow webhook-url <slug>` for the exact
+    URL and the **derived** signing secret the sender configures.
   </Step>
 </Steps>
 
