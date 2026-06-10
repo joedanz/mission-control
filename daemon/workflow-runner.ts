@@ -216,7 +216,14 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
             terminal.add(nodeId);
             continue;
           }
-          inflight.set(nodeId, executeNode(node).then((r) => ({ nodeId, ...r })));
+          // Attach a no-op rejection guard at REGISTRATION (M28): a launched promise only acquires a handler
+          // when it later reaches Promise.race below — but the `await upsertStepRun(...,'skipped',...)` between
+          // registrations can throw under a DB blip, escaping the loop with freshly-launched promises that were
+          // never raced. On Node an unhandled rejection terminates the process, killing every other in-flight
+          // walk. The guard ensures a rejection is always handled; the promise itself is still raced normally.
+          const p = executeNode(node).then((r) => ({ nodeId, ...r }));
+          p.catch(() => {});
+          inflight.set(nodeId, p);
         }
       }
 
@@ -243,7 +250,12 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
       else halted = true;
     }
   } catch (err) {
-    await setWorkflowRunStatus(run.id, 'failed');
+    // Let any in-flight nodes settle before we leave (their linked agent runs are independently monitored +
+    // finalized; we just don't want their promises rejecting unhandled after we've unwound). Then mark the run
+    // failed — guarded, since under the same outage that DB write can also reject and would otherwise replace
+    // the original error and re-open the unhandled-rejection window (M28).
+    await Promise.allSettled(inflight.values());
+    try { await setWorkflowRunStatus(run.id, 'failed'); } catch { /* DB blip — the reaper reconciles a stale run */ }
     throw err; // surface ValidationError/etc. to the CLI envelope
   } finally {
     clearInterval(heartbeat);

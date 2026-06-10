@@ -55,6 +55,18 @@ const log = (msg: string) => console.log(`[auto-claim ${new Date().toISOString()
 
 let shuttingDown = false;
 
+// Force-quit backstop (M37): the in-flight child is spawned detached in its OWN process group, so a second
+// SIGINT/SIGTERM's process.exit() would orphan it (still running + spending, with its monitor gone). We track
+// the live child's pid so the force-quit handler can SIGTERM its group before exiting.
+let activeChildPid: number | null = null;
+
+// Circuit breaker (H6): a spawn-render failure is DETERMINISTIC (an unset profile ${ENV}, a missing skill on
+// disk), so the failed run releases its task → `mc task next` returns the SAME task → it fails again, forever,
+// with no backoff: tens of thousands of junk runs/events a day. Count consecutive spawn failures per task id;
+// once a task trips the breaker, skip it WITHOUT opening a run (zero junk) until the operator fixes the config.
+const SPAWN_FAILURE_MAX = 3;
+const spawnFailures = new Map<string, number>();
+
 type Task = { id: string; label: string; notes: string | null };
 
 /** Frame untrusted task text as DATA between markers so an injected directive ("ignore prior instructions
@@ -86,7 +98,7 @@ async function resolveProfileForTask(task: Task, a: Args): Promise<AgentProfile 
 /** Claim + run exactly one task. 'done' = a task was attempted; 'empty' = the queue is genuinely empty;
  *  'error' = an mc command failed transiently — kept DISTINCT from 'empty' so --once doesn't mistake a DB
  *  blip for an empty queue and silently skip a queued task. */
-async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' | 'error'> {
+async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' | 'error' | 'blocked'> {
   const next = await mc(['task', 'next', '--project', a.project]);
   if (!next.ok) {
     log(`mc task next failed (${next.error?.code ?? next.code}: ${next.error?.message ?? ''}) — will retry`);
@@ -94,6 +106,13 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
   }
   const task = next.data as Task | null;
   if (!task) return 'empty';
+
+  // Breaker tripped for this task → skip it WITHOUT opening a run/claim (no junk runs/events). The queue head
+  // stays wedged until the operator fixes the profile and restarts the daemon; we surface that, don't hammer it.
+  if ((spawnFailures.get(task.id) ?? 0) >= SPAWN_FAILURE_MAX) {
+    log(`task ${task.id.slice(0, 8)} "${task.label}" failed to spawn ${SPAWN_FAILURE_MAX}× (deterministic — unset env / missing skill); skipping. Fix its profile, then restart the daemon.`);
+    return 'blocked';
+  }
 
   const profile = await resolveProfileForTask(task, a);
   // Cost-aware model pick: if this profile has a daily budget + fallback and has already spent past the cap
@@ -105,7 +124,14 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
   const startArgs = ['run', 'start', '--id', runId, '--agent', AGENT_LABEL, '--source', 'cli', '--work-dir', repoPath, '--project', a.project, '--title', task.label];
   if (profile) startArgs.push('--profile', profile.slug); // links the run → profile (run.agentProfileId)
   if (choice.model) startArgs.push('--model', choice.model); // record the model that actually runs
-  await mc(startArgs);
+  // M36: check the run-start envelope. If it failed the run row never exists, so the claim below would hit an
+  // FK violation and be misread as a lost race — instead back off (the 'error' path) so we don't spin or
+  // spawn against a phantom run. (Mirrors the `task next` error handling above.)
+  const started = await mc(startArgs);
+  if (!started.ok) {
+    log(`run start for "${task.label}" failed (${started.error?.code ?? started.code}) — backing off`);
+    return 'error';
+  }
 
   const claim = await mc(['task', 'claim', task.id, '--run', runId]);
   if (!claim.ok) {
@@ -139,16 +165,25 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
     });
   } catch (e) {
     // Failed before launch — an unset profile-secret ${ENV}, or a declared skill missing on disk
-    // (MissingSkillError). Fail the run cleanly, don't spawn broken.
+    // (MissingSkillError). Fail the run cleanly, don't spawn broken. Count it toward the per-task breaker so a
+    // deterministic failure can't spin forever; emit the error event only on the FIRST failure (no event spam).
+    const n = (spawnFailures.get(task.id) ?? 0) + 1;
+    spawnFailures.set(task.id, n);
     const msg = (e as Error).message;
     const skillMiss = e instanceof MissingSkillError;
-    log(`spawn ${skillMiss ? 'skill resolution' : 'render'} failed for "${task.label}": ${msg} — failing run`);
-    await mc(['event', 'add', msg, '--type', skillMiss ? 'skill.unresolved' : 'note', '--level', 'error', '--run', runId, '--project', a.project]);
+    log(`spawn ${skillMiss ? 'skill resolution' : 'render'} failed for "${task.label}" (${n}/${SPAWN_FAILURE_MAX}): ${msg} — failing run`);
+    if (n === 1) await mc(['event', 'add', msg, '--type', skillMiss ? 'skill.unresolved' : 'note', '--level', 'error', '--run', runId, '--project', a.project]);
     await mc(['run', 'end', runId, 'failed']);
-    return 'done';
+    return 'error'; // back off; the next poll re-checks the breaker (which trips at SPAWN_FAILURE_MAX → 'blocked')
   }
-  const { status, exitCode, cancelled, timedOut } = await monitorAndFinalize(spawned, runId, { timeoutSec: a.timeoutSec, graceSec: a.graceSec }, log);
-  log(`run ${runId.slice(0, 8)} → ${status} (child exit ${exitCode}${cancelled ? ', cancelled' : ''}${timedOut ? ', timed out' : ''})`);
+  spawnFailures.delete(task.id); // a successful spawn clears any prior transient failures for this task
+  activeChildPid = spawned.child.pid ?? null; // M37: force-quit can SIGTERM this child's group
+  try {
+    const { status, exitCode, cancelled, timedOut } = await monitorAndFinalize(spawned, runId, { timeoutSec: a.timeoutSec, graceSec: a.graceSec }, log);
+    log(`run ${runId.slice(0, 8)} → ${status} (child exit ${exitCode}${cancelled ? ', cancelled' : ''}${timedOut ? ', timed out' : ''})`);
+  } finally {
+    activeChildPid = null;
+  }
   return 'done';
 }
 
@@ -163,7 +198,14 @@ async function main() {
   const a = parseArgs(process.argv.slice(2));
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
-      if (shuttingDown) process.exit(130);
+      if (shuttingDown) {
+        // Force-quit: terminate the in-flight child's whole process group first so it doesn't outlive us as
+        // an unmonitored, still-spending orphan (M37). It's detached in its own group → SIGTERM the negative pid.
+        if (activeChildPid) {
+          try { process.kill(-activeChildPid, 'SIGTERM'); } catch { /* group already gone */ }
+        }
+        process.exit(130);
+      }
       shuttingDown = true;
       log(`${sig} received — finishing the in-flight task, then stopping (repeat to force-quit)`);
     });
@@ -199,6 +241,17 @@ async function main() {
         break;
       }
       await sleep(a.pollSec * 1000); // transient failure — back off, then retry
+      continue;
+    }
+    if (result === 'blocked') {
+      // The queue head is a task whose spawn deterministically fails (breaker tripped). Don't count it toward
+      // --max-tasks, don't spin: under --once exit non-zero (nothing was accomplished); else back off and poll.
+      if (a.once) {
+        log('aborting — queue head is wedged on a task that cannot spawn (--once)');
+        process.exitCode = 1;
+        break;
+      }
+      await sleep(a.pollSec * 1000);
       continue;
     }
     // 'empty'

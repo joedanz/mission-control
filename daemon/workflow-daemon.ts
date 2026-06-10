@@ -70,7 +70,16 @@ async function scanCronWorkflows(): Promise<void> {
     }
     if (!schedule) continue;
 
-    const anchor = (await latestCronRunAt(wf.id)) ?? wf.updatedAt;
+    // The ONE unguarded await in this otherwise best-effort scan: a transient Neon failure here would reject
+    // scanCronWorkflows → tick → main → process.exit(1), killing the whole daemon (every in-flight walk loses
+    // its walker). Guard it like every sibling call — log + skip this workflow.
+    let anchor;
+    try {
+      anchor = (await latestCronRunAt(wf.id)) ?? wf.updatedAt;
+    } catch (e) {
+      log(`cron scan: anchor read for ${wf.slug} failed: ${e instanceof Error ? e.message : e} — skipping this workflow`);
+      continue;
+    }
     const fields = { scheduleCron: schedule.cron ?? null, scheduleIntervalSec: schedule.intervalSec ?? null, scheduleTimezone: schedule.timezone ?? null, lastCheckInAt: anchor };
     if (!isDue(fields, now)) continue;
 

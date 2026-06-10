@@ -83,17 +83,26 @@ describe('auto-claim daemon — --once orchestration (stub executor)', () => {
       await addTask(projectId, 'task whose profile declares a missing skill');
 
       const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
-      execFileSync(tsxBin, ['daemon/auto-claim.ts', '--project', slug, '--once'], {
-        env: {
-          ...process.env,
-          MC_DAEMON_EXEC: 'exit 0', // even with the stub, resolution runs above it → throws before any spawn
-          MC_ALLOW_DATABASE_URL_FALLBACK: '1',
-          INGEST_TOKEN: '',
-        },
-        encoding: 'utf8',
-        timeout: 55000,
-        stdio: 'pipe',
-      });
+      // A deterministic spawn-render failure now takes the 'error' path (so the poll loop backs off instead of
+      // spinning — H6). Under --once that exits non-zero: the task did NOT run, and a cron wrapper checking the
+      // exit code must see that. execFileSync throws on the non-zero exit; assert exactly that.
+      let exitCode = 0;
+      try {
+        execFileSync(tsxBin, ['daemon/auto-claim.ts', '--project', slug, '--once'], {
+          env: {
+            ...process.env,
+            MC_DAEMON_EXEC: 'exit 0', // even with the stub, resolution runs above it → throws before any spawn
+            MC_ALLOW_DATABASE_URL_FALLBACK: '1',
+            INGEST_TOKEN: '',
+          },
+          encoding: 'utf8',
+          timeout: 55000,
+          stdio: 'pipe',
+        });
+      } catch (e) {
+        exitCode = (e as { status?: number }).status ?? -1;
+      }
+      expect(exitCode).toBe(1); // --once aborts non-zero when the single task couldn't spawn
 
       // The run was opened then hard-failed before launch.
       const projRuns = await db.select().from(runs).where(eq(runs.projectId, projectId));
