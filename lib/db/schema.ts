@@ -286,6 +286,11 @@ export const runs = pgTable(
     workDir: text('work_dir'), // the hook's cwd
     transcriptRef: text('transcript_ref'), // path to on-disk transcript — never the body
     cancelRequested: boolean('cancel_requested').notNull().default(false), // kill-switch request flag — write: setRunCancelRequested; surfaced on heartbeat responses + enforced by the PreToolUse hook (PR #22) when installed
+    // The single task this run is currently working — the serialization point for the one-in-flight-task-per-run
+    // cap (M26). claimTask sets it via a conditional UPDATE on THIS row, so the row lock serializes two parallel
+    // `claim --run R` calls (the old NOT EXISTS cap checked the tasks table and both racers passed). A later
+    // sequential claim takes the slot over once the prior task is done/expired/deleted (no other code clears it).
+    activeClaimTaskId: text('active_claim_task_id'),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
     lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }).notNull().defaultNow(),

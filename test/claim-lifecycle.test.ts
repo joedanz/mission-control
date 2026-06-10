@@ -159,6 +159,26 @@ describe('claimTask one-claim-per-run cap', () => {
     await claimTask(a.id, r1.id);
     expect((await claimTask(b.id, r2.id))?.claimedByRunId).toBe(r2.id);
   });
+
+  // M26: two CONCURRENT claims under the same run on DIFFERENT tasks. The old NOT EXISTS cap checked the
+  // tasks table, so each racer's snapshot missed the other's in-flight write and BOTH won — leaving the run
+  // with two live claims (run-end then mass-completes both though only one was worked). The runs-row slot
+  // serializes them: exactly one wins, the loser's task claim is rolled back, so the run holds ONE claim.
+  it('two concurrent claims under one run resolve to exactly ONE live claim (no double-claim race)', async () => {
+    const r = await mkRun();
+    const a = await addTask(projectId, 'A');
+    const b = await addTask(projectId, 'B');
+    const results = await Promise.allSettled([claimTask(a.id, r.id), claimTask(b.id, r.id)]);
+    const won = results.filter((x) => x.status === 'fulfilled' && x.value);
+    const lost = results.filter((x) => x.status === 'rejected');
+    expect(won.length).toBe(1); // exactly one claim succeeded
+    expect(lost.length).toBe(1);
+    expect((lost[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictError);
+    // And exactly one of the two tasks is actually held by the run; the other was rolled back to unclaimed.
+    const claimedBy = await Promise.all([getTaskById(a.id), getTaskById(b.id)]);
+    expect(claimedBy.filter((t) => t?.claimedByRunId === r.id).length).toBe(1);
+    expect(claimedBy.filter((t) => t?.claimedByRunId === null).length).toBe(1);
+  });
 });
 
 describe('getNextClaimableTask', () => {

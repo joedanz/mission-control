@@ -486,6 +486,36 @@ export async function claimTask(
     else reason = `run ${runId?.slice(0, 8)} already holds a live claim on another unfinished task (one in-flight task per run)`;
     throw new ConflictError('task', `Task ${taskId} is not claimable (${reason})`);
   }
+  if (runId) {
+    // Serialize same-run claims through the run's single slot (M26). Step A's NOT EXISTS cap above checks the
+    // TASKS table, so two concurrent `claim --run R` on DIFFERENT rows each evaluate it before the other's
+    // write is visible and BOTH pass — leaving R holding two live claims (run-end then marks BOTH done though
+    // only one was worked: silent lost work). This UPDATE targets the ONE runs row, so its row lock serializes
+    // the racers. The subquery lets a later SEQUENTIAL claim take over the slot once the prior task is
+    // done / expired / released / deleted, so no other code path has to clear it.
+    const slot = await db
+      .update(runs)
+      .set({ activeClaimTaskId: taskId })
+      .where(
+        and(
+          eq(runs.id, runId),
+          sql`(${runs.activeClaimTaskId} is null
+                or ${runs.activeClaimTaskId} = ${taskId}
+                or not exists (select 1 from ${tasks} t where t.id = ${runs.activeClaimTaskId}
+                     and t.claim_expires_at > now() and t.status <> 'done' and t.claimed_by_run_id = ${runId}))`,
+        ),
+      )
+      .returning({ id: runs.id });
+    if (!slot.length) {
+      // Lost the slot → another in-flight task already holds it. Roll back the task claim we just made (a
+      // compensating release; neon-http has no transactions) and refuse — BEFORE the task.claimed event below.
+      await db
+        .update(tasks)
+        .set({ claimedByRunId: null, claimedAt: null, claimExpiresAt: null, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+        .where(eq(tasks.id, taskId));
+      throw new ConflictError('task', `Task ${taskId} is not claimable (run ${runId.slice(0, 8)} already holds a live claim on another unfinished task)`);
+    }
+  }
   await Promise.all([
     touchProject(row.projectId),
     recordEvent({
