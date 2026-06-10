@@ -34,6 +34,9 @@ export function useBoard(
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
+  // Discard a superseded in-flight response: a board fetch slower than the 4s interval (cold DB / flaky net)
+  // could otherwise resolve AFTER a newer one and merge stale rows. Mirrors useWorkflowRun's loadSeq guard.
+  const loadSeq = useRef(0);
 
   const merge = useCallback((server: BoardData) => {
     const pending = pendingRef.current;
@@ -73,23 +76,25 @@ export function useBoard(
   }, []);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const qs = new URLSearchParams();
       if (projectSlug) qs.set('project', projectSlug);
       const res = await fetch(`/api/board?${qs.toString()}`, { cache: 'no-store' });
       if (!res.ok) {
-        setError(`HTTP ${res.status}`);
+        if (seq === loadSeq.current) setError(`HTTP ${res.status}`);
         return;
       }
       const json = await res.json();
+      if (seq !== loadSeq.current) return; // a newer load superseded this one — don't merge stale rows
       if (json.ok) {
         merge(json.data as BoardData);
         setError(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (seq === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoaded(true);
+      if (seq === loadSeq.current) setLoaded(true);
     }
   }, [projectSlug, merge]);
 

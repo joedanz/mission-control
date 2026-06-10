@@ -15,12 +15,24 @@ export type WfNodeData = {
   prompt?: string;
   profileSlug?: string;
   trigger?: string;
+  schedule?: { cron?: string; intervalSec?: number; timezone?: string };
+  event?: { source?: string; types?: string[] };
   toolkit?: string;
   action?: string;
   cases?: BranchCase[];
   message?: string;
   stepStatus?: WorkflowStepStatus;
 };
+
+/** A trigger node's human label, derived from its real data — a scheduled/webhook trigger carries
+ *  data.schedule / data.event, not data.trigger, so a bare `d.trigger ?? 'manual'` mislabels every real
+ *  trigger as 'manual'. */
+function triggerLabel(d: WfNodeData): string {
+  if (d.schedule?.cron) return `cron: ${d.schedule.cron}`;
+  if (typeof d.schedule?.intervalSec === 'number') return `every ${d.schedule.intervalSec}s`;
+  if (d.event) return d.event.source ? `event: ${d.event.source}` : 'event (webhook)';
+  return d.trigger ?? 'manual';
+}
 
 const STEP_LABEL: Record<WorkflowStepStatus, string> = {
   pending: 'pending', running: 'running', completed: 'done', failed: 'failed', skipped: 'skipped',
@@ -52,7 +64,7 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
   const d = data as WfNodeData;
   return (
     <Shell data={d} kind="trigger" accent="trigger">
-      <div className="wf-node__body wf-node__body--mono">{d.trigger ?? 'manual'}</div>
+      <div className="wf-node__body wf-node__body--mono">{triggerLabel(d)}</div>
       {SOURCE}
     </Shell>
   );
