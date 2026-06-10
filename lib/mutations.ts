@@ -928,16 +928,21 @@ export async function recordRunEnd(
   authoritative = false,
 ): Promise<Run | null> {
   const set = monotonicMetricSet(metrics, authoritative);
-  // Cancel-guard: a run the operator cancelled must NOT auto-complete its claimed work. When the caller
-  // asks for 'completed' but cancel_requested is set, record 'abandoned' instead so terminalizeClaimsForRun
-  // RELEASES the claim back to the queue rather than marking unfinished work done (the kill-switch's whole
-  // point). Folded into the single conditional UPDATE (race-safe on neon-http) and idempotent under re-post
-  // — the Stop hook AND a supervising daemon can both end the run; the guard holds on every write. Other
-  // terminal statuses (failed/abandoned) pass through unchanged.
+  // Terminal-status gate + cancel-guard, folded into one conditional UPDATE (race-safe on neon-http).
+  //  • Terminal gate: once a run is terminal its status is FROZEN. A late Stop hook (or duplicate run.end)
+  //    must not resurrect a reaper-'abandoned' run to 'completed' — which would hide the abandonment AND,
+  //    since terminalize then finds no claims, leave the actually-finished task stuck. Metrics below still
+  //    apply via GREATEST (a late authoritative cost post on a terminal run is correct), only `status`/the
+  //    derived event freeze.
+  //  • Cancel-guard: when the caller asks 'completed' but cancel_requested is set, record 'abandoned' so
+  //    terminalizeClaimsForRun RELEASES the claim rather than marking unfinished work done.
+  // Idempotent under re-post — the Stop hook AND a supervising daemon can both end the run.
   set.status =
     status === 'completed'
-      ? sql`case when ${runs.cancelRequested} then 'abandoned' else 'completed' end`
-      : status;
+      ? sql`case when ${runs.status} <> 'running' then ${runs.status}
+                  when ${runs.cancelRequested} then 'abandoned'
+                  else 'completed' end`
+      : sql`case when ${runs.status} <> 'running' then ${runs.status} else ${status} end`;
   set.endedAt = sql`coalesce(${runs.endedAt}, now())`;
   set.lastHeartbeatAt = sql`greatest(${runs.lastHeartbeatAt}, now())`;
   const rows = await db.update(runs).set(set).where(eq(runs.id, id)).returning();

@@ -3,7 +3,7 @@
 // ABOUTME: transcript (cost priced per-message by model via hooks/pricing.mjs). Wired to Stop AND
 // ABOUTME: SubagentStop, but a finishing subagent must NOT tear down the parent's run (see below).
 
-import { readStdin, post, readRunId, clearRunId, clearCancelFlag, sumTranscriptTokens, AGENT_LABEL } from './_lib.mjs';
+import { readStdin, post, resolveRunId, clearRunId, clearCancelFlag, sumTranscriptTokens, AGENT_LABEL } from './_lib.mjs';
 
 const input = await readStdin();
 const cwd = input.cwd || process.cwd();
@@ -14,10 +14,9 @@ const cwd = input.cwd || process.cwd();
 // switch). Only a real session Stop closes the run. (Missing hook_event_name → treat as Stop: safe default.)
 if (input.hook_event_name === 'SubagentStop') process.exit(0);
 
-const runId = readRunId(cwd);
+const runId = resolveRunId(cwd); // MC_RUN_ID (this child's own run) over the shared cwd file
 if (!runId) {
-  clearCancelFlag(cwd); // no open run to end, but never leave a kill-switch flag for the next run
-  process.exit(0);
+  process.exit(0); // no open run for this hook to end
 }
 
 const totals = sumTranscriptTokens(input.transcript_path);
@@ -30,6 +29,6 @@ await post({
   ...totals, // tokensIn/out/cacheRead/cacheWrite + costMicros — absolute, applied with a GREATEST guard server-side
 });
 
-clearRunId(cwd);
-clearCancelFlag(cwd); // run is over — drop the kill-switch flag (session-start also clears it next run)
+clearRunId(cwd); // clear the cwd bootstrap file (benign if a sibling re-writes it; consumers prefer MC_RUN_ID)
+clearCancelFlag(runId); // run is over — drop THIS run's kill-switch flag
 process.exit(0);

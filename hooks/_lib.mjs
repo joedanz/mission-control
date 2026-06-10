@@ -39,6 +39,17 @@ export function readRunId(cwd) {
     return null;
   }
 }
+
+/** The run THIS hook process belongs to. Prefer the spawn-injected MC_RUN_ID (daemon children — auto-claim,
+ *  scheduler, and the workflow walker's parallel agent nodes — each carry their OWN id in env) over the
+ *  cwd-keyed file. This MUST mirror cli/index.ts resolveRunId(). Why it matters: multiple children can run in
+ *  ONE repo cwd (a workflow fan-out, or a scheduled check-in landing on an auto-claim-locked repo), and the
+ *  cwd-keyed file is a single slot they clobber — so a heartbeat/run.end keyed on the FILE attributes to
+ *  whichever child wrote last. Keying on MC_RUN_ID gives each child its own identity; interactive sessions
+ *  (no MC_RUN_ID, one agent per cwd) fall back to the file exactly as before. */
+export function resolveRunId(cwd) {
+  return process.env.MC_RUN_ID || readRunId(cwd);
+}
 export function writeRunId(cwd, id) {
   try {
     writeFileSync(runFile(cwd), id, { mode: 0o600 });
@@ -55,31 +66,33 @@ export function clearRunId(cwd) {
 }
 
 // ── Kill-switch flag (R9 enforcement) ───────────────────────────────────────────
-// A cwd-keyed LOCAL flag: the PostToolUse heartbeat sets it when the server reports the run is
-// cancel_requested (the heartbeat response already round-trips that bit), and the PreToolUse hook reads
-// it — with NO network on the hot path — to halt the turn before the next tool. Detection lags by one
+// A LOCAL flag keyed on the RUN ID (not cwd): the PostToolUse heartbeat sets it when the server reports the
+// run is cancel_requested (the heartbeat response already round-trips that bit), and the PreToolUse hook
+// reads it — with NO network on the hot path — to halt the turn before the next tool. Detection lags by one
 // tool call, which is fine for a kill switch, and keeping the check local means it costs nothing on
-// uncancelled runs. Cleared on session-start (fresh run) and run-end (stop).
-function cancelFile(cwd) {
-  return join(tmpdir(), `mc-cancel-${cwdKey(cwd)}`);
+// uncancelled runs. Cleared on session-start (fresh run) and run-end (stop). Keying on the run id (both
+// hooks resolve the SAME id via resolveRunId) means cancelling one of several concurrent children in a repo
+// halts only THAT child, and a sibling's session-start can't wipe this run's pending kill-switch.
+function cancelFile(runId) {
+  return join(tmpdir(), `mc-cancel-${createHash('sha1').update(String(runId)).digest('hex').slice(0, 16)}`);
 }
-export function readCancelFlag(cwd) {
+export function readCancelFlag(runId) {
   try {
-    return existsSync(cancelFile(cwd));
+    return runId ? existsSync(cancelFile(runId)) : false;
   } catch {
     return false; // fail-open: a flag we can't read must never block a tool
   }
 }
-export function writeCancelFlag(cwd) {
+export function writeCancelFlag(runId) {
   try {
-    writeFileSync(cancelFile(cwd), '1', { mode: 0o600 });
+    if (runId) writeFileSync(cancelFile(runId), '1', { mode: 0o600 });
   } catch {
     /* best-effort */
   }
 }
-export function clearCancelFlag(cwd) {
+export function clearCancelFlag(runId) {
   try {
-    rmSync(cancelFile(cwd), { force: true });
+    if (runId) rmSync(cancelFile(runId), { force: true });
   } catch {
     /* best-effort */
   }

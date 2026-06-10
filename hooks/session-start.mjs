@@ -24,6 +24,9 @@ await post({
   title: input.source ? `session: ${input.source}` : null,
 });
 
+// The cwd-keyed file remains the interactive bootstrap (a plain `mc` shell sharing this cwd reads it when
+// MC_RUN_ID is unset). Concurrent daemon children may clobber it, but that's now harmless: every consumer
+// (the hooks here + cli resolveRunId) prefers MC_RUN_ID, so each child attributes to its OWN run.
 writeRunId(cwd, runId);
-clearCancelFlag(cwd); // a fresh run starts un-cancelled, even if a prior run in this cwd was cancelled
+clearCancelFlag(runId); // a fresh run starts un-cancelled (only THIS run's flag, not a sibling's)
 process.exit(0);

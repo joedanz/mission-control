@@ -12,6 +12,9 @@ import type { AgentProfile, McpServerConfig } from '../lib/db/schema';
 import { planSpawn, resolveMcpConfigJson, mergeMcpServers, MissingSkillError, type ModelChoice } from './render-profile';
 import { resolveSkills, userSkillsDir } from '../lib/skills';
 import { loadPluginContext, pluginSkillStatus } from '../lib/plugin-skills';
+// Pure transcript parser shared with the Claude Code hooks (.mjs so node can run it un-built; tsx + allowJs
+// let the daemon import it type-safely). Used only on the kill path to recover a cost estimate.
+import { sumTranscriptTokens } from '../hooks/_lib.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MC_BIN = process.env.MC_BIN || `node ${join(ROOT, 'bin', 'mc.mjs')}`;
@@ -288,13 +291,15 @@ export async function monitorChild(
   const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
 
   while ((await Promise.race([exited.then(() => 'exit' as const), sleep(2000).then(() => 'tick' as const)])) === 'tick') {
-    if (!cancelled) {
-      const r = await mc(['run', 'get', runId]);
-      if ((r.data as { cancelRequested?: boolean } | null)?.cancelRequested) {
-        cancelled = true;
-        log(`run ${runId.slice(0, 8)} cancel_requested — kill-switch hook gets ${opts.graceSec}s, then SIGTERM→SIGKILL`);
-        escalate(opts.graceSec); // cooperative grace before the OS-signal backstop
-      }
+    // One lean call per tick does double duty: it BUMPS lastHeartbeatAt (so a long-running tool call — a
+    // multi-minute build/test, the product's normal workload — can't go heartbeat-stale and get falsely
+    // abandoned by the reaper, releasing its claimed task mid-work) AND returns cancel_requested for the
+    // kill-switch. `run heartbeat` is gated on status='running' and skips the 501-event fetch `run get` did.
+    const r = await mc(['run', 'heartbeat', runId]);
+    if (!cancelled && (r.data as { cancelRequested?: boolean } | null)?.cancelRequested) {
+      cancelled = true;
+      log(`run ${runId.slice(0, 8)} cancel_requested — kill-switch hook gets ${opts.graceSec}s, then SIGTERM→SIGKILL`);
+      escalate(opts.graceSec); // cooperative grace before the OS-signal backstop
     }
     if (!timedOut && (Date.now() - startedAt) / 1000 > opts.timeoutSec) {
       timedOut = true;
@@ -353,8 +358,31 @@ export async function monitorAndFinalize(
       '--cache-write', String(metrics.cacheWriteTokens)]);
     if (r.ok) log(`recorded authoritative cost $${(metrics.costMicros / 1e6).toFixed(4)} for run ${runId.slice(0, 8)}`);
     else log(`authoritative cost post failed for run ${runId.slice(0, 8)} (${r.error?.code ?? r.code}) — estimate stands`);
+  } else if (cancelled || timedOut) {
+    // A killed child (cancel/timeout → SIGTERM→SIGKILL) prints no `--output-format json` result line and
+    // runs no Stop hook, so parseResultMetrics is null and the run would record $0 forever — undercounting
+    // the spend rollup AND the daily-budget downgrade (a profile whose runs keep timing out never trips its
+    // cap). Recover a best-effort estimate from the transcript the SessionStart hook stored on the run.
+    await recoverKilledRunCost(runId, status, log);
   }
   return { status, exitCode, cancelled, timedOut };
+}
+
+/** Best-effort cost recovery for a killed run (M12). Reads the run's transcriptRef (recorded by the
+ *  SessionStart hook) and sums per-message token/cost from the .jsonl, then records it NON-authoritatively
+ *  (server-side GREATEST guard; the M11 terminal-status gate keeps the run terminal — only metrics advance).
+ *  No-op when there's no transcript (exec runtime / hooks not installed) or nothing to record. */
+async function recoverKilledRunCost(runId: string, status: string, log: Log): Promise<void> {
+  const r = await mc(['run', 'get', runId]);
+  const ref = (r.data as { transcriptRef?: string | null } | null)?.transcriptRef;
+  if (!ref) return;
+  const t = sumTranscriptTokens(ref);
+  if (!t.costMicros && !t.tokensIn && !t.tokensOut) return;
+  const res = await mc(['run', 'end', runId, status,
+    '--cost-micros', String(t.costMicros), '--tokens-in', String(t.tokensIn), '--tokens-out', String(t.tokensOut),
+    '--cache-read', String(t.cacheReadTokens), '--cache-write', String(t.cacheWriteTokens)]);
+  if (res.ok) log(`recovered ~$${(t.costMicros / 1e6).toFixed(4)} from transcript for killed run ${runId.slice(0, 8)}`);
+  else log(`transcript-cost recovery failed for run ${runId.slice(0, 8)} (${res.error?.code ?? res.code})`);
 }
 
 function isAlive(pid: number): boolean {

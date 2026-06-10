@@ -2,11 +2,11 @@
 // ABOUTME: Claude Code PostToolUse hook → heartbeat (keeps the run "live") + a debug-level tool_call
 // ABOUTME: event retained for replay (filtered out of the info-level activity feed).
 
-import { readStdin, post, readRunId, writeCancelFlag, AGENT_LABEL } from './_lib.mjs';
+import { readStdin, post, resolveRunId, writeCancelFlag, AGENT_LABEL } from './_lib.mjs';
 
 const input = await readStdin();
 const cwd = input.cwd || process.cwd();
-const runId = readRunId(cwd);
+const runId = resolveRunId(cwd); // MC_RUN_ID (this child's own run) over the shared cwd file
 if (!runId) process.exit(0); // no open run for this cwd — nothing to do
 
 const tool = input.tool_name || input.tool || 'tool';
@@ -28,6 +28,6 @@ const [hb] = await Promise.all([
 // so the PreToolUse hook can halt the NEXT tool with no network call of its own. A null response (server
 // unreachable / terminal run) leaves any existing flag untouched. We only ever SET here — the flag is
 // cleared on session-start (fresh run) and run-end (stop.mjs); cancel_requested is one-way today.
-if (hb?.data?.cancelRequested) writeCancelFlag(cwd);
+if (hb?.data?.cancelRequested) writeCancelFlag(runId);
 
 process.exit(0);
