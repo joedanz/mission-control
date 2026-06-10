@@ -4,14 +4,15 @@
 // ABOUTME: Reads a LOCAL flag the PostToolUse heartbeat set — no network on the hot path. Fail-open:
 // ABOUTME: any problem → allow the tool, because a kill switch must never wedge a legitimate run.
 
-import { readStdin, readCancelFlag, killSwitchHalt } from './_lib.mjs';
+import { readStdin, resolveRunId, readCancelFlag, killSwitchHalt } from './_lib.mjs';
 
 const input = await readStdin();
 const cwd = input.cwd || process.cwd();
+const runId = resolveRunId(cwd); // same resolution as PostToolUse so reader + writer share the flag key
 
 // Only act when the flag is present. We do NOT clear it: continue:false ends this turn, and if the
 // session resumes the run is still cancelled, so it should keep halting until run-end (stop.mjs clears it).
-if (readCancelFlag(cwd)) {
+if (readCancelFlag(runId)) {
   process.stdout.write(JSON.stringify(killSwitchHalt()));
 }
 process.exit(0);

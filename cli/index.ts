@@ -388,6 +388,7 @@ const SPEC = [
   { name: 'run list', readonly: true, summary: 'List recent runs (newest heartbeat first)', options: ['--active', '--agent', '--limit'] },
   { name: 'run get', readonly: true, summary: 'Show a run with its event trail', args: ['<id>'] },
   { name: 'run cancel', readonly: false, summary: 'Request cancellation of a running run (enforced by the PreToolUse kill-switch hook when installed)', args: ['<id>'] },
+  { name: 'run heartbeat', readonly: false, summary: 'Refresh a running run\'s liveness + return {status, cancelRequested} (lean; the supervising daemon polls it)', args: ['<id>'] },
   { name: 'event add', readonly: false, summary: 'Append an event to the activity log', required: ['--type'], args: ['<summary...>'], options: ['--project', '--task', '--run', '--level', '--agent'] },
   { name: 'event list', readonly: true, summary: 'List recent events (newest first)', options: ['--project', '--run', '--level', '--limit'] },
   { name: 'spend', readonly: true, summary: 'Cost rollup over runs (grouped, windowed)', options: ['--group-by project|agent|day|run', '--since', '--until', '--project', '--agent', '--profile', '--limit'] },
@@ -1750,6 +1751,24 @@ withFlags(run.command('cancel'))
       return {
         data: row,
         human: () => console.log(`Cancel requested for run ${id.slice(0, 8)} (${row.agentLabel}) — the kill-switch hook halts its next tool call when wired`),
+      };
+    }),
+  );
+
+withFlags(run.command('heartbeat'))
+  .description('Refresh a running run\'s liveness (lastHeartbeatAt) and return its {status, cancelRequested}. ' +
+    'Lean by design — the supervising daemon calls it every poll to keep a long tool call / node from going ' +
+    'heartbeat-stale (so the reaper can\'t falsely abandon a live run) AND to read the kill-switch flag, ' +
+    'without the heavy event-trail fetch of `run get`. No-op on an already-terminal run (returns null).')
+  .argument('<id>')
+  .action((id: string, opts: LeafOpts) =>
+    emit('run heartbeat', opts, async () => {
+      const { mutations } = await loadDb();
+      const row = await mutations.recordRunHeartbeat(id); // gated on status='running'; null if terminal/absent
+      return {
+        data: row && { id: row.id, status: row.status, cancelRequested: row.cancelRequested, lastHeartbeatAt: row.lastHeartbeatAt },
+        human: () =>
+          console.log(row ? `♥ run ${id.slice(0, 8)} ${row.status}${row.cancelRequested ? ' ⚠ cancel requested' : ''}` : `run ${id.slice(0, 8)} not running (terminal/absent) — no heartbeat`),
       };
     }),
   );

@@ -41,6 +41,12 @@ const DEFAULT_GRACE_SEC = 15;
 const DEFAULT_PERMISSION_MODE = 'acceptEdits'; // agent nodes need write access; null-profile path uses this
 const AGENT_LABEL = 'workflow-runner';
 const DEFAULT_MAX_PARALLEL = 4; // cap on concurrently in-flight nodes (agent spawns are the expensive ones)
+// The walker bumps the run's heartbeat at the top of each scheduler tick, but a tick then BLOCKS in
+// `Promise.race(inflight)` until a node finishes — and an agent node may run up to DEFAULT_TIMEOUT_SEC.
+// Without an independent beat, any node longer than RUN_STALE_THRESHOLD_SEC (120s) lets the reaper falsely
+// fail a live walk, which (via the count-based single-flight guard) lets a duplicate paid run enqueue.
+// A timer decoupled from node completion keeps the run live regardless of how long the current node takes.
+const WORKFLOW_HEARTBEAT_TICK_MS = 30_000;
 
 export type RunWorkflowOpts = {
   trigger?: WorkflowTrigger;
@@ -178,6 +184,10 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   const maxParallel = Math.max(1, opts.maxParallel ?? DEFAULT_MAX_PARALLEL);
   const inflight = new Map<string, Promise<{ nodeId: string } & NodeResult & { chosen?: string }>>();
 
+  // Heartbeat on a TIMER, independent of node completion — the loop below blocks in Promise.race until a
+  // node finishes, so the per-tick touch alone starves during any long node. `.catch` keeps a transient DB
+  // blip from becoming a process-killing unhandled rejection.
+  const heartbeat = setInterval(() => { void touchWorkflowRun(run.id).catch(() => {}); }, WORKFLOW_HEARTBEAT_TICK_MS);
   try {
     // Ready-set scheduler: each tick launch every decidable+reached node (skipping the unreached instantly),
     // up to maxParallel in flight, then await the next completion and fold its result back in. Independent
@@ -235,6 +245,8 @@ export async function walkWorkflowRun(run: WorkflowRun, opts: RunWorkflowOpts = 
   } catch (err) {
     await setWorkflowRunStatus(run.id, 'failed');
     throw err; // surface ValidationError/etc. to the CLI envelope
+  } finally {
+    clearInterval(heartbeat);
   }
 
   // finalStatus is still 'completed' here unless cancellation flipped it. A gate awaiting approval pauses the run

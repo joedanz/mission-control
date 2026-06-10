@@ -1,7 +1,7 @@
 // ABOUTME: DB CRUD for workflows + workflow_runs + workflow_step_runs. Pure Drizzle (no graph logic, no
 // ABOUTME: spawn) — the DB-testable seam under the CLI + daemon walker, mirroring lib/composio-store.ts.
 
-import { eq, and, asc, desc, count, inArray, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, count, inArray, notInArray, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
   workflows, workflowRuns, workflowStepRuns,
@@ -200,10 +200,14 @@ export async function latestCronRunAt(workflowId: string): Promise<Date | null> 
 const TERMINAL_RUN_STATUSES: WorkflowRunStatus[] = ['completed', 'failed', 'cancelled'];
 
 export async function setWorkflowRunStatus(id: string, status: WorkflowRunStatus): Promise<WorkflowRun | null> {
+  // Terminal gate (mirrors recordRunEnd): a terminal workflow run is FROZEN. The walker writes the final
+  // status unconditionally at the end of its walk; if the reaper already failed a heartbeat-starved run,
+  // that write must not resurrect it to 'completed'. Only a non-terminal run (queued/running/paused) takes
+  // a new status. Race-safe single statement; a no-op on an already-terminal run returns null.
   const rows = await db
     .update(workflowRuns)
     .set({ status, ...(TERMINAL_RUN_STATUSES.includes(status) ? { endedAt: new Date() } : {}) })
-    .where(eq(workflowRuns.id, id))
+    .where(and(eq(workflowRuns.id, id), notInArray(workflowRuns.status, TERMINAL_RUN_STATUSES)))
     .returning();
   return rows[0] ?? null;
 }
