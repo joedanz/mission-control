@@ -27,8 +27,12 @@ let resolved = false;
 export function ensureDbCredentials(): void {
   if (resolved) return;
 
-  // 1. Already injected into the environment (the recommended path for remote/CI)?
-  if (!process.env.AGENT_DATABASE_URL && !process.env.DATABASE_URL) {
+  // 1. Load the local credential file unless AGENT_DATABASE_URL is ALREADY in the environment (the recommended
+  //    remote/CI path). Crucially we do NOT also short-circuit on a pre-set DATABASE_URL: direnv / a CI
+  //    migration job / a shell that exported it for the web app would otherwise skip the file that holds the
+  //    scoped AGENT_DATABASE_URL — then step 3 throws telling the user to populate the very file it refused to
+  //    read. dotenv does not override existing vars, so loading the file leaves a pre-set DATABASE_URL intact.
+  if (!process.env.AGENT_DATABASE_URL) {
     // 2. Load the local credential file — but only if its perms are tight.
     const path = credentialPath();
     let exists = true;
