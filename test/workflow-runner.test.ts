@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db } from '../lib/db/index';
-import { projects, runs, events, type WorkflowGraph } from '../lib/db/schema';
+import { projects, runs, events, type WorkflowGraph, type WorkflowNode } from '../lib/db/schema';
 import { createProject } from '../lib/mutations';
 import { getNextClaimableTask } from '../lib/queries';
 import { createWorkflow, getWorkflowRun, listStepRuns } from '../lib/workflow-store';

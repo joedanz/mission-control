@@ -28,6 +28,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The docs site is a separately-built Holocron bundle; its prebuilt static output
+    // (huge minified JS) crashes eslint with "RangeError: Invalid string length".
+    "docs/dist/**",
+    "docs/.vercel/**",
   ]),
 ]);
 

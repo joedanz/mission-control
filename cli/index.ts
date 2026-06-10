@@ -771,7 +771,7 @@ withFlags(task.command('next'))
 withFlags(task.command('claim'))
   .description('Claim a task for the current run (single-statement, race-safe; loses → CONFLICT)')
   .argument('<id>')
-  .option('--run <id>', 'run id to claim under (default: CC_RUN_ID / the session run file)')
+  .option('--run <id>', 'run id to claim under (default: MC_RUN_ID / the session run file)')
   .option('--ttl <seconds>', 'claim TTL in seconds (default: CLAIM_TTL_SEC)')
   .action((id: string, opts: LeafOpts) =>
     emit('task claim', opts, async () => {
