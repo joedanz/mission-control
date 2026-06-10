@@ -14,7 +14,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except: /login, the auth API, the bearer-auth ingest + cron routes (they
-  // authenticate via token, not a session cookie), Next internals, and static assets.
-  matcher: ['/((?!login|api/auth|api/ingest|api/cron|_next/static|_next/image|favicon.ico).*)'],
+  // Everything except: /login, the auth API, the bearer-auth ingest + cron routes, the public
+  // HMAC-authed workflow webhook (all authenticate via token/signature, not a session cookie),
+  // Next internals, and static assets.
+  matcher: [
+    '/((?!login|api/auth|api/ingest|api/cron|api/workflows/[^/]+/webhook|_next/static|_next/image|favicon.ico).*)',
+  ],
 };

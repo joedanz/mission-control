@@ -12,7 +12,7 @@ locked to `you@example.com`) · Vercel.
 1. `cp .env.example .env.local` and fill it in (see below).
 2. `npm install`
 3. `npm run db:migrate` — apply migrations to Neon (run as the **owner** role).
-4. `npm run dev` — open http://localhost:3000 and sign in with Google as `you@example.com`.
+4. `npm run dev` — open http://localhost:3030 and sign in with Google as `you@example.com`.
 
 Useful: `npm run db:studio` (Drizzle Studio), `npm run db:generate` (regenerate migration SQL
 after a schema change).
