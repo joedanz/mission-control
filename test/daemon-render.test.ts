@@ -106,6 +106,13 @@ describe('resolveMcpConfigJson (pure)', () => {
       resolveMcpConfigJson({ gh: { type: 'http', url: 'https://api', headers: { Authorization: 'Bearer ${GH}' } } }, {}),
     ).toThrow(MissingEnvError);
   });
+  it('resolves an ${ENV} placeholder in the URL (query-token remote MCP) (M20)', () => {
+    const json = resolveMcpConfigJson(
+      { svc: { type: 'http', url: 'https://s/mcp?api_key=${SVC_TOKEN}' } },
+      { SVC_TOKEN: 'sk-real-9' },
+    );
+    expect(JSON.parse(json!).mcpServers.svc.url).toBe('https://s/mcp?api_key=sk-real-9');
+  });
 });
 
 describe('planSpawn — no profile (back-compat)', () => {

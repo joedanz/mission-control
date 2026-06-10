@@ -68,6 +68,11 @@ export function resolveMcpConfigJson(
   const resolved: Record<string, McpServerConfig> = {};
   for (const [name, cfg] of Object.entries(servers)) {
     const next: McpServerConfig = { ...cfg };
+    if (cfg.url) {
+      // Resolve ${ENV} in the URL too (M20) — a query-token endpoint's only valid config is
+      // ?api_key=${TOKEN} (validateRemoteInput rejects a literal), so the placeholder MUST resolve at spawn.
+      next.url = resolvePlaceholders(cfg.url, hostEnv, `mcpServers.${name}.url`);
+    }
     if (cfg.env) {
       next.env = Object.fromEntries(
         Object.entries(cfg.env).map(([k, v]) => [k, resolvePlaceholders(v, hostEnv, `mcpServers.${name}.env.${k}`)]),

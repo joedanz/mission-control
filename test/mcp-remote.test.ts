@@ -40,4 +40,18 @@ describe('validateRemoteInput', () => {
   it('rejects a header value with no ${ENV} placeholder (would persist a literal secret)', () => {
     expect(() => validateRemoteInput({ name: 'x', url: 'https://a', headers: { Authorization: 'Bearer sk-raw-secret' } })).toThrow(ValidationError);
   });
+
+  it('rejects a URL with a LITERAL credential query param (would persist a secret in remoteUrl) (M20)', () => {
+    expect(() => validateRemoteInput({ name: 'x', url: 'https://s/mcp?api_key=sk-literal-123', headers: {} })).toThrow(ValidationError);
+    expect(() => validateRemoteInput({ name: 'x', url: 'https://s/mcp?token=abc', headers: {} })).toThrow(ValidationError);
+  });
+
+  it('accepts a URL whose credential query param is an ${ENV} placeholder (resolved at spawn) (M20)', () => {
+    const out = validateRemoteInput({ name: 'x', url: 'https://s/mcp?api_key=${MY_TOKEN}', headers: {} });
+    expect(out.url).toBe('https://s/mcp?api_key=${MY_TOKEN}'); // stored verbatim — no literal secret
+  });
+
+  it('allows a non-credential query param with a literal value', () => {
+    expect(() => validateRemoteInput({ name: 'x', url: 'https://s/mcp?page=2&limit=10', headers: {} })).not.toThrow();
+  });
 });
