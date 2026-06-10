@@ -24,11 +24,11 @@ Mirror the new secrets locally in `.env.local` if testing ingest/reaper there (t
 
 ## 2. Database (production Neon)
 
-- ✅ **Migrations applied.** `0001_*` (runs/events + `tasks.version`) and `0002_*` (task-claim columns) are
-  applied to the production DB. Local `.env.local` `DATABASE_URL` should point at an **isolated Neon `dev`
-  branch** (see `.env.example`), NOT prod — so local migrations/seeds never touch live data. Migrating prod
-  is a deliberate owner action: run `npm run db:migrate` with the prod owner string swapped in. (Vercel never
-  runs migrations.)
+- ✅ **Migrations applied.** Local `.env.local` `DATABASE_URL` is currently pointed at the **prod** Neon branch
+  (the one Vercel uses), so `npm run db:migrate` (owner) and `npm test` run against prod directly — a migration
+  is live on prod as soon as it's applied locally; there is no separate prod-migrate step. (Vercel never runs
+  migrations.) A `dev` branch exists for isolation but isn't the active target — repoint `DATABASE_URL`/
+  `AGENT_DATABASE_URL` at it (and re-sync with `neonctl branches reset dev`) when you want local work off prod.
 - ✅ **Scoped roles created (2026-05-29)** via SQL as owner (no Neon CLI). Three roles: `neondb_owner` (local
   migrations/seed), `app_user` (Vercel prod — read/write incl. auth, no DDL/owner), `mc_agent` (CLI — scoped):
   ```sql
