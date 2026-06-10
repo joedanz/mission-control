@@ -1,7 +1,7 @@
 // ABOUTME: Read helpers for the dashboard — projects+tasks, derived Sentry/Zoho grids, stats.
 // ABOUTME: No `server-only` so the CLI can reuse these. Grids are "loose" with live denominators.
 
-import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gte, inArray, lt, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
   projects,
@@ -19,6 +19,7 @@ import {
 } from './db/schema';
 import { RUN_STALE_THRESHOLD_SEC, type SpendGroupBy } from './constants';
 import { profileMatchesContext, type MatchContext } from './profiles';
+import { OVERALL_DONE_CAP } from './board'; // board.ts is type-only-importing → no runtime cycle
 
 export type ProjectWithTasks = Project & { tasks: Task[] };
 
@@ -178,15 +179,37 @@ export async function getProjectsWithTasks(
           .where(eq(projects.archived, mode === 'archived'))
           .orderBy(asc(projects.sortOrder), asc(projects.name));
 
-  const [allProjects, allTasks] = await Promise.all([
-    projectsQuery,
-    db.select().from(tasks).orderBy(asc(tasks.sortOrder), asc(tasks.createdAt)),
-  ]);
+  const allProjects = await projectsQuery;
+  if (!allProjects.length) return [];
+  const projectIds = allProjects.map((p) => p.id);
+
+  // Cap Done per project IN SQL (M29). This is the hottest read in the app (both boards' 4-6s poll, the
+  // /projects page, getDashboard, and `mc project list`), and it previously did an unfiltered
+  // `SELECT * FROM tasks` — every row of a monotonically-growing table (run-completion auto-creates done
+  // tasks) every poll, only to discard all but OVERALL_DONE_CAP done per project in JS. Now: scope to the
+  // selected (non-archived) projects, return all non-done tasks, and keep only the OVERALL_DONE_CAP
+  // most-recent done per project via a window — matching the cap toBoardProject already applies.
+  const ranked = db
+    .select({
+      ...getTableColumns(tasks),
+      doneRank: sql<number>`case when ${tasks.status} = 'done'
+        then row_number() over (partition by ${tasks.projectId} order by ${tasks.completedAt} desc nulls last)
+        else 0 end`.as('done_rank'),
+    })
+    .from(tasks)
+    .where(inArray(tasks.projectId, projectIds))
+    .as('ranked');
+  const rows = await db
+    .select()
+    .from(ranked)
+    .where(sql`${ranked.doneRank} <= ${OVERALL_DONE_CAP}`)
+    .orderBy(asc(ranked.sortOrder), asc(ranked.createdAt));
 
   const tasksByProject = new Map<string, Task[]>();
-  for (const t of allTasks) {
+  for (const row of rows) {
+    const { doneRank, ...t } = row; // drop the window helper column (ignoreRestSiblings); t is a Task
     const arr = tasksByProject.get(t.projectId) ?? [];
-    arr.push(t);
+    arr.push(t as Task);
     tasksByProject.set(t.projectId, arr);
   }
 
