@@ -183,6 +183,9 @@ export const tasks = pgTable(
     index('tasks_claimable_idx')
       .on(t.sortOrder, t.createdAt)
       .where(sql`status = 'todo'`),
+    // claimed_by_run_id was a bare FK with no index, yet it's the join key for the hottest auxiliary lookups
+    // (getRecentRuns claim attach, run-end, every reaper tick) — each did a seq-scan of the tasks table.
+    index('tasks_claimed_by_run_idx').on(t.claimedByRunId),
   ],
 );
 
@@ -299,6 +302,9 @@ export const runs = pgTable(
     index('runs_status_heartbeat_idx').on(t.status, t.lastHeartbeatAt), // the reaper's index
     index('runs_agent_idx').on(t.agentLabel),
     index('runs_parent_idx').on(t.parentRunId),
+    // Fleet feed: getRecentRuns (no `active`) does ORDER BY last_heartbeat_at DESC LIMIT 20 over the whole
+    // table. The (status, last_heartbeat_at) index can't serve a GLOBAL order; this one does (reverse scan).
+    index('runs_heartbeat_idx').on(t.lastHeartbeatAt),
   ],
 );
 
@@ -327,7 +333,9 @@ export const events = pgTable(
   (t) => [
     index('events_order_idx').on(t.createdAt, t.seq), // replay / feed ordering
     index('events_project_idx').on(t.projectId),
-    index('events_run_idx').on(t.runId),
+    // Run drill-in: getRunEvents does WHERE run_id ORDER BY created_at DESC, seq DESC LIMIT 500. A (run_id)
+    // index forced a bitmap-fetch-all + top-N sort; the composite serves the order directly (reverse scan).
+    index('events_run_idx').on(t.runId, t.createdAt, t.seq),
     uniqueIndex('events_idempotency_uq')
       .on(t.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`), // dedupe retried appends
