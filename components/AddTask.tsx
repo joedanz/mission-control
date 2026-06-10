@@ -12,9 +12,13 @@ export function AddTask({ projectId, onAdded }: { projectId: string; onAdded?: (
   function submit() {
     const value = label.trim();
     if (!value) return;
-    setLabel('');
+    setLabel(''); // clear optimistically so the next task can be typed immediately
     startTransition(() => {
-      void addTask(projectId, value).then(() => onAdded?.());
+      // Restore the typed text if the add rejects — otherwise the input was already cleared (line above) and
+      // the user's task is silently lost with no feedback (M18).
+      void addTask(projectId, value)
+        .then(() => onAdded?.())
+        .catch(() => setLabel(value));
     });
   }
 

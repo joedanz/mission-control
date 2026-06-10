@@ -100,7 +100,12 @@ export function useBoard(
           ...p,
           tasks: p.tasks.map((t) => {
             let next = t;
-            if (t.id === movedId && toStatus && toStatus !== t.status) next = { ...next, status: toStatus };
+            if (t.id === movedId && toStatus && toStatus !== t.status) {
+              // Mirror moveTask: a card entering Done needs a completedAt so it sorts INTO the (capped) Done
+              // window instead of vanishing for a poll cycle (null sorts last → sliced out, or filtered by a
+              // today/7d window). Leaving Done clears it. (M16)
+              next = { ...next, status: toStatus, completedAt: toStatus === 'done' ? new Date().toISOString() : null };
+            }
             const idx = orderedIds.indexOf(t.id);
             if (idx >= 0) next = { ...next, sortOrder: idx };
             return next;
@@ -117,5 +122,13 @@ export function useBoard(
     [intervalMs],
   );
 
-  return { projects: data.projects, runs: data.runs, loaded, error, reload: load, applyMove };
+  // Drop a task's pending hold so the NEXT merge accepts server truth immediately. Called on a refused move
+  // (res.ok false) before reload() — otherwise merge() keeps holding the failed optimistic row for the full
+  // settle window (intervalMs*2), and the revert fetch is silently ignored, so the card sits in the wrong
+  // place with no error indicator until the window elapses (M15).
+  const clearPending = useCallback((taskId: string) => {
+    pendingRef.current.delete(taskId);
+  }, []);
+
+  return { projects: data.projects, runs: data.runs, loaded, error, reload: load, applyMove, clearPending };
 }

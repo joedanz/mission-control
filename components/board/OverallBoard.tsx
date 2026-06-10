@@ -68,7 +68,7 @@ const Lane = memo(function Lane({
 
 export function OverallBoard({ initial }: { initial: BoardData }) {
   // Heavier payload than the Mission feed → poll a bit slower. Single poller feeds both board + rail.
-  const { projects, runs, error, applyMove, reload } = useBoard({ initial, intervalMs: 6000 });
+  const { projects, runs, error, applyMove, reload, clearPending } = useBoard({ initial, intervalMs: 6000 });
   const claimantFor = useMemo(() => claimantResolver(runs), [runs]);
 
   const sensors = useSensors(
@@ -127,7 +127,10 @@ export function OverallBoard({ initial }: { initial: BoardData }) {
       orderedIds: plan.orderedIds,
       expectedVersion: plan.statusChanged ? plan.version : undefined,
     });
-    if (!res.ok) reload();
+    if (!res.ok) {
+      clearPending(activeId); // accept server truth immediately instead of holding the failed optimistic row
+      reload();
+    }
   }
 
   return (

@@ -111,16 +111,27 @@ export function planDrop(
 ): DropPlan | null {
   const moved = tasks.find((t) => t.id === activeId);
   if (!moved) return null;
+  // Self-drop: releasing over the card's own slot (common after the 6px activation wiggle). overId===activeId
+  // would make others.findIndex(overId) return -1 → append-to-end, silently rewriting sort_order (which steers
+  // the auto-claim queue). No move (M14).
+  if (overId === activeId) return null;
 
   const destTasks = tasks.filter((t) => t.status === toStatus);
-  const others = destTasks
-    .filter((t) => t.id !== activeId)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const destFull = destTasks.slice().sort((a, b) => a.sortOrder - b.sortOrder); // dest incl. active (same-column)
+  const others = destFull.filter((t) => t.id !== activeId);
 
-  let insertAt = others.length;
+  let insertAt = others.length; // default: dropped onto the column body → append below all cards
   if (!overIsColumn) {
-    const overIdx = others.findIndex((t) => t.id === overId);
-    if (overIdx >= 0) insertAt = overIdx;
+    const overIdxOthers = others.findIndex((t) => t.id === overId);
+    if (overIdxOthers >= 0) {
+      // arrayMove semantics (match dnd-kit's sortable preview): when the active card started ABOVE the over
+      // card in this SAME column it lands AFTER it; otherwise (an upward drag, or a cross-column drop where
+      // active isn't in destFull) it lands AT the over card's index. The old code always used the over index,
+      // so a downward drag landed one slot short and a one-slot-down drag was a no-op snapback (M14).
+      const activeIdxFull = destFull.findIndex((t) => t.id === activeId);
+      const overIdxFull = destFull.findIndex((t) => t.id === overId);
+      insertAt = activeIdxFull >= 0 && activeIdxFull < overIdxFull ? overIdxOthers + 1 : overIdxOthers;
+    }
   }
   const orderedIds = [
     ...others.slice(0, insertAt).map((t) => t.id),
