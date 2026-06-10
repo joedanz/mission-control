@@ -35,6 +35,19 @@ function parseArgs(argv: string[]): Args {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
+  // Parse an integer flag distinguishing ABSENT (→ default) from a literal value (incl. 0). `Number(x) || def`
+  // silently swallowed `--max-tasks 0` (a natural "no-op/dry validation" → Infinity = unbounded paid runs) and
+  // `--timeout 0`. Now an out-of-range/garbage value is a hard error instead of a silent default.
+  const intFlag = (flag: string, def: number, min: number): number => {
+    const raw = get(flag);
+    if (raw === undefined) return def;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min) {
+      console.error(`${flag} must be an integer >= ${min} (got "${raw}")`);
+      process.exit(2);
+    }
+    return n;
+  };
   const project = get('--project');
   if (!project) {
     console.error('usage: tsx daemon/auto-claim.ts --project <slug> [--once] [--poll <sec>] [--permission-mode plan] [--timeout <sec>] [--grace <sec>] [--max-tasks <n>]');
@@ -43,11 +56,11 @@ function parseArgs(argv: string[]): Args {
   return {
     project,
     once: argv.includes('--once'),
-    pollSec: Number(get('--poll')) || 10,
+    pollSec: intFlag('--poll', 10, 1),
     permissionMode: get('--permission-mode') || 'plan',
-    timeoutSec: Number(get('--timeout')) || 900,
-    graceSec: Number(get('--grace')) || 15,
-    maxTasks: Number(get('--max-tasks')) || Infinity,
+    timeoutSec: intFlag('--timeout', 900, 1),
+    graceSec: intFlag('--grace', 15, 1),
+    maxTasks: intFlag('--max-tasks', Infinity, 0), // 0 = a no-op dry run (loop `processed < 0` never runs)
   };
 }
 
@@ -103,7 +116,7 @@ async function resolveProfileForTask(task: Task, a: Args): Promise<AgentProfile 
 /** Claim + run exactly one task. 'done' = a task was attempted; 'empty' = the queue is genuinely empty;
  *  'error' = an mc command failed transiently — kept DISTINCT from 'empty' so --once doesn't mistake a DB
  *  blip for an empty queue and silently skip a queued task. */
-async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' | 'error' | 'blocked'> {
+async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' | 'error' | 'blocked' | 'lost'> {
   const next = await mc(['task', 'next', '--project', a.project]);
   if (!next.ok) {
     log(`mc task next failed (${next.error?.code ?? next.code}: ${next.error?.message ?? ''}) — will retry`);
@@ -140,15 +153,27 @@ async function processNext(repoPath: string, a: Args): Promise<'done' | 'empty' 
 
   const claim = await mc(['task', 'claim', task.id, '--run', runId]);
   if (!claim.ok) {
-    // Lost the race (another worker / not claimable) or claim failed — release the run, re-poll.
-    log(`claim of "${task.label}" failed (${claim.error?.code ?? claim.code}) — releasing run, re-polling`);
-    await mc(['run', 'end', runId, 'failed']);
-    return 'done';
+    // Losing the claim race is NORMAL here (a scheduler check-in pre-claims the same project's queue, and the
+    // window between `task next` and `claim` spans 3-4 mc roundtrips). End the orphan run as 'abandoned' — NOT
+    // 'failed' (which would pollute the failure view + spend metrics with a phantom failure) — and return
+    // 'lost' so it does NOT consume a --max-tasks slot.
+    log(`claim of "${task.label}" lost to a concurrent worker (${claim.error?.code ?? claim.code}) — abandoning run, re-polling`);
+    await mc(['run', 'end', runId, 'abandoned']);
+    return 'lost';
   }
   if (choice.downgraded) await recordDowngrade(choice, profile!, spentToday, runId, a.project, log);
   // Auto-feed the project's ACTIVE Composio connections as MCP servers — profiled and profileless
   // spawns alike (a profileless spawn renders them with --strict-mcp-config; see planSpawn).
-  const extraMcpServers = await fetchComposioMcpServers(a.project, runId, log);
+  const mcp = await fetchComposioMcpServers(a.project, runId, log);
+  if (mcp.degraded) {
+    // A transient `mc mcp config` failure: don't spawn without the project's integrations — a 'completed' run
+    // would then auto-mark the now-claimed task done even if the task needed them. Abandon the run + back off;
+    // the claim's TTL frees the task for a later attempt.
+    log(`mcp config unavailable for "${task.label}" — abandoning run, will retry rather than spawn without integrations`);
+    await mc(['run', 'end', runId, 'abandoned']);
+    return 'error';
+  }
+  const extraMcpServers = mcp.servers;
   const how = process.env.MC_DAEMON_EXEC
     ? 'executor (MC_DAEMON_EXEC)'
     : profile
@@ -257,6 +282,16 @@ async function main() {
         break;
       }
       await sleep(a.pollSec * 1000);
+      continue;
+    }
+    if (result === 'lost') {
+      // Lost the claim race — NORMAL concurrent operation, not work done and not a failure. Don't count it
+      // toward --max-tasks. Under --once the task is being handled by whoever won, so exit cleanly (0);
+      // in poll mode re-poll immediately (that task is now claimed, so `task next` returns the next one).
+      if (a.once) {
+        log('claim lost to a concurrent worker — nothing left for us (--once)');
+        break;
+      }
       continue;
     }
     // 'empty'

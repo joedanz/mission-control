@@ -78,19 +78,25 @@ export async function recordDowngrade(choice: ModelChoice, profile: AgentProfile
 }
 
 /** A project's ACTIVE Composio connections as MCP servers, fetched via the CLI so DB scope stays at the
- *  mc_agent boundary; the daemon merges them UNDER a profile's own servers at spawn. Non-fatal: a CLI
- *  failure logs and returns undefined so the run still spawns (just without auto-feed). Returns undefined
- *  when there is nothing to add. Shared by both daemons so the command name + log wording live in one place. */
-export async function fetchComposioMcpServers(projectSlug: string, runId: string, log: Log): Promise<Record<string, McpServerConfig> | undefined> {
+ *  mc_agent boundary; the daemon merges them UNDER a profile's own servers at spawn. `degraded` distinguishes
+ *  a TRANSIENT `mc mcp config` failure (don't know if integrations exist) from a clean empty result — the
+ *  auto-claim caller backs off on `degraded` rather than silently spawning a run that may complete (and
+ *  auto-mark its task done) WITHOUT a required integration; the scheduler keeps degrading gracefully. Shared
+ *  by both daemons so the command name + log wording live in one place. */
+export async function fetchComposioMcpServers(
+  projectSlug: string,
+  runId: string,
+  log: Log,
+): Promise<{ servers?: Record<string, McpServerConfig>; degraded: boolean }> {
   const cfg = await mc(['mcp', 'config', projectSlug]);
   if (!cfg.ok) {
-    log(`mcp config for ${projectSlug} failed (${cfg.error?.code ?? cfg.code}) — spawning without auto-feed`);
-    return undefined;
+    log(`mcp config for ${projectSlug} failed (${cfg.error?.code ?? cfg.code}) — auto-feed unavailable`);
+    return { degraded: true };
   }
   const servers = (cfg.data as { mcpServers?: Record<string, McpServerConfig> } | null)?.mcpServers;
   const names = Object.keys(servers ?? {}).map((k) => (k.startsWith('composio-') ? k.slice('composio-'.length) : k));
   if (names.length) log(`fed ${names.length} mcp server(s) [${names.join(', ')}] into run ${runId.slice(0, 8)}`);
-  return servers;
+  return { servers, degraded: false };
 }
 
 export type Spawned = {
@@ -325,8 +331,14 @@ export async function finalize(runId: string, exitCode: number | null, cancelled
     if (run && run.status && run.status !== 'running') return run.status; // the Stop hook (or cancel path) already ended it
   }
   const status = cancelled ? 'abandoned' : exitCode === 0 ? 'completed' : 'failed';
-  await mc(['run', 'end', runId, status]); // cancel-guard coerces completed→abandoned if cancel_requested
-  log(`run ${runId.slice(0, 8)} closed by daemon → ${status}`);
+  const res = await mc(['run', 'end', runId, status]); // cancel-guard coerces completed→abandoned if cancel_requested
+  if (res.ok) {
+    log(`run ${runId.slice(0, 8)} closed by daemon → ${status}`);
+  } else {
+    // Don't fabricate a "closed" line when the close failed — the run row stays 'running' and the reaper
+    // reconciles it on heartbeat staleness. Surface the real reason so it's visible in the daemon log.
+    log(`run ${runId.slice(0, 8)} close FAILED (${res.error?.code ?? 'unknown'}: ${res.error?.message ?? ''}) — left for the reaper`);
+  }
   return status;
 }
 
@@ -405,26 +417,41 @@ export function lockDir(): string {
  *  refuse to start (exit 1) with `descr` in the message. Returns a release fn. Used per-repo by auto-claim and
  *  globally by the scheduler. */
 export function acquireLock(lockPath: string, descr: string): () => void {
-  try {
-    writeFileSync(lockPath, String(process.pid), { flag: 'wx' }); // exclusive create — fails if it exists
-  } catch {
-    let holder = 0;
-    try {
-      holder = Number(readFileSync(lockPath, 'utf8').trim());
-    } catch {
-      /* unreadable */
-    }
-    if (holder && isAlive(holder)) {
-      console.error(`another instance (pid ${holder}) already owns ${descr} — refusing to start a second instance`);
-      process.exit(1);
-    }
-    writeFileSync(lockPath, String(process.pid)); // stale lock (dead holder) → take it over
-  }
-  return () => {
+  const release = () => {
     try {
       rmSync(lockPath, { force: true });
     } catch {
       /* best-effort */
     }
   };
+  // Bounded retry so the stale-lock TAKEOVER is race-safe: on a dead holder, remove its lock and RE-ATTEMPT the
+  // EXCLUSIVE create (flag 'wx'). Only one racer's exclusive create can win — the loser re-reads the holder and,
+  // finding it now alive, refuses. The prior plain writeFileSync let two simultaneous starters BOTH "take over"
+  // a dead holder's lock and run concurrently in the same repo (defeating the per-repo lock's whole purpose).
+  for (let attempt = 0; ; attempt++) {
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: 'wx' }); // exclusive create — fails if it exists
+      return release;
+    } catch {
+      let holder = 0;
+      try {
+        holder = Number(readFileSync(lockPath, 'utf8').trim());
+      } catch {
+        /* unreadable */
+      }
+      if (holder && isAlive(holder)) {
+        console.error(`another instance (pid ${holder}) already owns ${descr} — refusing to start a second instance`);
+        process.exit(1);
+      }
+      if (attempt >= 5) {
+        console.error(`could not acquire ${descr} after repeated stale-takeover races — refusing to start`);
+        process.exit(1);
+      }
+      try {
+        rmSync(lockPath, { force: true }); // dead/unreadable holder → drop it, then loop to re-attempt exclusive create
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
 }

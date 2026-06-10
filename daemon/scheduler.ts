@@ -57,6 +57,23 @@ let shuttingDown = false;
 
 type Project = { id: string; slug: string; name: string; repoPath: string | null };
 
+/** AgentProfile as it arrives over the mc CLI's JSON wire: the Date columns are ISO strings. */
+type WireProfile = Omit<AgentProfile, 'lastCheckInAt' | 'createdAt' | 'updatedAt'> & {
+  lastCheckInAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+/** Rehydrate a wire profile into a genuine AgentProfile (string dates → Date) so the rest of the scheduler can
+ *  trust the type instead of casting and reaching through with `as unknown as string`. */
+function rehydrateProfile(w: WireProfile): AgentProfile {
+  return {
+    ...w,
+    lastCheckInAt: w.lastCheckInAt ? new Date(w.lastCheckInAt) : null,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  } as AgentProfile;
+}
+
 /** Check-ins spawned by THIS scheduler that are still running, keyed by profile slug → its monitor promise.
  *  Doubles as the skip-if-live guard (don't start a second check-in for a profile whose previous one hasn't
  *  finished) AND the set --once/shutdown await before exiting. */
@@ -116,8 +133,10 @@ async function runCheckIn(profile: AgentProfile, project: Project, a: Args): Pro
   const prompt = buildCheckInPrompt(profile, project, claimedTask, a.maxTasks);
 
   if (choice.downgraded) await recordDowngrade(choice, profile, spentToday, runId, project.slug, log);
-  // Auto-feed the project's ACTIVE Composio connections as MCP servers (runCheckIn always has a profile).
-  const extraMcpServers = await fetchComposioMcpServers(project.slug, runId, log);
+  // Auto-feed the project's ACTIVE Composio connections as MCP servers (runCheckIn always has a profile). The
+  // scheduler keeps the documented degrade-gracefully behavior: a transient config failure just spawns without
+  // auto-feed (the check-in self-serves the queue; unlike auto-claim it isn't auto-completing a specific task).
+  const extraMcpServers = (await fetchComposioMcpServers(project.slug, runId, log)).servers;
 
   const how = process.env.MC_DAEMON_EXEC ? 'executor (MC_DAEMON_EXEC)' : `profile ${profile.slug} (${profile.runtime}${choice.model ? `, model ${choice.model}` : ''})`;
   const work = claimedTask ? `task "${claimedTask.label}"` : 'mission only';
@@ -156,12 +175,14 @@ async function tick(a: Args): Promise<void> {
   // so a --once test tick can't pick up a REAL due profile and consume its check-in slot / mark its real
   // queued task done against the shared dev DB (M21). Unset in production (the default — fires all profiles).
   const onlyProfile = process.env.MC_SCHEDULER_ONLY_PROFILE;
-  const due = ((profsR.data as { items: AgentProfile[] }).items ?? []).filter((profile) => {
+  // mc serializes Date columns to ISO strings on the wire, so parse to the honest wire shape (string dates)
+  // and rehydrate into real AgentProfile objects — rather than casting to AgentProfile[] (which makes TS vouch
+  // for Date fields that are actually strings) and reaching through with `as unknown as string`.
+  const items = ((profsR.data as { items?: WireProfile[] }).items ?? []).map(rehydrateProfile);
+  const due = items.filter((profile) => {
     if (onlyProfile && profile.slug !== onlyProfile) return false;
     if (inFlight.has(profile.slug)) return false; // its previous check-in is still running → skip this tick
-    // mc serializes timestamps to ISO strings; rehydrate lastCheckInAt for the date math.
-    const lastCheckInAt = profile.lastCheckInAt ? new Date(profile.lastCheckInAt as unknown as string) : null;
-    return isDue({ scheduleIntervalSec: profile.scheduleIntervalSec, scheduleCron: profile.scheduleCron, scheduleTimezone: profile.scheduleTimezone, lastCheckInAt }, now);
+    return isDue({ scheduleIntervalSec: profile.scheduleIntervalSec, scheduleCron: profile.scheduleCron, scheduleTimezone: profile.scheduleTimezone, lastCheckInAt: profile.lastCheckInAt }, now);
   });
   if (!due.length) return;
 
