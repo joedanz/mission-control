@@ -1,7 +1,7 @@
 // ABOUTME: Client polling hook for the Mission tab — the single data seam. Phase 1 polls /api/activity;
 // ABOUTME: Phase 3 swaps the body for an SSE subscription with NO change to consuming components.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // JSON-over-the-wire shapes: Dates arrive as ISO strings (relativeTime() accepts string|Date).
 export type FeedEvent = {
@@ -37,25 +37,30 @@ export function useActivityFeed(opts: { projectId?: string; intervalMs?: number 
   const [data, setData] = useState<Feed>({ events: [], runs: [] });
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Discard a superseded in-flight response: when a fetch is slower than the 4s interval (cold serverless DB,
+  // flaky net), an OLDER response can resolve AFTER a newer one and clobber fresher data. Mirrors useWorkflowRun.
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const qs = new URLSearchParams();
       if (projectId) qs.set('projectId', projectId);
       const res = await fetch(`/api/activity?${qs.toString()}`, { cache: 'no-store' });
       if (!res.ok) {
-        setError(`HTTP ${res.status}`);
+        if (seq === loadSeq.current) setError(`HTTP ${res.status}`);
         return;
       }
       const json = await res.json();
+      if (seq !== loadSeq.current) return; // a newer load superseded this one
       if (json.ok) {
         setData(json.data as Feed);
         setError(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (seq === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoaded(true);
+      if (seq === loadSeq.current) setLoaded(true);
     }
   }, [projectId]);
 

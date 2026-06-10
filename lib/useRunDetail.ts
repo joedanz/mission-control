@@ -36,6 +36,9 @@ export function useRunDetail(id: string, intervalMs = 4000) {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Discard a superseded in-flight response: a slow fetch (cold DB / flaky net) can resolve AFTER a newer
+  // poll and clobber fresher run state. Mirrors useWorkflowRun's loadSeq guard.
+  const loadSeq = useRef(0);
 
   const stop = useCallback(() => {
     if (timer.current) {
@@ -45,8 +48,10 @@ export function useRunDetail(id: string, intervalMs = 4000) {
   }, []);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const res = await fetch(`/api/runs/${id}`, { cache: 'no-store' });
+      if (seq !== loadSeq.current) return; // a newer load superseded this one
       if (res.status === 404) {
         setNotFound(true);
         stop(); // a missing run won't appear later
@@ -57,6 +62,7 @@ export function useRunDetail(id: string, intervalMs = 4000) {
         return;
       }
       const json = await res.json();
+      if (seq !== loadSeq.current) return; // superseded between fetch and json parse
       if (json.ok) {
         const next = json.data.run as RunDetailView;
         setRun(next);
@@ -67,9 +73,9 @@ export function useRunDetail(id: string, intervalMs = 4000) {
         if (next.status !== 'running') stop();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (seq === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoaded(true);
+      if (seq === loadSeq.current) setLoaded(true);
     }
   }, [id, stop]);
 
