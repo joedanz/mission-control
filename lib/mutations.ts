@@ -33,8 +33,9 @@ import {
   type EventType,
   type EventLevel,
   type WorkflowRun,
+  TASK_STATUSES,
 } from './db/schema';
-import { slugify, ConflictError } from './validation';
+import { slugify, ConflictError, assertEnum } from './validation';
 import { type ProfileInput, type ProfileUpdate, validateProfile } from './profiles';
 import { getTaskById, getProfileById } from './queries';
 import { getActor, withActor } from './actor-context';
@@ -368,6 +369,10 @@ export async function moveTask(taskId: string, input: MoveTaskInput): Promise<Ta
   if (current.claimExpiresAt && current.claimExpiresAt.getTime() > Date.now()) return null;
 
   let row: Task = current;
+  // tasks.status is a plain text column (no CHECK), and the web moveTask server action passes the client's
+  // `toStatus` straight through — validate at the write seam so a tampered/buggy client can't poison the
+  // column with an arbitrary status (the CLI already validates; this also covers it).
+  if (input.toStatus !== undefined) assertEnum(input.toStatus, TASK_STATUSES, 'toStatus');
   const statusChanged = input.toStatus !== undefined && input.toStatus !== current.status;
 
   if (statusChanged && input.toStatus) {
@@ -577,6 +582,9 @@ function effectiveProfile(current: AgentProfile | null, patch: ProfileUpdate) {
     runtime: (v(patch.runtime, current?.runtime) as string) ?? 'claude-code',
     permissionMode: v(patch.permissionMode, current?.permissionMode),
     execTemplate: v(patch.execTemplate, current?.execTemplate),
+    skills: v(patch.skills, current?.skills),
+    allowedTools: v(patch.allowedTools, current?.allowedTools),
+    disallowedTools: v(patch.disallowedTools, current?.disallowedTools),
     mcpServers: v(patch.mcpServers, current?.mcpServers),
     matchRules: v(patch.matchRules, current?.matchRules),
     dailyBudgetMicros: v(patch.dailyBudgetMicros, current?.dailyBudgetMicros),

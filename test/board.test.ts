@@ -8,6 +8,7 @@ import { db } from '@/lib/db/index';
 import { projects, events } from '@/lib/db/schema';
 import { createProject, addTask, moveTask, claimTask, recordRunStart } from '@/lib/mutations';
 import { getNextClaimableTask, getTaskById } from '@/lib/queries';
+import { ValidationError } from '@/lib/validation';
 
 const createdProjectIds: string[] = [];
 
@@ -74,6 +75,14 @@ describe('moveTask — status changes', () => {
     const after = await getTaskById(t.id);
     expect(after!.status).toBe('todo');
     expect(after!.version).toBe(t.version);
+  });
+
+  it('rejects an out-of-enum status (the web action passes client toStatus straight through)', async () => {
+    const p = await freshProject(uniqueName('board-badstatus'));
+    const t = await addTask(p.id, 'tamper');
+    await expect(moveTask(t.id, { toStatus: 'inprogress' } as never)).rejects.toBeInstanceOf(ValidationError);
+    const after = await getTaskById(t.id);
+    expect(after!.status).toBe('todo'); // unchanged — tasks.status not poisoned
   });
 });
 

@@ -60,6 +60,9 @@ export type EffectiveProfile = {
   runtime: string;
   permissionMode?: string | null;
   execTemplate?: string | null;
+  skills?: string[] | null;
+  allowedTools?: string[] | null;
+  disallowedTools?: string[] | null;
   mcpServers?: Record<string, McpServerConfig> | null;
   matchRules?: ProfileMatchRules | null;
   dailyBudgetMicros?: number | null;
@@ -108,6 +111,11 @@ export function validateProfile(p: EffectiveProfile): void {
   if (p.dailyBudgetMicros != null && (!Number.isFinite(p.dailyBudgetMicros) || p.dailyBudgetMicros < 0)) {
     throw new ValidationError('dailyBudgetMicros', 'dailyBudgetMicros must be a non-negative integer (micro-dollars)');
   }
+  // jsonb array fields: the web profile editor passes client JSON straight through, so shape-check that
+  // these are string arrays before they reach the jsonb columns (the CLI builds them from csv()).
+  assertStringArray(p.skills, 'skills');
+  assertStringArray(p.allowedTools, 'allowedTools');
+  assertStringArray(p.disallowedTools, 'disallowedTools');
   if (p.mcpServers != null) validateMcpServers(p.mcpServers);
   if (p.matchRules?.labelPattern != null && p.matchRules.labelPattern !== '') {
     try {
@@ -147,6 +155,13 @@ function validateSchedule(p: EffectiveProfile): void {
       'schedule',
       'an enabled schedule needs exactly one of --schedule-interval <sec> or --schedule-cron <expr>',
     );
+  }
+}
+
+function assertStringArray(v: unknown, field: string): void {
+  if (v == null) return;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
+    throw new ValidationError(field, `${field} must be an array of strings`);
   }
 }
 
