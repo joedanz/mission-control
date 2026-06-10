@@ -73,8 +73,8 @@ export async function getTaskById(id: string): Promise<Task | null> {
   return rows[0] ?? null;
 }
 
-/** The next claimable custom task — the agent work-queue peek behind `cc task next`. Claimable =
- *  a `custom` task with status 'todo' that is unclaimed OR whose claim has expired. Ordered by
+/** The next claimable task — the agent work-queue peek behind `mc task next`. Claimable =
+ *  a task with status 'todo' that is unclaimed OR whose claim has expired. Ordered by
  *  sortOrder (then createdAt to break ties) so the Kanban board's drag-to-reorder steers what the
  *  daemon picks up next; backed by tasks_claimable_idx on (sortOrder, createdAt). READ-ONLY: the result
  *  is only a CANDIDATE — the actual take is claimTask(), whose single-statement WHERE re-validates and

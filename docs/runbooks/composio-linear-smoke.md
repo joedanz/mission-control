@@ -108,19 +108,19 @@ this real spawn is the only true end-to-end check.
 
 Prerequisites:
 - A project (e.g. `bodybymike`) with a `repoPath` set and an **active** Linear connection
-  (`mc composio list <slug>` shows `linear  active`). Connect via the Integrations tab or
-  `mc composio connect <slug> linear` → authorize → `mc composio status <slug> linear`.
+  (`mc mcp list <slug>` shows `linear  active`). Connect via the MCP tab or
+  `mc mcp connect <slug> linear` → authorize → `mc mcp status <slug> linear`.
 - `COMPOSIO_API_KEY` set in the daemon's environment (same requirement as any profile secret).
 - A resolvable agent profile for the project (the default profile is fine).
 
 Steps:
 1. Confirm the resolved map is non-empty:
-   `npm run cli -- composio mcp-config <slug> --json` →
+   `npm run cli -- mcp config <slug> --json` →
    `data.mcpServers["composio-linear"]` present, `url` ends `?user_id=mc-proj-…`.
 2. Queue a task that requires Linear, e.g.:
    `npm run cli -- task add <slug> "List our Linear teams and report their names"`
 3. Run one auto-claim pass (permission mode that allows the MCP tool calls):
-   `MC_CLAUDE_BIN=/Users/danziger/.local/bin/claude tsx daemon/auto-claim.ts --project <slug> --once --permission-mode acceptEdits`
+   `MC_CLAUDE_BIN=/ABS/PATH/TO/claude tsx daemon/auto-claim.ts --project <slug> --once --permission-mode acceptEdits`
 4. In the daemon log, confirm the line `fed 1 composio server(s) [linear] into run <id>`.
 5. Confirm the run output shows the agent listed the Linear teams (it used the auto-fed tool).
 

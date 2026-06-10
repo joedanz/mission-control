@@ -1,0 +1,23 @@
+# Deterministic gates only: type-check + scoped lint. The DB-backed `npm test` suite is intentionally
+# excluded — it hits a real Neon branch and mutates shared rows, so it runs locally, not in CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Lint (first-party sources)
+        run: npm run lint:ci

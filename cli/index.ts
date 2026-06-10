@@ -372,7 +372,7 @@ const SPEC = [
   { name: 'task move', readonly: false, summary: 'Move a task on the board: change status and/or reorder within a column', args: ['<id>'], options: ['--status', '--top', '--after'] },
   { name: 'task toggle', readonly: false, summary: 'Toggle a task done/undone', args: ['<id>'] },
   { name: 'task rm', readonly: false, summary: 'Delete a task; requires --yes', args: ['<id>'], required: ['--yes'] },
-  { name: 'task next', readonly: true, summary: 'Show the next claimable task (FIFO: custom, todo, unclaimed/expired)', options: ['--project'] },
+  { name: 'task next', readonly: true, summary: 'Show the next claimable task (board order by sort_order, then FIFO; todo + unclaimed/expired)', options: ['--project'] },
   { name: 'task claim', readonly: false, summary: 'Claim a task for the current run (single-statement, race-safe)', args: ['<id>'], options: ['--run', '--ttl'] },
   { name: 'task import-issues', readonly: false, summary: "Import a project's GitHub issues as custom tasks (idempotent by issue #)", args: ['<slug>'], options: ['--state open|closed|all', '--label', '--limit', '--dry-run'] },
   { name: 'mcp catalog', readonly: true, summary: "List Composio's full live catalog", options: ['--search', '--limit'] },
@@ -391,7 +391,7 @@ const SPEC = [
   { name: 'workflow run', readonly: false, summary: 'Run a workflow now (synchronous; --async enqueues for the workflow-daemon)', args: ['<slug>'], options: ['--timeout', '--max-parallel', '--allow-concurrent', '--async'] },
   { name: 'workflow status', readonly: true, summary: 'Show a workflow run + its per-node steps', args: ['<runId>'] },
   { name: 'workflow cancel', readonly: false, summary: 'Request cancellation of a workflow run (propagates to the active agent run)', args: ['<runId>'] },
-  { name: 'workflow approve', readonly: false, summary: 'Approve (or --reject) a paused gate + resume the run (sync; --async requeues for the daemon)', args: ['<runId>', '<nodeId>'] },
+  { name: 'workflow approve', readonly: false, summary: 'Approve (or --reject) a paused gate + resume the run (sync; --async requeues for the daemon)', args: ['<runId>', '<nodeId>'], options: ['--reject', '--reason', '--async'] },
   { name: 'workflow activate', readonly: false, summary: 'Activate a workflow (status → active; cron-scheduled triggers then fire via the workflow-daemon)', args: ['<slug>'] },
   { name: 'workflow pause', readonly: false, summary: 'Pause a workflow (status → paused)', args: ['<slug>'] },
   { name: 'workflow webhook-url', readonly: true, summary: 'Print the external webhook URL + HMAC signing details for an event-triggered workflow', args: ['<slug>'] },
@@ -783,7 +783,7 @@ withFlags(task.command('rm'))
   );
 
 withFlags(task.command('next'))
-  .description('Show the next claimable task (FIFO: custom, todo, unclaimed or claim-expired)')
+  .description('Show the next claimable task (board order by sort_order, then FIFO; todo + unclaimed or claim-expired)')
   .option('--project <slug>', 'limit to a project')
   .action((opts: LeafOpts) =>
     emit('task next', opts, async () => {
