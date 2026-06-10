@@ -155,6 +155,20 @@
       "when": 1781093352992,
       "tag": "0021_workflow_run_single_flight",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781094823871,
+      "tag": "0022_run_active_claim_task",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781094829079,
+      "tag": "0023_reapply_agent_grants_dual_name",
+      "breakpoints": true
     }
   ]
 }

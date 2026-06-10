@@ -37,9 +37,11 @@ GRANT SELECT, INSERT, UPDATE ON runs, events TO mc_agent;
 REVOKE ALL ON users, sessions, accounts, verification FROM mc_agent;
 ```
 
-> The `0001_*` migration also applies the `runs`/`events` grant automatically — **but only if the
-> `mc_agent` role already exists** (it's guarded by a `pg_roles` check). On a DB where the role is
-> created later, run the `GRANT … ON runs, events` above as part of this one-time setup.
+> Migration `0023_reapply_agent_grants_dual_name` applies the schema USAGE + projects/tasks (full) +
+> runs/events (no DELETE) grants automatically — **but only if the `mc_agent` (or legacy `cc_agent`) role
+> already exists** (a `pg_roles`-guarded `DO` block). Create the role BEFORE running migrations on a fresh
+> DB, or re-run the `GRANT`s above once after. (The early `0001`/`0002`/`0004` grant migrations guard only
+> the legacy `cc_agent` name, so on a rebuilt DB they no-op for `mc_agent` — which is why `0023` exists.)
 
 After any future migration that adds an agent-facing table, re-run the `GRANT` (or set
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner> IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO mc_agent;`).

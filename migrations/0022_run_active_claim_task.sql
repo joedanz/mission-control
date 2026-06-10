@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "active_claim_task_id" text;
