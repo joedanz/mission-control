@@ -198,6 +198,17 @@ describe('listPulls', () => {
     globalThis.fetch = stubFetch({ message: 'Not Found' }, 404) as unknown as typeof fetch;
     await expect(listPulls(REPO)).rejects.toBeInstanceOf(GitHubApiError);
   });
+
+  it('paginates closed PRs and includes a merged PR beyond the first page', async () => {
+    const now = new Date().toISOString();
+    const recentUnmerged = { ...RAW_PR, number: 8, state: 'closed', merged_at: null as string | null, updated_at: now };
+    const recentMerged = { ...RAW_PR, number: 9, state: 'closed', merged_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), updated_at: now };
+    // open=[], closed p1=[recentUnmerged] (oldest updated_at >= cutoff → keep going), p2=[recentMerged], p3=[] (stop).
+    globalThis.fetch = stubFetchSequence([], [recentUnmerged], [recentMerged], []) as unknown as typeof fetch;
+
+    const { recentlyMerged } = await listPulls(REPO);
+    expect(recentlyMerged.map((p) => p.number)).toContain(9); // not dropped by the 100-row first page
+  });
 });
 
 // ── getPullReviews ─────────────────────────────────────────────────────────
@@ -319,6 +330,20 @@ describe('getPull', () => {
 
     const detail = await getPull(REPO, 7);
     expect(detail.ciStatus).toBe('failure');
+  });
+
+  it('derives ciStatus: failure for cancelled/action_required (not masked as success)', async () => {
+    const rawDetail = { ...RAW_PR, additions: 0, deletions: 0, changed_files: 0 };
+    const checks = {
+      check_runs: [
+        { name: 'A', status: 'completed', conclusion: 'success', html_url: 'https://github.com' },
+        { name: 'B', status: 'completed', conclusion: 'cancelled', html_url: 'https://github.com' },
+      ],
+    };
+    globalThis.fetch = stubFetchSequence(rawDetail, [], checks) as unknown as typeof fetch;
+
+    const detail = await getPull(REPO, 7);
+    expect(detail.ciStatus).toBe('failure'); // a cancelled check is non-passing — was wrongly 'success'
   });
 });
 

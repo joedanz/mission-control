@@ -79,9 +79,14 @@ function deriveReviewDecision(reviews: GitHubPRReview[]): 'APPROVED' | 'CHANGES_
   return 'APPROVED';
 }
 
+// A check-run conclusion is NON-passing if it's any of these — not just failure/timed_out. 'cancelled',
+// 'action_required', and 'stale' all mean the pipeline did NOT pass; treating them as green/neutral masked a
+// non-passing PR (e.g. [success, cancelled] read as success).
+const FAILING_CONCLUSIONS = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'stale']);
+
 function deriveCiStatus(checkRuns: GitHubCheckRun[]): GitHubPRDetail['ciStatus'] {
   if (checkRuns.length === 0) return null;
-  if (checkRuns.some((r) => r.conclusion === 'failure' || r.conclusion === 'timed_out')) return 'failure';
+  if (checkRuns.some((r) => r.conclusion != null && FAILING_CONCLUSIONS.has(r.conclusion))) return 'failure';
   if (checkRuns.some((r) => r.status !== 'completed')) return 'pending';
   if (checkRuns.some((r) => r.conclusion === 'success')) return 'success';
   return 'neutral';
@@ -224,10 +229,25 @@ export async function listPulls(
   const mergedDays = opts.mergedDays ?? 7;
   const cutoff = new Date(Date.now() - mergedDays * 24 * 60 * 60 * 1000).toISOString();
 
-  const [openRaw, closedRaw] = await Promise.all([
-    ghFetch(`/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=50&sort=updated`),
-    ghFetch(`/repos/${repo.owner}/${repo.repo}/pulls?state=closed&per_page=100&sort=updated&direction=desc`),
-  ]) as [RawPR[], RawPR[]];
+  // Closed PRs are fetched sort=updated desc, but we filter by merged_at — a single 100-row page can OMIT a
+  // PR merged within the window if enough closed-but-unmerged PRs were updated more recently (busy repo). A
+  // merge updates the PR, so updated_at >= merged_at: any PR merged within the window has updated_at >= cutoff
+  // and therefore appears BEFORE the page where updated_at drops below the cutoff. So paginate until a page's
+  // OLDEST updated_at is past the cutoff (bounded to avoid runaway), then filter by merged_at.
+  const MAX_CLOSED_PAGES = 10;
+  const closedRaw: RawPR[] = [];
+  const openP = ghFetch(`/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=50&sort=updated`) as Promise<RawPR[]>;
+  void openP.catch(() => {}); // if the closed loop throws first, don't orphan openP as an unhandled rejection (re-awaited + rethrown below)
+  for (let page = 1; page <= MAX_CLOSED_PAGES; page++) {
+    const pageRaw = (await ghFetch(
+      `/repos/${repo.owner}/${repo.repo}/pulls?state=closed&per_page=100&sort=updated&direction=desc&page=${page}`,
+    )) as RawPR[];
+    if (!pageRaw.length) break;
+    closedRaw.push(...pageRaw);
+    const oldest = pageRaw[pageRaw.length - 1];
+    if (oldest.updated_at && oldest.updated_at < cutoff) break; // no older-updated PR can be merged-in-window
+  }
+  const openRaw = await openP;
 
   return {
     open: openRaw.map(mapRawPR),
