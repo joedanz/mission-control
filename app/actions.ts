@@ -10,7 +10,7 @@ import { withActor } from '@/lib/actor-context';
 import { ConflictError, ValidationError } from '@/lib/validation';
 import * as mutations from '@/lib/mutations';
 import type { ProjectInput } from '@/lib/mutations';
-import type { ProfileInput } from '@/lib/profiles';
+import { scanForLeakedSecrets, type ProfileInput } from '@/lib/profiles';
 import {
   CATEGORIES,
   STATUSES,
@@ -142,7 +142,17 @@ function profileWriteError(err: unknown): ProfileActionResult {
   throw err;
 }
 
+/** The "secrets are placeholders, NEVER stored" contract is enforced softly on the CLI (a stderr warning).
+ *  The web editor has no such channel, so it would SILENTLY persist a raw secret. Block the write and report
+ *  the offending field(s) so the user switches to a ${ENV} placeholder. */
+function secretLeakError(input: ProfileInput): ProfileActionResult | null {
+  const leaks = scanForLeakedSecrets(input);
+  return leaks.length ? { ok: false, error: leaks.join('; ') } : null;
+}
+
 export async function createProfile(input: ProfileInput): Promise<ProfileActionResult> {
+  const leak = secretLeakError(input);
+  if (leak) return leak;
   try {
     await asUser((m) => m.createProfile(input));
   } catch (err) {
@@ -153,6 +163,8 @@ export async function createProfile(input: ProfileInput): Promise<ProfileActionR
 }
 
 export async function updateProfile(id: string, input: ProfileInput): Promise<ProfileActionResult> {
+  const leak = secretLeakError(input);
+  if (leak) return leak;
   try {
     await asUser((m) => m.updateProfile(id, input));
   } catch (err) {

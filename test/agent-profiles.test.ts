@@ -88,6 +88,12 @@ describe('validateProfile (pure)', () => {
     expect(() => validateProfile({ runtime: 'claude-code', dailyBudgetMicros: -1 })).toThrow(ValidationError);
     expect(() => validateProfile({ runtime: 'claude-code', dailyBudgetMicros: 5_000_000 })).not.toThrow();
   });
+  it('rejects non-string-array jsonb fields (skills/allowedTools/disallowedTools)', () => {
+    expect(() => validateProfile({ runtime: 'claude-code', skills: 'not-an-array' as never })).toThrow(ValidationError);
+    expect(() => validateProfile({ runtime: 'claude-code', allowedTools: [1, 2] as never })).toThrow(ValidationError);
+    expect(() => validateProfile({ runtime: 'claude-code', disallowedTools: [{}] as never })).toThrow(ValidationError);
+    expect(() => validateProfile({ runtime: 'claude-code', skills: ['a', 'b'], allowedTools: ['Bash'] })).not.toThrow();
+  });
 });
 
 describe('scanForLeakedSecrets (pure)', () => {
