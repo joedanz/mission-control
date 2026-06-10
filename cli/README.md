@@ -144,7 +144,7 @@ mc skill add <target> [--force]              # install a registry skill into ~/.
 
 # Mission Control — runs (agent sessions) + the activity-event log
 mc run start --agent <label> [--project <slug>] [--profile <slug>] [--title <t>] [--source hook|cli|cron|manual] [--model <m>] [--session-id <id>] [--work-dir <dir>] [--id <uuid>]
-mc run end <id> <status> [--tokens-in <n>] [--tokens-out <n>] [--cache-read <n>] [--cache-write <n>] [--cost-micros <n>] [--agent <label>]
+mc run end <id> <status> [--tokens-in <n>] [--tokens-out <n>] [--cache-read <n>] [--cache-write <n>] [--cost-micros <n>] [--authoritative] [--agent <label>]
 mc run list [--active] [--agent <label>] [--limit <n>]   # lean rows; use 'run get <id>' for model/source/timing/cache
 mc run get <id>                              # one run + its event trail (the full row)
 mc run cancel <id>                           # request cancellation (sets cancel_requested; enforced by the PreToolUse kill-switch hook when installed)
@@ -162,7 +162,7 @@ plus `runStatus`, `runSource`, `eventType`, `eventLevel`, `runtime`, and
 **Agent profiles & auto-routing.** A profile is a slug-addressed bundle of capabilities (skills, MCP
 servers, model, permission mode, tool policy, persona) plus match rules. `mc profile resolve` previews
 which profile auto-routing picks for a project/task: of the **enabled** profiles whose `matchRules` apply
-(project slug/category, task kind, label regex — all ANDed), the highest `--priority` wins; if none match,
+(project slug/category, label regex — all ANDed), the highest `--priority` wins; if none match,
 the single `--default` profile is the fallback. `runtime=claude-code` renders rich `claude -p` flags;
 `runtime=exec` renders `--exec-template` so a profile can drive a **non-Claude** model through any runner.
 Secrets are **never stored** — `--env` and `--mcp-config` values use `${ENV_VAR}` placeholders resolved

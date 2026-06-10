@@ -40,12 +40,12 @@ When `task next` finds nothing claimable, `data` is `null`.
 | Exit | Meaning | `error.code` values that map here |
 |---|---|---|
 | `0` | success | — |
-| `1` | conflict / DB / external | `CONFLICT`, `DB`, `GITHUB`, `COMPOSIO` |
+| `1` | conflict / DB / external | `CONFLICT`, `DB`, `GITHUB`, `COMPOSIO`, `REGISTRY` |
 | `2` | bad input | `VALIDATION` (carries `field`) |
 | `3` | missing row | `NOT_FOUND` |
 | `4` | config/credentials | `CONFIG` |
 
-**Exit `1` is overloaded** — four very different situations collapse to it. Always read
+**Exit `1` is overloaded** — five very different situations collapse to it. Always read
 `error.code` to decide what to do:
 
 - `CONFLICT` on `task claim` → you **lost a race** (another run grabbed it, or you already hold a
@@ -53,7 +53,8 @@ When `task next` finds nothing claimable, `data` is `null`.
   failure to surface.
 - `CONFLICT` on `task move` → the task is **live-claimed**; a reorder won't yank work from a running
   agent. Wait or pick another.
-- `DB` / `GITHUB` / `COMPOSIO` → a real downstream failure worth surfacing.
+- `DB` / `GITHUB` / `COMPOSIO` / `REGISTRY` → a real downstream failure worth surfacing. `REGISTRY` is a
+  skills.sh registry failure from the `mc skill` group (`mc skill search` / `mc skill add` — discovery + install).
 - `VALIDATION` → fix the offending `field`; the message lists valid values for enum fields.
 - `NOT_FOUND` → wrong id/slug (see Addressing in `SKILL.md`); the message suggests `mc project list`.
 

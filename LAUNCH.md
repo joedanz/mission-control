@@ -25,8 +25,10 @@ Mirror the new secrets locally in `.env.local` if testing ingest/reaper there (t
 ## 2. Database (production Neon)
 
 - ✅ **Migrations applied.** `0001_*` (runs/events + `tasks.version`) and `0002_*` (task-claim columns) are
-  applied to the production DB. Prod and local `.env.local` `DATABASE_URL` are the **same Neon instance**, so
-  `npm run db:migrate` (owner) keeps both in sync. (Vercel never runs migrations.)
+  applied to the production DB. Local `.env.local` `DATABASE_URL` should point at an **isolated Neon `dev`
+  branch** (see `.env.example`), NOT prod — so local migrations/seeds never touch live data. Migrating prod
+  is a deliberate owner action: run `npm run db:migrate` with the prod owner string swapped in. (Vercel never
+  runs migrations.)
 - ✅ **Scoped roles created (2026-05-29)** via SQL as owner (no Neon CLI). Three roles: `neondb_owner` (local
   migrations/seed), `app_user` (Vercel prod — read/write incl. auth, no DDL/owner), `mc_agent` (CLI — scoped):
   ```sql
@@ -101,7 +103,9 @@ service** (`RunAtLoad` + `KeepAlive`), not a one-shot. Full walkthrough in [`INS
 - ✅ Open the **Mission** tab → activity feed + runs strip load with real captured telemetry.
 - ✅ `curl -X POST https://your-app.example.com/api/ingest -H "Authorization: Bearer $INGEST_TOKEN" ... '{"type":"run.start",...}'` → `{ok:true}`; bad token → 401 (verified 2026-05-29).
 - ✅ The smoke run appeared in the Mission tab; `run.end` left it out of the "live" set (FLEET `0 LIVE`).
-- ✅ `npm run build` is green in CI/deploy — the Vercel deployment is live and serving authenticated pages.
+- ✅ `npm run build` is green on Vercel deploy — the deployment is live and serving authenticated pages.
+- ✅ GitHub Actions CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` + scoped `eslint` on every push/PR. Note:
+  the DB-backed `npm test` suite is NOT in CI (it hits a real Neon branch and mutates shared rows); run it locally.
 
 ## Known deferrals (NOT launch blockers)
 
